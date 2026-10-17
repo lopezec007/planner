@@ -86,8 +86,11 @@ test('dragging a matrix point changes urgency and importance', async ({ page, re
     await page.mouse.move(cx - 2 * cellX, cy - 3 * cellY, { steps: 8 });
     await page.mouse.up();
     await expect.poll(async () => { const it = await byTitle(request, 'Clean gutters'); return [it.urgency, it.importance]; }).toEqual([9, 7]);
-    // A click without movement does not change anything.
-    const d2 = await page.locator(`.matrix-plot .pt[data-id="${gutters.id}"] .dot`).boundingBox();
+    // A click without movement does not change anything (wait for the redraw first).
+    const dot2 = page.locator(`.matrix-plot .pt[data-id="${gutters.id}"] .dot`);
+    await expect(dot2).toBeVisible();
+    await page.waitForTimeout(300);
+    const d2 = await dot2.boundingBox();
     await page.mouse.click(d2.x + d2.width / 2, d2.y + d2.height / 2);
     await page.waitForTimeout(200);
     const it = await byTitle(request, 'Clean gutters');

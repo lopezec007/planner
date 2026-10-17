@@ -150,14 +150,21 @@ test('Click-to-edit every field type on a task', async ({ page, request }) => {
   await r2.locator('input[name=end_date]').fill(ymd(2));
   await expect(r2.locator('.date-text[data-field=end_date]')).toHaveClass(/hl-warn/); // within a week
   // Urgency / importance single keys: 9, then ` -> 0, then 0 -> 10, then 2.
+  // Each key saves at once; wait for the save (and the re-render it causes)
+  // before the next key so the presses do not race each other.
+  const saved = async (field, v) => expect.poll(async () => (await byTitle(request, 'E2E Task A2'))[field]).toBe(v);
   await r2.locator('input[name=urgency]').press('9');
+  await saved('urgency', 9);
   await expect(r2.locator('input[name=urgency]')).toHaveValue('9');
   await expect(r2.locator('input[name=urgency]')).toHaveClass(/hl-level/);
   await r2.locator('input[name=importance]').press('`');
+  await saved('importance', 0);
   await expect(r2.locator('input[name=importance]')).toHaveValue('0');
   await r2.locator('input[name=importance]').press('0');
+  await saved('importance', 10);
   await expect(r2.locator('input[name=importance]')).toHaveValue('10');
   await r2.locator('input[name=importance]').press('2');
+  await saved('importance', 2);
   await expect(r2.locator('input[name=importance]')).toHaveValue('2');
   // Blocked.
   await r2.locator('input[name=blocked]').check();
@@ -199,6 +206,7 @@ test('Clearing fields, Escape reverts, and an empty title is rejected', async ({
   await expect(page.locator('#toast')).toContainText('title is required');
   await expect(row.locator('.title-text')).toHaveText('E2E Task A2');
   await row.locator('input[name=blocked]').uncheck();
+  await expect.poll(async () => (await byTitle(request, 'E2E Task A2')).blocked).toBe(false); // the last save has landed
 
   const it = await byTitle(request, 'E2E Task A2');
   expect(it.start_date).toBeNull();

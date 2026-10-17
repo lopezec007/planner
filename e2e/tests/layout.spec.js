@@ -101,3 +101,22 @@ test('Ctrl+Z undoes edits, deletions, creations, reorders and dependency changes
   await expect(page.locator('#toast')).not.toContainText('Nothing to undo');
   await page.keyboard.press('Escape');
 });
+
+test('switching views does not move the rows (the toolbar keeps its height)', async ({ page }) => {
+  for (const width of [1440, 1366]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto('/#/all');
+    await expect(page.locator('.row[data-id]').first()).toBeVisible();
+    const pos = () => page.evaluate(() => ({ top: document.querySelector('.row[data-id]').getBoundingClientRect().top, bar: document.querySelector('.topbar').getBoundingClientRect().height }));
+    const table = await pos();
+    await page.locator('button[data-view=timeline]').click();
+    await expect(page.locator('.timeline-canvas')).toBeVisible();
+    expect(await pos()).toEqual(table);
+    await page.locator('button[data-view=matrix]').click();
+    await expect(page.locator('.matrix-plot')).toBeVisible();
+    expect(await pos()).toEqual(table);
+    await expect(page.locator('#btn-narrow')).toBeDisabled();
+    await page.locator('button[data-view=table]').click();
+    await expect(page.locator('#btn-narrow')).toBeEnabled();
+  }
+});

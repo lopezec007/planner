@@ -141,13 +141,15 @@ function render() {
     title: 'Flat: tasks only, with their Ongoing/Project as columns',
     onClick: () => { flat = !flat; remember('planner.flat', flat ? '1' : '0'); render(); },
   }, 'Flat'));
-  if (ui.view === 'table') {
-    toolbar.append(el('button', {
-      type: 'button', id: 'btn-narrow', class: narrow ? 'active' : '', title: 'Constrain the table width on wide screens',
-      'aria-pressed': narrow ? 'true' : 'false',
-      onClick: () => { narrow = !narrow; remember('planner.narrow', narrow ? '1' : '0'); render(); },
-    }, 'Narrow'));
-  }
+  // Always present (disabled outside Table view) so the toolbar keeps the same
+  // shape in every view and the rows below do not shift.
+  const tableView = ui.view === 'table';
+  toolbar.append(el('button', {
+    type: 'button', id: 'btn-narrow', class: narrow && tableView ? 'active' : '', disabled: tableView ? null : true,
+    title: tableView ? 'Constrain the table width on wide screens' : 'Narrow applies to the Table view',
+    'aria-pressed': narrow ? 'true' : 'false',
+    onClick: () => { narrow = !narrow; remember('planner.narrow', narrow ? '1' : '0'); render(); },
+  }, 'Narrow'));
 
   const group = el('div', { class: 'group', role: 'group', 'aria-label': 'View' });
   for (const v of VIEWS) {
