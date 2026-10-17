@@ -38,6 +38,8 @@ func Handler(st *store.Store) http.Handler {
 	mux.HandleFunc("DELETE /api/items/{id}", s.deleteItem)
 	mux.HandleFunc("GET /api/items/{id}/history", s.history)
 	mux.HandleFunc("PUT /api/order", s.reorder)
+	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("PATCH /api/settings", s.updateSettings)
 	return mux
 }
 
@@ -338,6 +340,31 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, h)
+}
+
+// ---------------------------------------------------------------- settings
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	st, err := s.st.Settings()
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, st)
+}
+
+func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
+	var in map[string]string
+	if err := decode(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	st, err := s.st.UpdateSettings(in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, st)
 }
 
 func (s *Server) reorder(w http.ResponseWriter, r *http.Request) {

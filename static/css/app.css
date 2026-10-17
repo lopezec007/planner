@@ -18,6 +18,10 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --row-h: 34px;
+  /* Row tints by item type; set from Settings (see app.js applySettings). */
+  --row-ongoing: #2a9d8f;
+  --row-project: #5b6cff;
+  --row-task: transparent;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -100,7 +104,7 @@ main { padding: 12px 16px; flex: 1; }
   z-index: 100;
 }
 
-/* ---------- split layout for plan / matrix ---------- */
+/* ---------- split layout for timeline / matrix ---------- */
 .split { display: flex; gap: 16px; align-items: flex-start; }
 .split .table-wrap { flex: 0 0 auto; min-width: 320px; max-width: 45%; }
 .split .panel { flex: 1 1 auto; min-width: 0; position: relative; }
@@ -127,12 +131,15 @@ main { padding: 12px 16px; flex: 1; }
 }
 .row:first-child { border-top: none; }
 .row > * { padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row.parent { background: var(--bg-alt); font-weight: 600; }
+.row.parent { font-weight: 600; }
+.row.parent[data-type="ongoing"] { background: color-mix(in srgb, var(--row-ongoing) 16%, var(--bg)); }
+.row.parent[data-type="project"] { background: color-mix(in srgb, var(--row-project) 16%, var(--bg)); }
+.row.task { background: color-mix(in srgb, var(--row-task) 12%, var(--bg)); }
 .row.header {
   background: var(--bg-alt); color: var(--fg-muted); font-weight: 600; font-size: 12px;
-  text-transform: uppercase; letter-spacing: 0.02em; min-height: 28px;
+  text-transform: uppercase; letter-spacing: 0.02em; min-height: 36px;
 }
-.row:not(.header):hover { background: var(--bg-hover); }
+.row:not(.header):not(.editing):not(.edit-detail):hover { background: var(--bg-hover); }
 .row.task .key, .row.task .title { padding-left: calc(8px + var(--indent)); }
 .row .key { font-family: var(--mono); color: var(--fg-muted); font-size: 12px; }
 .row .title { white-space: normal; }

@@ -1,0 +1,173 @@
+/* Timeline (Gantt) view — see js/timeline.js. All colours come from the theme tokens
+   in app.css so the view follows the light/dark scheme. */
+
+.timeline {
+  position: relative;
+  width: 100%;
+  contain: inline-size;
+  user-select: none;
+  --timeline-grid: color-mix(in srgb, var(--border) 55%, transparent);
+  --timeline-grid-strong: var(--border);
+  --timeline-month: #b06cb0;   /* month boundaries */
+  --timeline-year: #d08a2e;    /* year boundaries */
+  --timeline-today: var(--accent);
+}
+@media (prefers-color-scheme: dark) {
+  .timeline { --timeline-month: #c48ac4; --timeline-year: #e0a04a; }
+}
+
+.timeline-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  cursor: grab;
+}
+.timeline-scroll.dragging { cursor: grabbing; }
+
+/* No overflow clipping here: the scroll container must stay the nearest
+   scrolling ancestor so sticky axis labels work. Bars are clamped in JS. */
+.timeline-canvas {
+  position: relative;
+  min-width: 100%;
+}
+
+/* ---- axis (two tiers, level with the table header row) ---- */
+.timeline-axis {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.timeline-tick {
+  position: absolute;
+  bottom: 0;
+  border-left: 1px solid var(--timeline-grid);
+  pointer-events: none;
+  z-index: 2;
+}
+.timeline-axis-tier { border-bottom: 1px solid var(--border); }
+.timeline-tick.major { border-left-color: var(--timeline-grid-strong); }
+.timeline-tick.month { border-left-color: var(--timeline-month); }
+.timeline-tick.year { border-left-color: var(--timeline-year); border-left-width: 2px; }
+.timeline-tick-label {
+  display: block;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 0 5px;
+  font-size: 10px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.timeline-tick.major .timeline-tick-label {
+  display: inline-block;
+  vertical-align: top;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  position: sticky;   /* keep the current month/year in view while scrolling */
+  left: 0;
+}
+.timeline-tick.minor .timeline-tick-label { font-weight: 500; padding: 0 4px; }
+.timeline-tick.day .timeline-tick-label { text-align: center; padding: 0 2px; }
+
+/* ---- row bands: mirror the table rows so bars read against them ---- */
+.timeline-rows { position: absolute; left: 0; right: 0; bottom: 0; z-index: 0; }
+.timeline-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--border);
+}
+.timeline-row.ongoing { background: color-mix(in srgb, var(--row-ongoing) 16%, var(--bg)); }
+.timeline-row.project { background: color-mix(in srgb, var(--row-project) 16%, var(--bg)); }
+.timeline-row.task { background: color-mix(in srgb, var(--row-task) 12%, var(--bg)); }
+.timeline-row:hover { background: var(--bg-hover) !important; }
+
+/* ---- bars ---- */
+.timeline-bar {
+  position: absolute;
+  z-index: 3;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  cursor: default;
+}
+.timeline-bar.parent { border-radius: 3px; }
+.timeline-bar.closed { filter: grayscale(0.8); opacity: 0.5; }
+.timeline-bar.blocked { opacity: 0.4; }
+.timeline-bar.closed.blocked { opacity: 0.3; }
+.timeline-bar:hover { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 0 2px var(--bg-hover); }
+
+/* ---- today marker ---- */
+.timeline-today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px solid var(--timeline-today);
+  z-index: 4;
+  pointer-events: none;
+}
+.timeline-today-label {
+  position: absolute;
+  top: 2px;
+  left: -1px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent-fg);
+  background: var(--timeline-today);
+  border-radius: 0 7px 7px 0;
+}
+
+/* ---- controls (float over the axis, top-right) ---- */
+.timeline-controls {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 6;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+.timeline-controls button { padding: 1px 7px; font-size: 13px; line-height: 18px; }
+.timeline-controls button.icon { min-width: 24px; font-weight: 600; }
+
+/* ---- tooltip ---- */
+.timeline-tooltip {
+  position: absolute;
+  z-index: 7;
+  max-width: 360px;
+  padding: 6px 10px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+.timeline-tooltip[hidden] { display: none; }
+.timeline-tip-title { font-weight: 600; font-size: 13px; }
+.timeline-tip-title .key { font-family: var(--mono); color: var(--fg-muted); font-weight: 500; margin-right: 2px; }
+.timeline-tip-dates { font-variant-numeric: tabular-nums; }
+.timeline-tip-who { color: var(--fg-muted); }

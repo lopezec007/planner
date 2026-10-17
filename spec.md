@@ -29,7 +29,8 @@ There are only 3:
 - Project: a project with a discrete start and end
 - Task: a child of either an "Ongoing" or a "Project"
 
-Items should be keyed based on their type and in increasing numeric order (e.g. "O-1, O-2, P-1, P-2, T-1, T-2, etc.).
+Items should be keyed based on their type and in increasing numeric order (e.g. "N-1, N-2, P-1, P-2, T-1, T-2, etc.).
+"N" is used for Ongoing rather than "O" because "O" can be confused with "0".
 Keys are never reused, including after deletion.
 
 Every task must have a parent (an "Ongoing" or a "Project").

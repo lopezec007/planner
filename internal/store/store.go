@@ -32,7 +32,8 @@ const (
 	StatusCancelled  = "cancelled"
 )
 
-var keyPrefix = map[string]string{TypeOngoing: "O", TypeProject: "P", TypeTask: "T"}
+// Ongoing uses "N" rather than "O" so keys cannot be misread as zeros.
+var keyPrefix = map[string]string{TypeOngoing: "N", TypeProject: "P", TypeTask: "T"}
 
 var validStatuses = map[string]bool{
 	StatusIdea: true, StatusBacklog: true, StatusTodo: true,
@@ -185,6 +186,11 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS items_parent ON items(parent_id);
 
+CREATE TABLE IF NOT EXISTS settings (
+	key   TEXT PRIMARY KEY,
+	value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS status_history (
 	id         INTEGER PRIMARY KEY,
 	item_id    INTEGER NOT NULL REFERENCES items(id),
@@ -195,8 +201,85 @@ CREATE INDEX IF NOT EXISTS status_history_item ON status_history(item_id, id);
 `
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(schema)
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	// Ongoing keys were originally prefixed "O-"; they are now "N-".
+	_, err := s.db.Exec(`UPDATE items SET key = 'N-' || num WHERE type = 'ongoing' AND key LIKE 'O-%'`)
 	return err
+}
+
+// ---------------------------------------------------------------- settings
+
+// SettingDefaults lists every known setting with its default value. Unknown
+// keys are rejected by UpdateSettings.
+var SettingDefaults = map[string]string{
+	"week_start":    "6", // 0 = Sunday ... 6 = Saturday
+	"color_ongoing": "#2a9d8f",
+	"color_project": "#5b6cff",
+	"color_task":    "", // empty = no tint
+}
+
+// Settings returns all settings with defaults applied.
+func (s *Store) Settings() (map[string]string, error) {
+	out := make(map[string]string, len(SettingDefaults))
+	for k, v := range SettingDefaults {
+		out[k] = v
+	}
+	rows, err := s.db.Query(`SELECT key, value FROM settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		if _, known := SettingDefaults[k]; known {
+			out[k] = v
+		}
+	}
+	return out, rows.Err()
+}
+
+func validSetting(k, v string) error {
+	switch k {
+	case "week_start":
+		if len(v) != 1 || v[0] < '0' || v[0] > '6' {
+			return verr("week_start must be 0-6")
+		}
+	case "color_ongoing", "color_project", "color_task":
+		if v != "" && !validColor(v) {
+			return verr("%s must be a #rrggbb hex string or empty", k)
+		}
+	default:
+		return verr("unknown setting %q", k)
+	}
+	return nil
+}
+
+// UpdateSettings stores the given values and returns the full settings.
+func (s *Store) UpdateSettings(vals map[string]string) (map[string]string, error) {
+	for k, v := range vals {
+		if err := validSetting(k, v); err != nil {
+			return nil, err
+		}
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	for k, v := range vals {
+		if _, err := tx.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, k, v); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.Settings()
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }

@@ -4,14 +4,14 @@
 // a handle: { rows: [{ item, el, kind }], rerender() }.
 //
 //   opts.groups    [{ parent, tasks }] from filters.js
-//   opts.mode      'full' | 'title-only'   (title-only is used beside Plan/Matrix)
+//   opts.mode      'full' | 'title-only'   (title-only is used beside Timeline/Matrix)
 //   opts.expanded  Set<number> of item ids whose description is expanded
 //                  (owned by the caller so it survives re-renders)
 //   opts.actions   { onEdit(item), onDelete(item), onAddTask(parent),
 //                    onChanged() } — optional. onChanged() reloads data after
 //                  a save or reorder; without it the table only re-renders.
 //
-// Rows carry data-id / data-kind attributes so side panels (Plan) can align
+// Rows carry data-id / data-kind attributes so side panels (Timeline) can align
 // to them, and so editing code can find them. Task rows also carry
 // data-parent. A row in edit/new mode (see edit.js) carries data-editing and
 // is rendered as a form instead of cells; a new row has no data-id yet and is

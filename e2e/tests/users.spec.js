@@ -7,7 +7,7 @@ const row = (page, name) => page.locator('.user-row:not(.header)', { has: page.l
 test('users page lists seeded users with colour chips', async ({ page }) => {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/#/users');
+  await page.goto('/#/settings');
   await expect(page.locator('.user-row:not(.header)')).toHaveCount(3);
   for (const name of ['Alex', 'Evan', 'Sam']) {
     const r = page.locator('.user-row', { hasText: name });
@@ -22,7 +22,7 @@ test('users page lists seeded users with colour chips', async ({ page }) => {
 
 test('add, rename, recolour and delete a user', async ({ page }) => {
   page.on('dialog', (d) => d.accept());
-  await page.goto('/#/users');
+  await page.goto('/#/settings');
 
   // Add: colour is auto-assigned by the server.
   await page.locator('#new-user-name').fill('Robin');
@@ -48,7 +48,7 @@ test('add, rename, recolour and delete a user', async ({ page }) => {
   await expect(maint.locator('.chip', { hasText: 'Evan' })).toHaveCSS('background-color', 'rgb(18, 52, 86)');
 
   // Deleting a referenced user fails with the server's 409 message and the user stays.
-  await page.goto('/#/users');
+  await page.goto('/#/settings');
   await row(page, 'Evan').locator('.user-delete').click();
   await expect(page.locator('#toast')).toBeVisible();
   await expect(page.locator('#toast')).toContainText('referenced');
@@ -62,7 +62,7 @@ test('add, rename, recolour and delete a user', async ({ page }) => {
 });
 
 test('rename to a blank or duplicate name is rejected', async ({ page }) => {
-  await page.goto('/#/users');
+  await page.goto('/#/settings');
   const sam = row(page, 'Sam');
   await sam.locator('.user-name').fill('   ');
   await sam.locator('.user-name').press('Enter');

@@ -1,14 +1,14 @@
 // Application shell: hash router, toolbar, page rendering.
 //
-// Routes: #/ (home), #/backlog, #/ideas, #/everything, #/users
+// Routes: #/ (active), #/backlog, #/ideas, #/everything, #/settings
 
 import { api } from './api.js';
 import { state, load } from './state.js';
 import { PAGES } from './filters.js';
 import { renderTable, describedIds } from './table.js';
-import { renderPlan } from './plan.js';
+import { renderTimeline } from './timeline.js';
 import { renderMatrix } from './matrix.js';
-import { renderUsers } from './users.js';
+import { renderSettings } from './settings.js';
 import { renderSearch } from './search.js';
 import { el, toast } from './util.js';
 import { beginNew, beginEdit, cancelEdit } from './edit.js';
@@ -32,8 +32,10 @@ function ps(page) {
 
 function route() {
   const hash = location.hash.replace(/^#\/?/, '');
-  const page = hash.split('?')[0] || 'home';
-  return PAGES[page] || page === 'users' ? page : 'home';
+  let page = hash.split('?')[0] || 'active';
+  if (page === 'home') page = 'active';
+  if (page === 'users') page = 'settings';
+  return PAGES[page] || page === 'settings' ? page : 'active';
 }
 
 async function reload() {
@@ -43,7 +45,17 @@ async function reload() {
     toast(`Failed to load: ${e.message}`);
     return;
   }
+  applySettings();
   render();
+}
+
+// Row tint colours come from Settings; an empty colour means no tint.
+function applySettings() {
+  const root = document.documentElement.style;
+  const s = state.settings || {};
+  root.setProperty('--row-ongoing', s.color_ongoing || 'transparent');
+  root.setProperty('--row-project', s.color_project || 'transparent');
+  root.setProperty('--row-task', s.color_task || 'transparent');
 }
 
 // ---------------------------------------------------------------- actions
@@ -80,9 +92,9 @@ function setActiveNav(page) {
 function render() {
   const page = route();
   setActiveNav(page);
-  if (page === 'users') {
+  if (page === 'settings') {
     toolbar.replaceChildren();
-    renderUsers(main, { reload });
+    renderSettings(main, { reload });
     return;
   }
   const def = PAGES[page];
@@ -136,7 +148,7 @@ function render() {
   // First-run guidance: an empty database has no users to pick as owner/assignee.
   const hint = (!state.users.length && !state.items.length)
     ? el('p', { class: 'hint', id: 'first-run-hint' },
-        'Welcome. Start by adding people on the ', el('a', { href: '#/users' }, 'Users'), ' page, then use New to create an Ongoing bucket or a Project.')
+        'Welcome. Start by adding people under ', el('a', { href: '#/settings' }, 'Settings'), ', then use New Ongoing or New Project to create your first items.')
     : null;
 
   if (st.view === 'table') {
@@ -149,7 +161,7 @@ function render() {
     main.replaceChildren(el('div', { class: 'split' }, wrap, panel));
     const draw = (handle) => {
       const ctx = { rerender: render, page };
-      if (st.view === 'plan') renderPlan(panel, handle, ctx);
+      if (st.view === 'timeline') renderTimeline(panel, handle, ctx);
       else renderMatrix(panel, handle, ctx);
     };
     renderTable(wrap, { groups: currentGroups, mode: 'title-only', expanded: st.expanded, actions, onRendered: draw });

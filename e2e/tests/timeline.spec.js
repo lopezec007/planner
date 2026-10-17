@@ -5,15 +5,15 @@ async function openPlan(page) {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await expect(page.locator('.row.parent:not(.header)').first()).toBeVisible();
-  await page.locator('.toolbar button[data-view="plan"]').click();
-  await expect(page.locator('#panel .plan-canvas')).toBeVisible();
+  await page.locator('.toolbar button[data-view="timeline"]').click();
+  await expect(page.locator('#panel .timeline-canvas')).toBeVisible();
   return errors;
 }
 
 /** Locator for the bar belonging to the row whose title matches. */
 async function barFor(page, title) {
   const id = await page.locator('.row:not(.header)', { hasText: title }).first().getAttribute('data-id');
-  return page.locator(`.plan-bar[data-id="${id}"]`);
+  return page.locator(`.timeline-bar[data-id="${id}"]`);
 }
 
 test('plan view hides non-title columns and draws bars only for dated items', async ({ page }) => {
@@ -31,9 +31,9 @@ test('plan view hides non-title columns and draws bars only for dated items', as
   await expect(await barFor(page, 'Clean gutters')).toHaveClass(/no-start/);
 
   // Today marker and axis present.
-  await expect(page.locator('.plan-today')).toHaveCount(1);
-  expect(await page.locator('.plan-tick.major').count()).toBeGreaterThan(0);
-  expect(await page.locator('.plan-tick.minor').count()).toBeGreaterThan(0);
+  await expect(page.locator('.timeline-today')).toHaveCount(1);
+  expect(await page.locator('.timeline-tick.major').count()).toBeGreaterThan(0);
+  expect(await page.locator('.timeline-tick.minor').count()).toBeGreaterThan(0);
   expect(errors).toEqual([]);
 });
 
@@ -58,15 +58,15 @@ test('bars line up vertically with their table rows, including when descriptions
   await check('Kitchen remodel');
   await check('Build raised beds');
 
-  // The axis is level with the table header row.
+  // The axis is level with the table header row (two tiers inside it).
   const headerBottom = (await page.locator('.row.header').boundingBox());
-  const axis = await page.locator('.plan-axis').boundingBox();
+  const axis = await page.locator('.timeline-axis').boundingBox();
   expect(Math.abs((axis.y + axis.height) - (headerBottom.y + headerBottom.height))).toBeLessThan(2);
 });
 
 test('zoom buttons change the axis scale and Today recentres', async ({ page }) => {
   await openPlan(page);
-  const canvas = page.locator('.plan-canvas');
+  const canvas = page.locator('.timeline-canvas');
   const ppd0 = parseFloat(await canvas.getAttribute('data-ppd'));
   const units0 = await canvas.getAttribute('data-units');
   const w0 = (await canvas.boundingBox()).width;
@@ -84,14 +84,14 @@ test('zoom buttons change the axis scale and Today recentres', async ({ page }) 
   await expect(canvas).toHaveAttribute('data-units', 'year/month');
 
   // Ctrl+wheel zooms too.
-  await page.locator('.plan-scroll').hover();
+  await page.locator('.timeline-scroll').hover();
   await page.keyboard.down('Control');
   await page.mouse.wheel(0, -300);
   await page.keyboard.up('Control');
   await expect.poll(async () => parseFloat(await canvas.getAttribute('data-ppd'))).toBeGreaterThan(ppd2);
 
   // Drag to pan changes the scroll position.
-  const scrollEl = page.locator('.plan-scroll');
+  const scrollEl = page.locator('.timeline-scroll');
   const before = await scrollEl.evaluate((s) => s.scrollLeft);
   const box = await scrollEl.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -103,8 +103,8 @@ test('zoom buttons change the axis scale and Today recentres', async ({ page }) 
   // Today marker is inside the viewport after pressing Today.
   await page.locator('button[data-plan="today"]').click();
   await expect.poll(async () => {
-    const scroll = await page.locator('.plan-scroll').boundingBox();
-    const today = await page.locator('.plan-today').boundingBox();
+    const scroll = await page.locator('.timeline-scroll').boundingBox();
+    const today = await page.locator('.timeline-today').boundingBox();
     return today.x >= scroll.x && today.x <= scroll.x + scroll.width;
   }).toBe(true);
 });
@@ -121,7 +121,7 @@ test('bars are styled by assignee, status and blocked, and show a tooltip', asyn
 
   const bar = await barFor(page, 'Kitchen remodel');
   await bar.hover();
-  const tip = page.locator('.plan-tooltip');
+  const tip = page.locator('.timeline-tooltip');
   await expect(tip).toBeVisible();
   await expect(tip).toContainText('P-1');
   await expect(tip).toContainText('Kitchen remodel');

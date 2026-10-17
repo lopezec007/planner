@@ -1,6 +1,6 @@
-// Plan view: Gantt-style timeline rendered beside the title-only table.
+// Timeline view: Gantt-style timeline rendered beside the title-only table.
 //
-// renderPlan(panel, handle, ctx)
+// renderTimeline(panel, handle, ctx)
 //   panel   the right-hand container element
 //   handle  the table handle from renderTable: rows [{ item, el, kind }] in
 //           display order; bars are aligned to each row's actual bounding box
@@ -9,11 +9,10 @@
 //
 // Layout: a horizontally scrollable canvas (native scrollbar, shift+wheel,
 // drag to pan) covering a wide date range; zoom (ctrl+wheel or the +/- buttons)
-// changes the pixels-per-day scale. The axis is a single strip the same height
-// as the table's header row: minor ticks (days/weeks/months) are labelled in
-// place and the major unit (month/year) is a sticky label that stays at the
-// left edge while scrolling. View state (zoom and scroll position) is kept in
-// memory for the session only.
+// changes the pixels-per-day scale. The axis is the same height as the table's
+// header row and has two tiers: the major unit (month/year, a sticky label that
+// stays in view while scrolling) above the minor unit (days/weeks/months).
+// View state (zoom and scroll position) is kept in memory for the session only.
 
 import { el } from './util.js';
 import { state, isClosed, parseYMD, today, daysFromToday } from './state.js';
@@ -53,8 +52,11 @@ function tickUnits(ppd) {
   return ['year', 'quarter'];
 }
 
+/** First day of the week, 0 = Sunday ... 6 = Saturday (a setting). */
+const weekStart = () => Number(state.settings?.week_start ?? 6);
+
 function snap(d, unit) {
-  if (unit === 'week') d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  if (unit === 'week') d.setDate(d.getDate() - ((d.getDay() - weekStart() + 7) % 7));
   else if (unit === 'month') d.setDate(1);
   else if (unit === 'quarter') d.setMonth(d.getMonth() - (d.getMonth() % 3), 1);
   else if (unit === 'year') d.setMonth(0, 1);
@@ -105,7 +107,7 @@ function* ticks(unit, base, from, to) {
 
 // ---------------------------------------------------------------- render
 
-export function renderPlan(panel, handle, ctx) {
+export function renderTimeline(panel, handle, ctx) {
   if (cleanup) { cleanup(); cleanup = null; }
 
   const T = today();
@@ -133,11 +135,11 @@ export function renderPlan(panel, handle, ctx) {
 
   // ---- skeleton: wrapper, scroll container, canvas (appended before
   // measuring so positions are taken relative to the real canvas box) ----
-  const plan = el('div', { class: 'plan' });
-  const scroll = el('div', { class: 'plan-scroll' });
-  const canvas = el('div', { class: 'plan-canvas' });
-  const tooltip = el('div', { class: 'plan-tooltip', hidden: true });
-  const controls = el('div', { class: 'plan-controls', role: 'group', 'aria-label': 'Timeline zoom' });
+  const plan = el('div', { class: 'timeline' });
+  const scroll = el('div', { class: 'timeline-scroll' });
+  const canvas = el('div', { class: 'timeline-canvas' });
+  const tooltip = el('div', { class: 'timeline-tooltip', hidden: true });
+  const controls = el('div', { class: 'timeline-controls', role: 'group', 'aria-label': 'Timeline zoom' });
   const btnOut = el('button', { type: 'button', class: 'icon', title: 'Zoom out', 'aria-label': 'Zoom out', dataset: { plan: 'zoom-out' } }, '−');
   const btnIn = el('button', { type: 'button', class: 'icon', title: 'Zoom in', 'aria-label': 'Zoom in', dataset: { plan: 'zoom-in' } }, '+');
   const btnToday = el('button', { type: 'button', title: 'Scroll to today', dataset: { plan: 'today' } }, 'Today');
@@ -168,9 +170,10 @@ export function renderPlan(panel, handle, ctx) {
     canvas.replaceChildren();
     const canvasTop = canvas.getBoundingClientRect().top;
     const tableRect = table?.getBoundingClientRect();
-    // The axis is exactly as tall as the table's header row.
-    const axisH = headers.length ? headers[headers.length - 1].getBoundingClientRect().bottom - canvasTop : 28;
-    const bodyTop = axisH;
+    // The axis is exactly as tall as the table's header row; its two tiers
+    // split that height.
+    const axisH = headers.length ? headers[headers.length - 1].getBoundingClientRect().bottom - canvasTop : 36;
+    const tier1 = Math.round(axisH / 2);
     let height = tableRect ? tableRect.bottom - 1 - canvasTop : axisH;
     const W = Math.ceil(rangeDays * view.ppd);
     const vw = viewportW();
@@ -188,7 +191,7 @@ export function renderPlan(panel, handle, ctx) {
       const h = rect.height;
       height = Math.max(height, top + h);
       bands.push(el('div', {
-        class: `plan-row ${r.kind}${isClosed(it.status) ? ' closed' : ''}`,
+        class: `timeline-row ${r.kind} ${it.type}${isClosed(it.status) ? ' closed' : ''}`,
         dataset: { id: it.id },
         style: { top: `${top}px`, height: `${h}px` },
       }));
@@ -210,7 +213,7 @@ export function renderPlan(panel, handle, ctx) {
       const barH = Math.max(8, Math.round(Math.min(r.kind === 'parent' ? 18 : 14, h * 0.55)));
       const mask = `linear-gradient(to right, transparent ${-clipL}px, #000 ${fadeL - clipL}px, #000 calc(100% - ${fadeR - clipR}px), transparent calc(100% + ${clipR}px))`;
       const user = it.assignee_id != null ? state.usersById.get(it.assignee_id) : null;
-      const cls = ['plan-bar', r.kind];
+      const cls = ['timeline-bar', r.kind];
       if (isClosed(it.status)) cls.push('closed');
       if (it.blocked) cls.push('blocked');
       if (s == null) cls.push('no-start');
@@ -238,31 +241,33 @@ export function renderPlan(panel, handle, ctx) {
     // Axis background (level with the header rows) and tick columns.
     const [majorU, minorU] = tickUnits(ppd);
     canvas.dataset.units = `${majorU}/${minorU}`;
-    canvas.append(el('div', { class: 'plan-axis', style: { height: `${axisH}px` } }));
+    canvas.append(el('div', { class: 'timeline-axis', style: { height: `${axisH}px` } },
+      el('div', { class: 'timeline-axis-tier', style: { height: `${tier1}px` } })));
     const tickEls = [];
-    const labelStyle = { height: `${axisH}px`, lineHeight: `${axisH}px` };
-    // Minor ticks first so the major (sticky) labels paint over them.
-    for (const t of ticks(minorU, base, rangeStart, rangeEnd)) {
-      const left = x(t.start), w = (t.end - t.start) * ppd;
-      tickEls.push(el('div', {
-        class: `plan-tick minor ${minorU}`,
-        style: { left: `${left}px`, width: `${w}px`, top: '0px' },
-      }, el('span', { class: 'plan-tick-label', style: labelStyle }, tickLabel(minorU, t.date, w))));
-    }
+    const ymdOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     for (const t of ticks(majorU, base, rangeStart, rangeEnd)) {
       const left = x(t.start), w = (t.end - t.start) * ppd;
       tickEls.push(el('div', {
-        class: `plan-tick major ${majorU}`,
+        class: `timeline-tick major ${majorU}`,
+        dataset: { date: ymdOf(t.date) },
         style: { left: `${left}px`, width: `${w}px`, top: '0px' },
-      }, el('span', { class: 'plan-tick-label', style: labelStyle }, tickLabel(majorU, t.date, w))));
+      }, el('span', { class: 'timeline-tick-label', style: { height: `${tier1}px`, lineHeight: `${tier1}px` } }, tickLabel(majorU, t.date, w))));
     }
-    canvas.append(el('div', { class: 'plan-rows', style: { top: `${bodyTop}px` } }, ...bands));
+    for (const t of ticks(minorU, base, rangeStart, rangeEnd)) {
+      const left = x(t.start), w = (t.end - t.start) * ppd;
+      tickEls.push(el('div', {
+        class: `timeline-tick minor ${minorU}`,
+        dataset: { date: ymdOf(t.date) },
+        style: { left: `${left}px`, width: `${w}px`, top: `${tier1}px` },
+      }, el('span', { class: 'timeline-tick-label', style: { height: `${axisH - tier1}px`, lineHeight: `${axisH - tier1}px` } }, tickLabel(minorU, t.date, w))));
+    }
+    canvas.append(el('div', { class: 'timeline-rows', style: { top: '0px' } }, ...bands));
     canvas.append(...tickEls);
     canvas.append(...bars);
 
     // Today marker.
-    canvas.append(el('div', { class: 'plan-today', style: { left: `${x(0)}px` } },
-      el('span', { class: 'plan-today-label' }, 'Today')));
+    canvas.append(el('div', { class: 'timeline-today', style: { left: `${x(0)}px` } },
+      el('span', { class: 'timeline-today-label' }, 'Today')));
 
     scroll.scrollLeft = Math.round((view.leftDay - rangeStart) * ppd);
     btnIn.disabled = ppd >= MAX_PPD - 1e-6;
@@ -276,10 +281,10 @@ export function renderPlan(panel, handle, ctx) {
   }
   function showTip(it, user) {
     tooltip.replaceChildren(
-      el('div', { class: 'plan-tip-title' }, el('span', { class: 'key' }, it.key), ' ', it.title),
-      el('div', { class: 'plan-tip-dates' }, `Start: ${fmtDate(it.start_date, it.start_firm)}  ·  End: ${fmtDate(it.end_date, it.end_firm)}`),
+      el('div', { class: 'timeline-tip-title' }, el('span', { class: 'key' }, it.key), ' ', it.title),
+      el('div', { class: 'timeline-tip-dates' }, `Start: ${fmtDate(it.start_date, it.start_firm)}  ·  End: ${fmtDate(it.end_date, it.end_firm)}`),
     );
-    if (user) tooltip.append(el('div', { class: 'plan-tip-who' }, `Assignee: ${user.name}`));
+    if (user) tooltip.append(el('div', { class: 'timeline-tip-who' }, `Assignee: ${user.name}`));
     tooltip.hidden = false;
   }
   function moveTip(e) {

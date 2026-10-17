@@ -12,7 +12,7 @@ function recentlyClosed(it) {
   return isClosed(it.status) && withinLastDays(it.closed_at, RECENT_DAYS);
 }
 
-function homeStatus(it) {
+function activeStatus(it) {
   return it.status === 'todo' || it.status === 'in-progress' || recentlyClosed(it);
 }
 
@@ -33,19 +33,19 @@ function build({ showParent, showTaskUnderOngoing, showProjectEvenIfEmpty }) {
 }
 
 export const PAGES = {
-  home: {
-    title: 'Home',
-    views: ['table', 'plan', 'matrix'],
+  active: {
+    title: 'Active',
+    views: ['table', 'timeline', 'matrix'],
     newStatus: 'todo',
     allowNewOngoing: true,
     groups: () => build({
-      showParent: (it) => it.type === 'ongoing' || homeStatus(it),
-      showTaskUnderOngoing: homeStatus,
+      showParent: (it) => it.type === 'ongoing' || activeStatus(it),
+      showTaskUnderOngoing: activeStatus,
     }),
   },
   backlog: {
     title: 'Backlog',
-    views: ['table', 'plan', 'matrix'],
+    views: ['table', 'timeline', 'matrix'],
     newStatus: 'backlog',
     allowNewOngoing: false,
     groups: () => build({
@@ -55,7 +55,7 @@ export const PAGES = {
   },
   ideas: {
     title: 'Ideas',
-    views: ['table', 'plan', 'matrix'],
+    views: ['table', 'timeline', 'matrix'],
     newStatus: 'idea',
     allowNewOngoing: false,
     groups: () => build({

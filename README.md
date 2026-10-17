@@ -17,10 +17,9 @@ the single SQLite file. The directory containing it must already exist.
 
 ## Using it
 
-1. Open the **Users** page and add the people who will own or be assigned
-   work. Each gets a colour (click the swatch to change it) that highlights
+1. Open **Settings** and add the people who will own or be assigned work. Each gets a colour (click the swatch to change it) that highlights
    the Owner and Assignee columns everywhere.
-2. On **Home**, click **New Ongoing** or **New Project** to add a blank row;
+2. On **Active**, click **New Ongoing** or **New Project** to add a blank row;
    fill in the title (required) and anything else, then press Enter or the ✓
    button. Use the **+** on an Ongoing or Project row to add a task beneath it.
 3. Rows are read-only until you click ✎ on that row. Escape cancels, Enter
@@ -31,9 +30,11 @@ the single SQLite file. The directory containing it must already exist.
    among any tasks. Dropping a task among another parent's tasks, or onto a
    parent row, moves it to that parent. The **Narrow** toggle caps the table
    width on very wide screens.
-5. **Plan** shows a Gantt timeline beside the titles (zoom with the +/−
+5. **Timeline** shows a Gantt chart beside the titles (zoom with the +/−
    buttons or Ctrl+wheel, drag or scroll to pan, Today recentres). **Matrix**
    plots tasks by urgency and importance; hover a point for its description.
+   Settings has the first day of the week and the row tint colours for
+   Ongoing, Project and Task rows.
 6. **Backlog** and **Ideas** list items in those statuses; **Everything**
    lists all live items with search and filters.
 7. Deleting hides an item (and its tasks) from the UI; the rows stay in the
@@ -41,7 +42,7 @@ the single SQLite file. The directory containing it must already exist.
    available at `/api/items/{id}/history`.
 
 "Today" and all date highlighting use the browser's timezone, not the
-server's. The homepage shows To-Do and In-Progress work plus anything closed
+server's. The Active page shows To-Do and In-Progress work plus anything closed
 in the last 14 days; a project's status decides where its tasks appear.
 
 ## Deploying on Debian
@@ -151,9 +152,10 @@ Layout:
       js/filters.js       which items each page shows (supersede rule lives here)
       js/table.js         hierarchical table renderer, highlighting, drag reordering
       js/edit.js          in-table create/edit forms
-      js/plan.js          Plan (Gantt) view
+      js/timeline.js      Timeline (Gantt) view
       js/matrix.js        Matrix (scatter) view
-      js/users.js         Users page
+      js/settings.js      Settings page (week start, row colours)
+      js/users.js         Users section of Settings
       js/search.js        Everything-page search and filter
       css/app.css         theme tokens + table; one css file per feature module
     scripts/seed.sh       sample data for a running instance
@@ -178,6 +180,7 @@ API summary (all JSON):
     DELETE /api/items/{id}            soft delete (cascades to tasks)
     GET    /api/items/{id}/history    status changes, oldest first
     PUT    /api/order {ids: [...]}    reorder siblings
+    GET    /api/settings              PATCH /api/settings {key: value}  (week_start, color_*)
 
 Item JSON fields: id, type (ongoing|project|task), key, num, parent_id, title,
 description, owner_id, assignee_id, assignee_shared, status, start_date,

@@ -181,7 +181,7 @@ function firmLabel(checkbox) {
  * Build the edit row (grid-aligned) and the detail row beneath it. In the full
  * table every field has a cell of its own and the detail row holds only the
  * description editor, placed in the title column so it sits exactly under the
- * title. In the title-only table (Plan / Matrix) all other fields move to the
+ * title. In the title-only table (Timeline / Matrix) all other fields move to the
  * detail row as well.
  */
 export function renderEditRows(draft, kind, tableMode, ctx) {
@@ -196,7 +196,7 @@ export function renderEditRows(draft, kind, tableMode, ctx) {
   });
   row.append(
     el('div', { class: 'toggle' }),
-    el('div', { class: 'key' }, isNew ? el('span', { class: 'new-key' }, type === 'ongoing' ? 'O-?' : type === 'project' ? 'P-?' : 'T-?') : draft.key),
+    el('div', { class: 'key' }, isNew ? el('span', { class: 'new-key' }, type === 'ongoing' ? 'N-?' : type === 'project' ? 'P-?' : 'T-?') : draft.key),
     el('div', { class: 'title' }, ed.title),
   );
 
@@ -222,7 +222,7 @@ export function renderEditRows(draft, kind, tableMode, ctx) {
       row.append(el('div'), el('div'), el('div'));
     }
   } else {
-    // Title-only table (Plan / Matrix): everything but the title goes below.
+    // Title-only table (Timeline / Matrix): everything but the title goes below.
     if (type !== 'ongoing') detailFields.append(field('Status', ed.status));
     detailFields.append(field('Owner', ed.owner), field('Assignee', ed.assignee));
     if (type !== 'ongoing') {

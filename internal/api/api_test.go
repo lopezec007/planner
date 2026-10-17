@@ -57,7 +57,7 @@ func TestItemLifecycle(t *testing.T) {
 	if c := call(t, srv, "POST", "/api/items", map[string]any{"type": "ongoing", "title": "Maint"}, &o); c != 201 {
 		t.Fatalf("create ongoing: %d", c)
 	}
-	if o["key"] != "O-1" || o["status"] != nil {
+	if o["key"] != "N-1" || o["status"] != nil {
 		t.Fatalf("ongoing: %v", o)
 	}
 	var tk map[string]any
@@ -136,4 +136,21 @@ func TestReorderEndpoint(t *testing.T) {
 func jsonNum(i int64) string {
 	b, _ := json.Marshal(i)
 	return string(b)
+}
+
+func TestSettingsEndpoint(t *testing.T) {
+	srv := setup(t)
+	var st map[string]string
+	if c := call(t, srv, "GET", "/api/settings", nil, &st); c != 200 || st["week_start"] != "6" {
+		t.Fatalf("get: %d %v", c, st)
+	}
+	if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"week_start": "0", "color_ongoing": "#abcdef"}, &st); c != 200 {
+		t.Fatalf("patch: %d", c)
+	}
+	if st["week_start"] != "0" || st["color_ongoing"] != "#abcdef" {
+		t.Fatalf("patched: %v", st)
+	}
+	if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"week_start": "9"}, nil); c != 400 {
+		t.Fatalf("expected 400, got %d", c)
+	}
 }

@@ -30,4 +30,8 @@ export const api = {
   history: (id) => req('GET', `/api/items/${id}/history`),
   // ids: sibling item ids in the desired order
   reorder: (ids) => req('PUT', '/api/order', { ids }),
+
+  getSettings: () => req('GET', '/api/settings'),
+  // body: {key: value, ...}; returns the full settings
+  updateSettings: (body) => req('PATCH', '/api/settings', body),
 };

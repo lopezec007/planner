@@ -35,15 +35,15 @@ func TestKeysIncrementPerTypeAndNeverReuse(t *testing.T) {
 	o1 := mustCreate(t, s, TypeOngoing, Patch{Title: str("Maint")})
 	p1 := mustCreate(t, s, TypeProject, Patch{Title: str("Proj")})
 	o2 := mustCreate(t, s, TypeOngoing, Patch{Title: str("Finance")})
-	if o1.Key != "O-1" || p1.Key != "P-1" || o2.Key != "O-2" {
+	if o1.Key != "N-1" || p1.Key != "P-1" || o2.Key != "N-2" {
 		t.Fatalf("keys: %s %s %s", o1.Key, p1.Key, o2.Key)
 	}
 	if err := s.DeleteItem(o2.ID); err != nil {
 		t.Fatal(err)
 	}
 	o3 := mustCreate(t, s, TypeOngoing, Patch{Title: str("Again")})
-	if o3.Key != "O-3" {
-		t.Fatalf("expected O-3 after delete, got %s", o3.Key)
+	if o3.Key != "N-3" {
+		t.Fatalf("expected N-3 after delete, got %s", o3.Key)
 	}
 }
 
@@ -252,5 +252,49 @@ func TestUsers(t *testing.T) {
 	us, _ := s.ListUsers()
 	if len(us) != 1 {
 		t.Fatalf("expected 1 user, got %d", len(us))
+	}
+}
+
+func TestLegacyOngoingKeysMigrate(t *testing.T) {
+	s := openTest(t)
+	o := mustCreate(t, s, TypeOngoing, Patch{Title: str("Old")})
+	if _, err := s.db.Exec(`UPDATE items SET key = 'O-1' WHERE id = ?`, o.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetItem(o.ID)
+	if got.Key != "N-1" {
+		t.Fatalf("expected migrated key N-1, got %s", got.Key)
+	}
+}
+
+func TestSettings(t *testing.T) {
+	s := openTest(t)
+	st, err := s.Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st["week_start"] != "6" || st["color_task"] != "" {
+		t.Fatalf("defaults: %v", st)
+	}
+	st, err = s.UpdateSettings(map[string]string{"week_start": "1", "color_task": "#123456"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st["week_start"] != "1" || st["color_task"] != "#123456" || st["color_ongoing"] != SettingDefaults["color_ongoing"] {
+		t.Fatalf("updated: %v", st)
+	}
+	for _, bad := range []map[string]string{{"week_start": "7"}, {"color_project": "blue"}, {"nope": "x"}} {
+		var ve *ValidationError
+		if _, err := s.UpdateSettings(bad); !errors.As(err, &ve) {
+			t.Fatalf("%v: expected validation error, got %v", bad, err)
+		}
+	}
+	// Clearing a colour restores "no tint".
+	st, _ = s.UpdateSettings(map[string]string{"color_task": ""})
+	if st["color_task"] != "" {
+		t.Fatal("clear failed")
 	}
 }

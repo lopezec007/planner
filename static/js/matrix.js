@@ -277,10 +277,6 @@ export function renderMatrix(panel, handle, ctx) {
   const rows = handle.rows.filter((r) => r.kind === 'task' && r.item.type === 'task');
   const wrap = el('div', { class: 'matrix' });
   panel.replaceChildren(wrap);
-  if (!rows.length) {
-    wrap.append(el('div', { class: 'empty' }, 'No tasks to plot.'));
-    return;
-  }
 
   const plotRoot = el('div', { class: 'matrix-plot-wrap' });
   wrap.append(plotRoot);

@@ -27,7 +27,7 @@ test('New project: blank row with description expanded, saves with page status',
   await expect(newRow(page)).toBeVisible();
   await expect(detailRow(page).locator('textarea')).toBeVisible(); // description pre-expanded
   await expect(newRow(page).locator('input[name=title]')).toBeFocused();
-  // Status defaults to the page's new status (todo on Home).
+  // Status defaults to the page's new status (todo on Active).
   await expect(newRow(page).locator('select[name=status]')).toHaveValue('todo');
 
   await newRow(page).locator('input[name=title]').fill('E2E Project');
@@ -254,9 +254,9 @@ test('Only one row may be edited at a time', async ({ page }) => {
   await expect(editRow(page)).toHaveCount(0);
 });
 
-test('Editing works in the title-only table beside the Plan view', async ({ page, request }) => {
+test('Editing works in the title-only table beside the Timeline view', async ({ page, request }) => {
   await page.goto('/');
-  await page.locator('button[data-view=plan]').click();
+  await page.locator('button[data-view=timeline]').click();
   await expect(page.locator('.table.title-only')).toBeVisible();
   const row = page.locator('.row.task', { hasText: 'E2E Task B' });
   await row.locator('button[title=Edit]').click();
