@@ -11,6 +11,7 @@
   --timeline-month: #b06cb0;   /* month boundaries */
   --timeline-year: #d08a2e;    /* year boundaries */
   --timeline-today: var(--accent);
+  --timeline-firm: #ff1f1f;    /* firm date boundaries */
 }
 @media (prefers-color-scheme: dark) {
   .timeline { --timeline-month: #c48ac4; --timeline-year: #e0a04a; }
@@ -105,7 +106,14 @@
   cursor: default;
 }
 .timeline-bar.parent { border-radius: 3px; }
+/* Firm boundaries: a bright red edge on that end of the bar. */
+.timeline-bar.firm-start { box-shadow: inset 3px 0 0 var(--timeline-firm), inset 0 0 0 1px rgba(0, 0, 0, 0.18); }
+.timeline-bar.firm-end { box-shadow: inset -3px 0 0 var(--timeline-firm), inset 0 0 0 1px rgba(0, 0, 0, 0.18); }
+.timeline-bar.firm-start.firm-end { box-shadow: inset 3px 0 0 var(--timeline-firm), inset -3px 0 0 var(--timeline-firm), inset 0 0 0 1px rgba(0, 0, 0, 0.18); }
 .timeline-barwrap { position: absolute; z-index: 3; }
+/* Extend the hover area past both ends so the × buttons do not vanish while
+   the pointer crosses the gap to them. */
+.timeline-barwrap::before { content: ""; position: absolute; top: -4px; bottom: -4px; left: -22px; right: -22px; }
 .timeline-barwrap .timeline-bar { left: 0; top: 0; width: 100%; height: 100%; }
 .timeline-barwrap.editing { z-index: 5; }
 .timeline-barwrap.editing .timeline-bar { opacity: 0.9; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 0 2px var(--accent); }
@@ -117,7 +125,7 @@
   font-size: 11px; line-height: 14px; text-align: center; display: none; z-index: 6; cursor: pointer;
 }
 .timeline-x.end { left: calc(100% + 10px); }
-.timeline-barwrap:hover .timeline-x { display: block; }
+.timeline-barwrap:hover .timeline-x, .timeline-x:hover, .timeline-x:focus-visible { display: block; }
 .timeline-x:hover { color: var(--hl-alert); border-color: var(--hl-alert); background: var(--bg); }
 /* Empty rows accept a click/drag to create dates. */
 .timeline-row.empty-dates { cursor: copy; }

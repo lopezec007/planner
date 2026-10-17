@@ -27,7 +27,6 @@ import { state, isClosed, isBlocked, dependencyEdges, parseYMD, today, daysFromT
 const DAY_MS = 86400000;
 const MAX_PPD = 80;        // max pixels per day
 const ZOOM_STEP = 1.35;    // factor per +/- click
-const SHORT_FADE_DAYS = 3; // soft edge width for non-firm dates
 const MISSING_FADE_DAYS = 14; // tail length for a missing start or end date
 const DEP_PAD = 10;        // connector stub length beyond a bar edge (px)
 const DEP_RADIUS = 6;      // connector corner radius (px)
@@ -268,7 +267,6 @@ export function renderTimeline(panel, handle, ctx) {
     const bars = [];
     const geom = new Map(); // item id -> bar geometry for the dependency connectors
     const longFade = Math.max(MISSING_FADE_DAYS * ppd, 24); // tail for a missing date
-    const shortFade = Math.max(SHORT_FADE_DAYS * ppd, 6);
     for (const r of rows) {
       const it = r.item;
       const rect = r.el.getBoundingClientRect();
@@ -294,8 +292,10 @@ export function renderTimeline(panel, handle, ctx) {
       const s = daysFromToday(it.start_date);
       const e = daysFromToday(it.end_date);
       let x0, x1, fadeL, fadeR;
-      if (s != null) { x0 = x(s); fadeL = it.start_firm ? 0 : shortFade; }
-      if (e != null) { x1 = x(e + 1); fadeR = it.end_firm ? 0 : shortFade; }
+      // Known dates get a hard edge (firm ones are marked in red, see css);
+      // only missing dates fade.
+      if (s != null) { x0 = x(s); fadeL = 0; }
+      if (e != null) { x1 = x(e + 1); fadeR = 0; }
       // A missing date fades in/out over two weeks, unless dependencies pin
       // it: no start -> from the latest end among its blockers; no end -> to
       // the earliest start among the items it blocks.
@@ -324,6 +324,8 @@ export function renderTimeline(panel, handle, ctx) {
       if (isBlocked(it)) cls.push('blocked');
       if (s == null) cls.push('no-start');
       if (e == null) cls.push('no-end');
+      if (s != null && it.start_firm) cls.push('firm-start');
+      if (e != null && it.end_firm) cls.push('firm-end');
       // The wrapper carries the geometry; the bar inside it carries the mask
       // (so the remove buttons beside it are not faded).
       const wrap = el('div', {
