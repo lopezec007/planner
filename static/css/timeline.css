@@ -105,8 +105,28 @@
   cursor: default;
 }
 .timeline-bar.parent { border-radius: 3px; }
-.timeline-bar.editing { opacity: 0.9; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 0 2px var(--accent); z-index: 5; }
-.timeline-bar.editing ~ .timeline-tooltip { display: none; }
+.timeline-barwrap { position: absolute; z-index: 3; }
+.timeline-barwrap .timeline-bar { left: 0; top: 0; width: 100%; height: 100%; }
+.timeline-barwrap.editing { z-index: 5; }
+.timeline-barwrap.editing .timeline-bar { opacity: 0.9; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 0 2px var(--accent); }
+/* Remove-date buttons at the ends of a bar, shown on hover. */
+.timeline-x {
+  position: absolute; top: 50%; left: -10px; transform: translate(-50%, -50%);
+  width: 16px; height: 16px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--bg); color: var(--fg-muted);
+  font-size: 11px; line-height: 14px; text-align: center; display: none; z-index: 6; cursor: pointer;
+}
+.timeline-x.end { left: calc(100% + 10px); }
+.timeline-barwrap:hover .timeline-x { display: block; }
+.timeline-x:hover { color: var(--hl-alert); border-color: var(--hl-alert); background: var(--bg); }
+/* Empty rows accept a click/drag to create dates. */
+.timeline-row.empty-dates { cursor: copy; }
+.timeline-ghost {
+  position: absolute; z-index: 4; border-radius: 2px; pointer-events: none;
+  border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.timeline-tip-hint { color: var(--fg-muted); font-size: 11px; margin-top: 2px; }
+.timeline-tip-hint:empty { display: none; }
 .timeline-bar.closed { filter: grayscale(0.8); opacity: 0.5; }
 .timeline-bar.blocked { opacity: 0.4; }
 .timeline-bar.closed.blocked { opacity: 0.3; }

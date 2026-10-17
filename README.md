@@ -42,7 +42,10 @@ the single SQLite file. The directory containing it must already exist.
    parent row, moves it to that parent. The **Narrow** toggle caps the table
    width on very wide screens.
 6. **Timeline** shows a Gantt chart beside the titles (zoom with the +/−
-   buttons or Ctrl+wheel, drag or scroll to pan, Today recentres). **Matrix**
+   buttons or Ctrl+wheel, wheel or drag to pan, Today recentres). Drag a bar
+   to move its dates or an end to resize; drag or click in a bar's faded
+   tail to pin the missing date; click or drag on an empty row to create
+   dates; hover a bar for × buttons that remove a date. **Matrix**
    plots tasks by urgency and importance; hover a point for its description.
    Settings has the first day of the week, the row tint colours for
    Ongoing, Project and Task rows, the end-date highlight colours and

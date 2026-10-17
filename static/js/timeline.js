@@ -275,16 +275,24 @@ export function renderTimeline(panel, handle, ctx) {
       const top = rect.top - canvasTop;
       const h = rect.height;
       height = Math.max(height, top + h);
-      bands.push(el('div', {
+      const band = el('div', {
         class: `timeline-row ${r.kind} ${it.type}${isClosed(it.status) ? ' closed' : ''}`,
         dataset: { id: it.id },
         style: { top: `${top}px`, height: `${h}px` },
-      }));
+      });
+      bands.push(band);
+      const barH = Math.max(8, Math.round(Math.min(r.kind === 'parent' ? 18 : 14, h * 0.55)));
 
-      if (!it.start_date && !it.end_date) continue;
+      if (!it.start_date && !it.end_date) {
+        if (it.type !== 'ongoing') {
+          band.classList.add('empty-dates');
+          band.title = 'Click to set a start date here; drag to set start and end';
+          band.addEventListener('pointerdown', (ev) => startCreateDrag(ev, band, it, top + (h - barH) / 2, barH));
+        }
+        continue;
+      }
       const s = daysFromToday(it.start_date);
       const e = daysFromToday(it.end_date);
-      const e_ = e;
       let x0, x1, fadeL, fadeR;
       if (s != null) { x0 = x(s); fadeL = it.start_firm ? 0 : shortFade; }
       if (e != null) { x1 = x(e + 1); fadeR = it.end_firm ? 0 : shortFade; }
@@ -309,7 +317,6 @@ export function renderTimeline(panel, handle, ctx) {
       if (x0 < 0) { clipL = -x0; x0 = 0; }
       if (x1 > W) { clipR = x1 - W; x1 = W; }
       if (x1 <= x0) continue;
-      const barH = Math.max(8, Math.round(Math.min(r.kind === 'parent' ? 18 : 14, h * 0.55)));
       const mask = `linear-gradient(to right, transparent ${-clipL}px, #000 ${fadeL - clipL}px, #000 calc(100% - ${fadeR - clipR}px), transparent calc(100% + ${clipR}px))`;
       const user = it.assignee_id != null ? state.usersById.get(it.assignee_id) : null;
       const cls = ['timeline-bar', r.kind];
@@ -317,21 +324,39 @@ export function renderTimeline(panel, handle, ctx) {
       if (isBlocked(it)) cls.push('blocked');
       if (s == null) cls.push('no-start');
       if (e == null) cls.push('no-end');
+      // The wrapper carries the geometry; the bar inside it carries the mask
+      // (so the remove buttons beside it are not faded).
+      const wrap = el('div', {
+        class: 'timeline-barwrap',
+        style: { left: `${x0}px`, width: `${x1 - x0}px`, top: `${top + (h - barH) / 2}px`, height: `${barH}px` },
+      });
       const bar = el('div', {
         class: cls.join(' '),
-        dataset: { id: it.id, key: it.key },
+        dataset: { id: it.id, key: it.key, fadeL: fadeL.toFixed(1), fadeR: fadeR.toFixed(1) },
         style: {
-          left: `${x0}px`, width: `${x1 - x0}px`,
-          top: `${top + (h - barH) / 2}px`, height: `${barH}px`,
           background: user ? user.color : (state.settings?.color_unassigned || 'var(--accent)'),
           maskImage: mask, webkitMaskImage: mask,
         },
       });
+      wrap.append(bar);
+      for (const which of ['start', 'end']) {
+        if (!it[`${which}_date`]) continue;
+        const btn = el('button', {
+          type: 'button', class: `timeline-x ${which}`, title: `Remove ${which} date`, 'aria-label': `Remove ${which} date of ${it.key}`,
+          dataset: { remove: which, id: it.id },
+        }, '×');
+        btn.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+        btn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          try { await api.updateItem(it.id, { [`${which}_date`]: null }); await ctx.onChanged(); } catch (err) { toast(err.message); }
+        });
+        wrap.append(btn);
+      }
       bar.addEventListener('mouseenter', () => { if (!barDrag) showTip(it, user); });
-      bar.addEventListener('mousemove', (e) => { if (!barDrag) { moveTip(e); bar.style.cursor = cursorFor(bar, it, e); } });
+      bar.addEventListener('mousemove', (e) => { if (!barDrag) { const z = zoneFor(bar, it, e); bar.style.cursor = cursorFor(z); setTipHint(hintFor(z, it)); moveTip(e); } });
       bar.addEventListener('mouseleave', hideTip);
-      bar.addEventListener('pointerdown', (e) => startBarDrag(e, bar, it, s, e_));
-      bars.push(bar);
+      bar.addEventListener('pointerdown', (e) => startBarDrag(e, wrap, bar, it));
+      bars.push(wrap);
       geom.set(it.id, { x0, x1, yc: top + h / 2, rowTop: top, rowBottom: top + h });
     }
 
@@ -376,56 +401,92 @@ export function renderTimeline(panel, handle, ctx) {
     btnOut.disabled = ppd <= minPpd() + 1e-6;
   }
 
-  // ---- editing dates by dragging bars ----
-  // Edges resize the start/end (only when that date exists); the middle moves
-  // every date the item has. One pixel row = view.ppd pixels per day.
+  // ---- editing dates on the timeline ----
+  // Bars: the middle moves every date the item has; an 8px edge resizes an
+  // existing start/end; the faded region of a missing date is a "create"
+  // zone: drag (or click) there to pin that date. Empty rows: click sets a
+  // start date at that day, drag sets start and end. The × buttons shown on
+  // hover remove a date.
   const EDGE = 8;
   let barDrag = null;
+  const dayAt = (clientX) => Math.floor((clientX - canvas.getBoundingClientRect().left) / view.ppd) + rangeStart;
+  const dayYmd = (d) => addDays(T, d);
+
   function zoneFor(bar, it, e) {
     const r = bar.getBoundingClientRect();
     const px = e.clientX - r.left;
+    const fadeL = Number(bar.dataset.fadeL) || 0, fadeR = Number(bar.dataset.fadeR) || 0;
+    if (!it.start_date && px < fadeL * 0.6) return 'create-start';
+    if (!it.end_date && px > r.width - fadeR * 0.6) return 'create-end';
     if (it.start_date && px <= EDGE) return 'start';
     if (it.end_date && px >= r.width - EDGE) return 'end';
     return 'move';
   }
-  function cursorFor(bar, it, e) {
-    const z = zoneFor(bar, it, e);
-    return z === 'move' ? 'grab' : 'ew-resize';
+  const cursorFor = (z) => (z === 'move' ? 'grab' : z === 'create-start' ? 'w-resize' : z === 'create-end' ? 'e-resize' : 'ew-resize');
+  function hintFor(z, it) {
+    switch (z) {
+      case 'create-start': return 'Click or drag here to set the start date';
+      case 'create-end': return 'Click or drag here to set the end date';
+      case 'start': return 'Drag to change the start date';
+      case 'end': return 'Drag to change the end date';
+      default: return it.start_date && it.end_date ? 'Drag to move both dates' : 'Drag to move the date';
+    }
   }
-  function startBarDrag(e, bar, it) {
+
+  function startBarDrag(e, wrap, bar, it) {
     if (e.button !== 0) return;
     e.stopPropagation(); // not a pan
     e.preventDefault();
     hideTip();
     const zone = zoneFor(bar, it, e);
-    const left0 = parseFloat(bar.style.left), width0 = parseFloat(bar.style.width);
-    barDrag = { bar, it, zone, x: e.clientX, left0, width0, days: 0 };
-    bar.setPointerCapture(e.pointerId);
-    bar.classList.add('editing');
-    bar.style.cursor = zone === 'move' ? 'grabbing' : 'ew-resize';
+    const left0 = parseFloat(wrap.style.left), width0 = parseFloat(wrap.style.width);
     const sDay = daysFromToday(it.start_date), eDay = daysFromToday(it.end_date);
+    barDrag = { zone, x: e.clientX, days: 0, day: null, moved: false };
+    bar.setPointerCapture(e.pointerId);
+    wrap.classList.add('editing');
+    bar.style.cursor = zone === 'move' ? 'grabbing' : cursorFor(zone);
     const onMove = (ev) => {
+      if (Math.abs(ev.clientX - barDrag.x) > 2) barDrag.moved = true;
+      if (zone === 'create-start' || zone === 'create-end') {
+        let day = dayAt(ev.clientX);
+        if (zone === 'create-start' && eDay != null) day = Math.min(day, eDay);
+        if (zone === 'create-end' && sDay != null) day = Math.max(day, sDay);
+        barDrag.day = day;
+        if (zone === 'create-start') { wrap.style.left = `${x(day)}px`; wrap.style.width = `${Math.max(4, left0 + width0 - x(day))}px`; }
+        else wrap.style.width = `${Math.max(4, x(day + 1) - left0)}px`;
+        return;
+      }
       let days = Math.round((ev.clientX - barDrag.x) / view.ppd);
       // Keep start <= end while resizing.
       if (zone === 'start' && eDay != null) days = Math.min(days, eDay - sDay);
       if (zone === 'end' && sDay != null) days = Math.max(days, sDay - eDay);
       barDrag.days = days;
       const dx = days * view.ppd;
-      if (zone === 'move') bar.style.left = `${left0 + dx}px`;
-      else if (zone === 'start') { bar.style.left = `${left0 + dx}px`; bar.style.width = `${Math.max(4, width0 - dx)}px`; }
-      else bar.style.width = `${Math.max(4, width0 + dx)}px`;
+      if (zone === 'move') wrap.style.left = `${left0 + dx}px`;
+      else if (zone === 'start') { wrap.style.left = `${left0 + dx}px`; wrap.style.width = `${Math.max(4, width0 - dx)}px`; }
+      else wrap.style.width = `${Math.max(4, width0 + dx)}px`;
     };
-    const onUp = async () => {
+    const onUp = async (ev) => {
       bar.removeEventListener('pointermove', onMove);
       bar.removeEventListener('pointerup', onUp);
       bar.removeEventListener('pointercancel', onUp);
-      const { days } = barDrag;
+      const { days, moved } = barDrag;
+      let { day } = barDrag;
       barDrag = null;
-      bar.classList.remove('editing');
-      if (!days) { draw(); return; }
+      wrap.classList.remove('editing');
       const patch = {};
-      if (zone !== 'end' && it.start_date) patch.start_date = addDays(it.start_date, days);
-      if (zone !== 'start' && it.end_date) patch.end_date = addDays(it.end_date, days);
+      if (zone === 'create-start' || zone === 'create-end') {
+        if (day == null) { // a click: pin the date where it was clicked
+          day = dayAt(ev.clientX);
+          if (zone === 'create-start' && eDay != null) day = Math.min(day, eDay);
+          if (zone === 'create-end' && sDay != null) day = Math.max(day, sDay);
+        }
+        patch[zone === 'create-start' ? 'start_date' : 'end_date'] = dayYmd(day);
+      } else {
+        if (!days || !moved) { draw(); return; }
+        if (zone !== 'end' && it.start_date) patch.start_date = addDays(it.start_date, days);
+        if (zone !== 'start' && it.end_date) patch.end_date = addDays(it.end_date, days);
+      }
       try {
         await api.updateItem(it.id, patch);
         await ctx.onChanged();
@@ -439,6 +500,41 @@ export function renderTimeline(panel, handle, ctx) {
     bar.addEventListener('pointercancel', onUp);
   }
 
+  /** Empty row: click sets a start date, drag sets start and end. */
+  function startCreateDrag(e, band, it, top, barH) {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const day0 = dayAt(e.clientX);
+    let a = day0, b = day0, moved = false;
+    const ghost = el('div', { class: 'timeline-ghost', style: { top: `${top}px`, height: `${barH}px`, left: `${x(day0)}px`, width: `${view.ppd}px` } });
+    canvas.append(ghost);
+    band.setPointerCapture(e.pointerId);
+    const onMove = (ev) => {
+      const d = dayAt(ev.clientX);
+      if (d !== day0) moved = true;
+      a = Math.min(day0, d); b = Math.max(day0, d);
+      ghost.style.left = `${x(a)}px`;
+      ghost.style.width = `${(b - a + 1) * view.ppd}px`;
+    };
+    const onUp = async () => {
+      band.removeEventListener('pointermove', onMove);
+      band.removeEventListener('pointerup', onUp);
+      band.removeEventListener('pointercancel', onUp);
+      ghost.remove();
+      const patch = moved ? { start_date: dayYmd(a), end_date: dayYmd(b) } : { start_date: dayYmd(day0) };
+      try {
+        await api.updateItem(it.id, patch);
+        await ctx.onChanged();
+      } catch (err) {
+        toast(err.message);
+      }
+    };
+    band.addEventListener('pointermove', onMove);
+    band.addEventListener('pointerup', onUp);
+    band.addEventListener('pointercancel', onUp);
+  }
+
   // ---- tooltip ----
   function fmtDate(d, firm) {
     if (!d) return 'none';
@@ -450,7 +546,12 @@ export function renderTimeline(panel, handle, ctx) {
       el('div', { class: 'timeline-tip-dates' }, `Start: ${fmtDate(it.start_date, it.start_firm)}  ·  End: ${fmtDate(it.end_date, it.end_firm)}`),
     );
     if (user) tooltip.append(el('div', { class: 'timeline-tip-who' }, `Assignee: ${user.name}`));
+    tooltip.append(el('div', { class: 'timeline-tip-hint' }));
     tooltip.hidden = false;
+  }
+  function setTipHint(text) {
+    const h = tooltip.querySelector('.timeline-tip-hint');
+    if (h) h.textContent = text;
   }
   function moveTip(e) {
     const pr = plan.getBoundingClientRect();
