@@ -26,8 +26,14 @@ import (
 //go:embed static
 var staticFS embed.FS
 
-// version is set at build time via -ldflags "-X main.version=...".
-var version = "dev"
+// Version is the semantic version of this release and VersionDate the day it
+// was cut. build is the git description, set via -ldflags "-X main.build=...".
+const (
+	Version     = "0.9.0"
+	VersionDate = "2026-10-16"
+)
+
+var build = "dev"
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -43,7 +49,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("planner", version)
+		fmt.Printf("planner %s (%s, build %s)\n", Version, VersionDate, build)
 		return
 	}
 
@@ -70,9 +76,13 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", api.Handler(st))
+	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"version":%q,"date":%q,"build":%q}`, Version, VersionDate, build)
+	})
 	mux.Handle("/", noCache(http.FileServer(http.FS(static))))
 
-	log.Printf("planner %s listening on %s (db %s)", version, *addr, *dbPath)
+	log.Printf("planner %s (%s) listening on %s (db %s)", Version, build, *addr, *dbPath)
 	if err := http.ListenAndServe(*addr, mux); err != nil {
 		log.Fatal(err)
 	}

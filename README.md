@@ -12,7 +12,10 @@ used for the browser tests.
     ./planner -addr :8080 -db /var/lib/planner/planner.db
 
 Flags can also be given as environment variables `PLANNER_ADDR` and
-`PLANNER_DB`; `planner -version` prints the build version. All data lives in
+`PLANNER_DB`; `planner -version` prints the semantic version, its release
+date and the git build id (the version badge in the toolbar shows the same).
+The version and date live at the top of `main.go`; bump them when cutting a
+release. All data lives in
 the single SQLite file. The directory containing it must already exist.
 
 ## Using it
@@ -49,7 +52,8 @@ the single SQLite file. The directory containing it must already exist.
    plots tasks by urgency and importance; hover a point for its description.
    Settings has the first day of the week, the row tint colours for
    Ongoing, Project and Task rows, the end-date highlight colours and
-   windows, and a colour for each urgency/importance value (with presets).
+   windows, and a colour for each urgency and importance value (two ramps,
+   with presets).
 7. **Backlog** and **Ideas** list items in those statuses; **Everything**
    lists all live items with search and filters, which also apply to its
    Timeline and Matrix views.

@@ -34,6 +34,7 @@ export const api = {
   addDependency: (blockerId, blockedId) => req('POST', '/api/dependencies', { blocker_id: blockerId, blocked_id: blockedId }),
   removeDependency: (blockerId, blockedId) => req('DELETE', `/api/dependencies/${blockerId}/${blockedId}`),
 
+  getVersion: () => req('GET', '/api/version'),
   getSettings: () => req('GET', '/api/settings'),
   // body: {key: value, ...}; returns the full settings
   updateSettings: (body) => req('PATCH', '/api/settings', body),

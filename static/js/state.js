@@ -10,11 +10,13 @@ export const state = {
   itemsById: new Map(),
   childrenOf: new Map(), // parent id -> [task...] in sort order
   settings: {},          // app settings from /api/settings (defaults applied by the server)
+  version: null,         // { version, date, build } from /api/version
   loaded: false,
 };
 
 export async function load() {
-  const [users, items, settings] = await Promise.all([api.listUsers(), api.listItems(), api.getSettings()]);
+  const [users, items, settings, version] = await Promise.all([api.listUsers(), api.listItems(), api.getSettings(), state.version || api.getVersion()]);
+  state.version = version;
   state.settings = settings;
   state.users = users;
   state.usersById = new Map(users.map((u) => [u.id, u]));

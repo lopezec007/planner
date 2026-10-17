@@ -218,6 +218,15 @@ func (s *Store) migrate() error {
 	if _, err := s.db.Exec(`UPDATE items SET key = 'N-' || num WHERE type = 'ongoing' AND key LIKE 'O-%'`); err != nil {
 		return err
 	}
+	// A single urgency/importance ramp ("level_colors") became two.
+	if _, err := s.db.Exec(`INSERT OR IGNORE INTO settings (key, value)
+		SELECT 'urgency_colors', value FROM settings WHERE key = 'level_colors'
+		UNION ALL SELECT 'importance_colors', value FROM settings WHERE key = 'level_colors'`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM settings WHERE key = 'level_colors'`); err != nil {
+		return err
+	}
 	// The "Shared" assignee option was removed; drop its column if present
 	// (items that used it become unassigned).
 	var n int
@@ -249,13 +258,17 @@ var SettingDefaults = map[string]string{
 	"hl_alert_color":  "#e5484d",
 	"date_warn_days":  "7",
 	"date_alert_days": "0",
-	// Urgency/importance colour ramp: a JSON array of 11 entries (values 0-10),
-	// each "#rrggbb" or "" for no highlight.
-	"level_colors": `["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]`,
+	// Urgency and importance colour ramps: JSON arrays of 11 entries (values
+	// 0-10), each "#rrggbb" or "" for no highlight.
+	"urgency_colors":    DefaultRamp,
+	"importance_colors": DefaultRamp,
 }
 
 // LevelCount is the number of urgency/importance values (0-10).
 const LevelCount = 11
+
+// DefaultRamp highlights 6-8 in the warn colour and 9-10 in the alert colour.
+const DefaultRamp = `["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]`
 
 // Settings returns all settings with defaults applied.
 func (s *Store) Settings() (map[string]string, error) {
@@ -294,14 +307,14 @@ func validSetting(k, v string) error {
 		if !validColor(v) {
 			return verr("%s must be a #rrggbb hex string", k)
 		}
-	case "level_colors":
+	case "urgency_colors", "importance_colors":
 		var cols []string
 		if err := json.Unmarshal([]byte(v), &cols); err != nil || len(cols) != LevelCount {
-			return verr("level_colors must be a JSON array of %d colours", LevelCount)
+			return verr("%s must be a JSON array of %d colours", k, LevelCount)
 		}
 		for _, c := range cols {
 			if c != "" && !validColor(c) {
-				return verr("level_colors entries must be #rrggbb or empty")
+				return verr("%s entries must be #rrggbb or empty", k)
 			}
 		}
 	case "date_warn_days", "date_alert_days":

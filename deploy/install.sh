@@ -45,7 +45,7 @@ else
     VERSION=$(cd "$REPO_DIR" && git describe --tags --always --dirty 2>/dev/null || echo dev)
     log "building planner $VERSION with $("$GO" version)"
     BIN_SRC="$TMP/planner"
-    (cd "$REPO_DIR" && CGO_ENABLED=0 "$GO" build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$BIN_SRC" .)
+    (cd "$REPO_DIR" && CGO_ENABLED=0 "$GO" build -trimpath -ldflags "-s -w -X main.build=$VERSION" -o "$BIN_SRC" .)
 fi
 
 "$BIN_SRC" -version >/dev/null || die "$BIN_SRC does not run on this machine"
@@ -105,7 +105,7 @@ if [[ -z "$host" || "$host" == "0.0.0.0" || "$host" == "[::]" || "$host" == "::"
 fi
 
 echo
-echo "planner $("$BIN_DST" -version | awk '{print $2}') is running."
+echo "$("$BIN_DST" -version) is running."
 echo "  URL:       http://$host:$port/"
 echo "  Config:    $ENV_DST   (edit, then: systemctl restart planner)"
 echo "  Database:  $STATE_DIR/planner.db"

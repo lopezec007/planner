@@ -86,6 +86,13 @@ const actions = {
 
 // ---------------------------------------------------------------- render
 
+/** "v0.9.0" with the release date (and build) on mouseover. */
+function versionBadge() {
+  const v = state.version || {};
+  const title = v.version ? `Version ${v.version}, released ${v.date}${v.build && v.build !== 'dev' ? ` (build ${v.build})` : ''}` : '';
+  return el('span', { class: 'version', id: 'app-version', title }, v.version ? `v${v.version}` : '');
+}
+
 function setActiveNav(page) {
   for (const a of document.querySelectorAll('#nav a')) a.classList.toggle('active', a.dataset.page === page);
 }
@@ -94,7 +101,7 @@ function render() {
   const page = route();
   setActiveNav(page);
   if (page === 'settings') {
-    toolbar.replaceChildren();
+    toolbar.replaceChildren(el('div', { class: 'spacer' }), versionBadge());
     renderSettings(main, { reload });
     return;
   }
@@ -137,6 +144,7 @@ function render() {
   } else {
     st.view = 'table';
   }
+  toolbar.append(versionBadge());
 
   // ---- content ----
   let currentGroups = def.groups();

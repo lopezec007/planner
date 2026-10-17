@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 const weekday = (ymd) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).getDay(); };
 
 test.afterEach(async ({ request }) => {
-  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d', date_warn_days: '7', date_alert_days: '0', level_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]' } });
+  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d', date_warn_days: '7', date_alert_days: '0', urgency_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]', importance_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]' } });
 });
 
 test('settings page hosts the users list and the old #/users route still works', async ({ page }) => {
@@ -92,38 +92,47 @@ test('highlight colours and date windows come from settings', async ({ page, req
   expect(await g2.locator('.date .hl-alert').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(17, 34, 51)');
 });
 
-test('urgency/importance colour ramp: per-value colours and presets', async ({ page, request }) => {
+test('urgency and importance have their own colour ramps, with presets', async ({ page, request }) => {
   await page.goto('/');
   const gutters = page.locator('.row.task', { hasText: 'Clean gutters' }); // urgency 7, importance 4
   await expect(gutters.locator('.num').nth(0).locator('.hl-level')).toHaveCount(1);
   await expect(gutters.locator('.num').nth(1).locator('.hl-level')).toHaveCount(0);
 
-  // Colour value 4 and clear value 7 through the API.
-  const ramp = ['', '', '', '', '#123456', '', '', '', '#f5a524', '#e5484d', '#e5484d'];
-  await request.patch('/api/settings', { data: { level_colors: JSON.stringify(ramp) } });
+  // Importance ramp: colour value 4; urgency ramp: clear value 7. They are independent.
+  const imp = ['', '', '', '', '#123456', '', '', '', '#f5a524', '#e5484d', '#e5484d'];
+  const urg = ['', '', '', '', '', '', '#f5a524', '', '#f5a524', '#e5484d', '#e5484d'];
+  await request.patch('/api/settings', { data: { importance_colors: JSON.stringify(imp), urgency_colors: JSON.stringify(urg) } });
   await page.reload();
   const g2 = page.locator('.row.task', { hasText: 'Clean gutters' });
   await expect(g2.locator('.num').nth(0).locator('.hl-level')).toHaveCount(0);
-  const imp = g2.locator('.num').nth(1).locator('.hl-level');
-  await expect(imp).toHaveCount(1);
-  expect(await imp.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(18, 52, 86)');
+  const impCell = g2.locator('.num').nth(1).locator('.hl-level');
+  await expect(impCell).toHaveCount(1);
+  expect(await impCell.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(18, 52, 86)');
 
-  // The settings page shows the ramp; a preset fills every value.
+  // The settings page shows both ramps; a preset fills one of them.
   await page.goto('/#/settings');
-  await expect(page.locator('.ramp-cell')).toHaveCount(11);
-  await expect(page.locator('.ramp-cell').nth(4)).not.toHaveClass(/empty/);
-  await expect(page.locator('.ramp-cell').nth(7)).toHaveClass(/empty/);
-  await page.locator('#setting-level-preset').selectOption('traffic');
-  await expect(page.locator('.ramp-cell.empty')).toHaveCount(0);
-  const saved = JSON.parse((await (await request.get('/api/settings')).json()).level_colors);
-  expect(saved[0]).toBe('#2e9e4f');
-  expect(saved[10]).toBe('#b71c1c');
-  // Clearing one value and changing one swatch persist.
-  await page.locator('[data-clear="0"]').click();
-  await expect(page.locator('.ramp-cell').nth(0)).toHaveClass(/empty/);
-  await page.locator('input[data-level="10"]').fill('#000000');
-  await expect.poll(async () => JSON.parse((await (await request.get('/api/settings')).json()).level_colors)[10]).toBe('#000000');
-  expect(JSON.parse((await (await request.get('/api/settings')).json()).level_colors)[0]).toBe('');
+  await expect(page.locator('.ramp')).toHaveCount(2);
+  const urgRamp = page.locator('.ramp[data-ramp=urgency_colors]');
+  const impRamp = page.locator('.ramp[data-ramp=importance_colors]');
+  await expect(urgRamp.locator('.ramp-cell')).toHaveCount(11);
+  await expect(impRamp.locator('.ramp-cell').nth(4)).not.toHaveClass(/unset/);
+  await expect(urgRamp.locator('.ramp-cell').nth(7)).toHaveClass(/unset/);
+  // Coloured and uncoloured samples share the same vertical position and size.
+  const boxes = await urgRamp.locator('.ramp-sample').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { top: r.top, height: r.height }; }));
+  expect(Math.max(...boxes.map((r) => r.top)) - Math.min(...boxes.map((r) => r.top))).toBeLessThan(1);
+  expect(Math.max(...boxes.map((r) => r.height)) - Math.min(...boxes.map((r) => r.height))).toBeLessThan(1);
+  await page.locator('#setting-urgency-preset').selectOption('traffic');
+  await expect(page.locator('.ramp[data-ramp=urgency_colors] .ramp-cell.unset')).toHaveCount(0);
+  let settings = await (await request.get('/api/settings')).json();
+  expect(JSON.parse(settings.urgency_colors)[0]).toBe('#2e9e4f');
+  expect(JSON.parse(settings.importance_colors)).toEqual(imp); // untouched
+  // Clearing one value and changing one swatch persist, on the right ramp.
+  await page.locator('.ramp[data-ramp=urgency_colors] [data-clear="0"]').click();
+  await expect(page.locator('.ramp[data-ramp=urgency_colors] .ramp-cell').nth(0)).toHaveClass(/unset/);
+  await page.locator('.ramp[data-ramp=importance_colors] input[data-level="10"]').fill('#000000');
+  await expect.poll(async () => JSON.parse((await (await request.get('/api/settings')).json()).importance_colors)[10]).toBe('#000000');
+  settings = await (await request.get('/api/settings')).json();
+  expect(JSON.parse(settings.urgency_colors)[0]).toBe('');
   await page.goto('/');
-  await expect(page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.num .hl-level')).toHaveCount(2); // 7 and 4 both coloured now
+  await expect(page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.num .hl-level')).toHaveCount(2); // 7 (traffic) and 4 (importance ramp)
 });

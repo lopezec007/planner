@@ -1,8 +1,9 @@
 .PHONY: build test e2e run clean dist install
 
-# Version string baked into the binary (see `planner -version`).
+# Git description baked into the binary as the build id (see `planner -version`);
+# the semantic version itself lives in main.go.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS  = -X main.version=$(VERSION)
+LDFLAGS  = -X main.build=$(VERSION)
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o planner .

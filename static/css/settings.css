@@ -15,7 +15,14 @@ p.settings-help { margin: 0 0 8px; }
 .settings-preview { font-variant-numeric: tabular-nums; }
 .ramp { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 4px; }
 .ramp-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 56px; }
-.ramp-sample { min-width: 28px; text-align: center; font-variant-numeric: tabular-nums; }
-.ramp-cell.empty .ramp-sample { color: var(--fg-muted); border: 1px dashed var(--border); border-radius: 5px; padding: 2px 7px; }
+/* Coloured and uncoloured samples share one box (same padding, border and
+   line-height) so they sit on the same baseline. */
+.ramp-sample {
+  display: inline-block; min-width: 28px; box-sizing: border-box; text-align: center;
+  font-variant-numeric: tabular-nums; font-weight: 700; line-height: 1.2;
+  padding: 2px 7px; border: 1px solid transparent; border-radius: 5px;
+}
+.ramp-cell.unset .ramp-sample { color: var(--fg-muted); border-color: var(--border); border-style: dashed; }
+.ramp { margin-bottom: 14px; }
 .ramp-cell input[type="color"] { width: 40px; height: 24px; padding: 1px; }
 .ramp-clear { font-size: 11px; padding: 1px 6px; }

@@ -95,6 +95,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .nav a.active { background: var(--accent); color: var(--accent-fg); }
 .toolbar { display: flex; gap: 8px; align-items: center; flex: 1; flex-wrap: wrap; }
 .toolbar .spacer { flex: 1; }
+.toolbar .version { color: var(--fg-muted); font-size: 12px; font-family: var(--mono); padding: 0 4px; cursor: help; }
 .toolbar .group { display: flex; gap: 0; }
 .toolbar .group button { border-radius: 0; }
 .toolbar .group button:first-child { border-radius: var(--radius) 0 0 var(--radius); }

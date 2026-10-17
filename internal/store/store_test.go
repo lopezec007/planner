@@ -295,15 +295,26 @@ func TestSettings(t *testing.T) {
 	if st["week_start"] != "1" || st["color_task"] != "#123456" || st["color_ongoing"] != SettingDefaults["color_ongoing"] {
 		t.Fatalf("updated: %v", st)
 	}
-	for _, bad := range []map[string]string{{"week_start": "7"}, {"color_project": "blue"}, {"nope": "x"}, {"level_colors": `["#fff"]`}, {"level_colors": `["x","","","","","","","","","",""]`}, {"date_alert_days": "x"}, {"hl_warn_color": ""}} {
+	for _, bad := range []map[string]string{{"week_start": "7"}, {"color_project": "blue"}, {"nope": "x"}, {"urgency_colors": `["#fff"]`}, {"importance_colors": `["x","","","","","","","","","",""]`}, {"date_alert_days": "x"}, {"hl_warn_color": ""}} {
 		var ve *ValidationError
 		if _, err := s.UpdateSettings(bad); !errors.As(err, &ve) {
 			t.Fatalf("%v: expected validation error, got %v", bad, err)
 		}
 	}
-	st, err = s.UpdateSettings(map[string]string{"level_colors": `["#000000","","","","","","","","","","#ffffff"]`})
-	if err != nil || st["level_colors"] != `["#000000","","","","","","","","","","#ffffff"]` {
-		t.Fatalf("level_colors: %v %v", st["level_colors"], err)
+	st, err = s.UpdateSettings(map[string]string{"urgency_colors": `["#000000","","","","","","","","","","#ffffff"]`})
+	if err != nil || st["urgency_colors"] != `["#000000","","","","","","","","","","#ffffff"]` || st["importance_colors"] != DefaultRamp {
+		t.Fatalf("ramps: %v %v", st, err)
+	}
+	// A legacy single ramp is copied to both on migration.
+	if _, err := s.db.Exec(`DELETE FROM settings; INSERT INTO settings (key, value) VALUES ('level_colors', '["#111111","","","","","","","","","",""]')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = s.Settings()
+	if st["urgency_colors"] != `["#111111","","","","","","","","","",""]` || st["importance_colors"] != st["urgency_colors"] {
+		t.Fatalf("legacy ramp migration: %v", st)
 	}
 	// Clearing a colour restores "no tint".
 	st, _ = s.UpdateSettings(map[string]string{"color_task": ""})

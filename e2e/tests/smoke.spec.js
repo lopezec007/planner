@@ -58,3 +58,19 @@ test('backlog, ideas and everything pages', async ({ page }) => {
   expect(await page.locator('.row.task').count()).toBeGreaterThanOrEqual(17);
   await expect(page.locator('.toolbar button[data-view]')).toHaveCount(3);
 });
+
+test('the version badge shows the semantic version with the release date on hover', async ({ page, request }) => {
+  const v = await (await request.get('/api/version')).json();
+  expect(v.version).toMatch(/^\d+\.\d+\.\d+$/);
+  expect(v.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  await page.goto('/');
+  const badge = page.locator('#app-version');
+  await expect(badge).toHaveText(`v${v.version}`);
+  await expect(badge).toHaveAttribute('title', new RegExp(`Version ${v.version.replace(/\./g, '\\.')}, released ${v.date}`));
+  // Sits to the right of the view picker.
+  const group = await page.locator('.toolbar .group').boundingBox();
+  const b = await badge.boundingBox();
+  expect(b.x).toBeGreaterThan(group.x + group.width);
+  await page.goto('/#/settings');
+  await expect(page.locator('#app-version')).toHaveText(`v${v.version}`);
+});

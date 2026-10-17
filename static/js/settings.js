@@ -24,18 +24,20 @@ const RAMP_PRESETS = {
   none: { label: 'None', colors: ['', '', '', '', '', '', '', '', '', '', ''] },
 };
 
-function currentRamp() {
+function currentRamp(key) {
   try {
-    const r = JSON.parse(state.settings.level_colors || '[]');
+    const r = JSON.parse(state.settings[key] || '[]');
     if (Array.isArray(r) && r.length === 11) return r;
   } catch {}
   return RAMP_PRESETS.classic.colors.slice();
 }
 
-function levelRamp(ctx) {
-  const ramp = currentRamp();
-  const saveRamp = () => save({ level_colors: JSON.stringify(ramp) }, ctx);
-  const preset = el('select', { id: 'setting-level-preset', 'aria-label': 'Colour ramp preset' },
+/** One colour ramp (urgency or importance): a preset dropdown and 11 cells. */
+function levelRamp(ctx, key, label) {
+  const ramp = currentRamp(key);
+  const saveRamp = () => save({ [key]: JSON.stringify(ramp) }, ctx);
+  const id = `setting-${key.replace('_colors', '')}-preset`;
+  const preset = el('select', { id, 'aria-label': `${label} colour ramp preset` },
     el('option', { value: '' }, 'Apply a preset…'));
   for (const [k, p] of Object.entries(RAMP_PRESETS)) preset.append(el('option', { value: k }, p.label));
   preset.addEventListener('change', () => {
@@ -43,19 +45,26 @@ function levelRamp(ctx) {
     ramp.splice(0, ramp.length, ...RAMP_PRESETS[preset.value].colors);
     saveRamp();
   });
-  const cells = el('div', { class: 'ramp' });
+  const cells = el('div', { class: 'ramp', dataset: { ramp: key } });
   ramp.forEach((c, i) => {
-    const swatch = el('input', { type: 'color', value: c || '#888888', 'aria-label': `Colour for ${i}`, dataset: { level: i } });
+    const swatch = el('input', { type: 'color', value: c || '#888888', 'aria-label': `${label} colour for ${i}`, dataset: { level: i } });
     swatch.addEventListener('change', () => { ramp[i] = swatch.value; saveRamp(); });
     const sample = el('span', { class: 'ramp-sample ' + (c ? 'hl-level' : ''), style: c ? { background: c, color: contrastText(c) } : {} }, String(i));
     const clear = el('button', { type: 'button', class: 'ramp-clear', title: 'No highlight for this value', disabled: c ? null : true, dataset: { clear: i } }, 'none');
     clear.addEventListener('click', () => { ramp[i] = ''; saveRamp(); });
-    cells.append(el('div', { class: 'ramp-cell' + (c ? '' : ' empty') }, sample, swatch, clear));
+    cells.append(el('div', { class: 'ramp-cell' + (c ? '' : ' unset') }, sample, swatch, clear));
   });
   return [
-    el('p', { class: 'settings-help' }, 'Each urgency and importance value gets its own colour (or none). Pick a preset to fill them all, then adjust any value.'),
-    el('div', { class: 'settings-row' }, el('label', { for: 'setting-level-preset' }, 'Urgency / importance'), preset),
+    el('div', { class: 'settings-row' }, el('label', { for: id }, label), preset),
     cells,
+  ];
+}
+
+function levelRamps(ctx) {
+  return [
+    el('p', { class: 'settings-help' }, 'Each urgency and importance value gets its own colour (or none). Pick a preset to fill a ramp, then adjust any value.'),
+    ...levelRamp(ctx, 'urgency_colors', 'Urgency'),
+    ...levelRamp(ctx, 'importance_colors', 'Importance'),
   ];
 }
 
@@ -115,7 +124,7 @@ function highlightRows(ctx) {
     el('p', { class: 'settings-help' }, 'End dates within the given number of calendar days of today are highlighted. Alert takes precedence over warn. Use -1 to disable a rule.'),
     row('hl_warn_color', 'End date warn', 'date_warn_days', 'days'),
     row('hl_alert_color', 'End date alert', 'date_alert_days', 'days (0 = today or overdue)'),
-    ...levelRamp(ctx),
+    ...levelRamps(ctx),
   ];
 }
 

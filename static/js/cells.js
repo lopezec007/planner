@@ -264,13 +264,15 @@ export function dateControl(item, field, saver, { highlight = false } = {}) {
   return cell;
 }
 
-/** Colour for an urgency/importance value from the level_colors ramp, or ''. */
-export function levelColor(n) {
+/** Colour for an urgency or importance value from that field's ramp, or ''. */
+export function levelColor(n, field) {
   if (n == null) return '';
-  let ramp = state.settings?._levelColors;
+  const key = `${field}_colors`;
+  const cache = state.settings?._ramps || (state.settings ? (state.settings._ramps = {}) : {});
+  let ramp = cache[key];
   if (!ramp) {
-    try { ramp = JSON.parse(state.settings?.level_colors || '[]'); } catch { ramp = []; }
-    if (state.settings) state.settings._levelColors = ramp;
+    try { ramp = JSON.parse(state.settings?.[key] || '[]'); } catch { ramp = []; }
+    cache[key] = ramp;
   }
   return ramp[n] || '';
 }
@@ -279,7 +281,7 @@ export function levelColor(n) {
  *  (1-9, 0 = 10, ` = 0) and saves immediately. */
 export function levelControl(item, field, saver) {
   if (item.type !== 'task') return el('div', { class: 'num' });
-  const color = isClosed(item.status) ? '' : levelColor(item[field]);
+  const color = isClosed(item.status) ? '' : levelColor(item[field], field);
   const inp = el('input', {
     type: 'number', name: field, min: 0, max: 10, class: `cell-input num-input ${color ? 'hl-level' : ''}`,
     value: item[field] ?? '', 'aria-label': field,
