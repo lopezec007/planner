@@ -38,6 +38,132 @@ test('matrix view plots one point per visible task and no parents', async ({ pag
   expect(errors).toEqual([]);
 });
 
+// Helpers for reading the plot's pixel geometry.
+async function dotsByKey(page) {
+  const dots = await page.locator('.matrix-plot .pt').evaluateAll((els) => els.map((g) => {
+    const d = g.querySelector('.dot');
+    return { key: g.dataset.key, cx: +d.getAttribute('cx'), cy: +d.getAttribute('cy') };
+  }));
+  return Object.fromEntries(dots.map((d) => [d.key, d]));
+}
+async function plotGeometry(page) {
+  return page.evaluate(() => {
+    const svg = document.querySelector('.matrix-plot');
+    const panel = document.querySelector('.split .panel');
+    const box = svg.getBoundingClientRect();
+    const rect = (sel) => {
+      const r = svg.querySelector(sel);
+      return { x: +r.getAttribute('x'), y: +r.getAttribute('y'), w: +r.getAttribute('width'), h: +r.getAttribute('height') };
+    };
+    const ticks = [...svg.querySelectorAll('.ticks text')]
+      .filter((t) => t.getAttribute('text-anchor') === 'middle') // x-axis ticks
+      .map((t) => ({ v: +t.textContent, x: +t.getAttribute('x') }));
+    const label = svg.querySelector('.quad-label');
+    const diag = svg.querySelector('.diagonal');
+    return {
+      svg: { x: box.x, y: box.y, width: box.width, height: box.height, attrW: +svg.getAttribute('width'), attrH: +svg.getAttribute('height') },
+      panel: { width: panel.clientWidth, top: panel.getBoundingClientRect().top },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      bg: rect('.plot-bg'), hot: rect('.quad-hot'), cold: rect('.quad-cold'),
+      xTicks: Object.fromEntries(ticks.map((t) => [t.v, t.x])),
+      label: { x: +label.getAttribute('x'), y: +label.getAttribute('y'), anchor: label.getAttribute('text-anchor') },
+      diag: { x1: +diag.getAttribute('x1'), y1: +diag.getAttribute('y1'), x2: +diag.getAttribute('x2'), y2: +diag.getAttribute('y2') },
+    };
+  });
+}
+
+test('x axis is reversed: urgency 10 at the left, 0 at the right; hot quadrant top-left', async ({ page }) => {
+  // Seed data has no urgency-0 task; add one for this test and remove it after.
+  const items = await (await page.request.get('/api/items')).json();
+  const parent = items.find((i) => i.title === 'Maintenance');
+  const created = await (await page.request.post('/api/items', {
+    data: { type: 'task', parent_id: parent.id, title: 'Zero urgency probe', status: 'todo', urgency: 0, importance: 10 },
+  })).json();
+  try {
+    await openMatrix(page);
+    const byKey = await dotsByKey(page);
+    const u10 = byKey['T-6'], u0 = byKey[created.key];
+    expect(u10).toBeTruthy();
+    expect(u0).toBeTruthy();
+    expect(u10.cx).toBeLessThan(u0.cx);
+    // Monotonic: higher urgency is always further left.
+    expect(byKey['T-6'].cx).toBeLessThan(byKey['T-2'].cx); // 10 < 9
+    expect(byKey['T-2'].cx).toBeLessThan(byKey['T-9'].cx); // 9 < 8
+    expect(byKey['T-9'].cx).toBeLessThan(byKey['T-1'].cx); // 8 < 7
+    expect(byKey['T-1'].cx).toBeLessThan(byKey['T-7'].cx); // 7 < 4
+    // Importance is unchanged: higher importance is higher up (smaller cy).
+    expect(u0.cy).toBeLessThan(byKey['T-1'].cy); // importance 10 above 4
+    expect(byKey['T-9'].cy).toBeLessThan(byKey['T-1'].cy); // 9 above 4
+
+    const g = await plotGeometry(page);
+    // Tick labels run 10..0 left to right.
+    for (let v = 1; v <= 10; v++) expect(g.xTicks[v]).toBeLessThan(g.xTicks[v - 1]);
+    // Hot wash occupies the top-left quarter of the frame, cold the bottom-right.
+    expect(g.hot.x).toBeCloseTo(g.bg.x, 3);
+    expect(g.hot.y).toBeCloseTo(g.bg.y, 3);
+    expect(g.hot.w).toBeCloseTo(g.bg.w / 2, 3);
+    expect(g.hot.h).toBeCloseTo(g.bg.h / 2, 3);
+    expect(g.cold.x).toBeCloseTo(g.bg.x + g.bg.w / 2, 3);
+    expect(g.cold.y).toBeCloseTo(g.bg.y + g.bg.h / 2, 3);
+    expect(g.cold.w).toBeCloseTo(g.bg.w / 2, 3);
+    expect(g.cold.h).toBeCloseTo(g.bg.h / 2, 3);
+    // The urgency-10/importance-10 point sits inside the hot wash.
+    expect(u10.cx).toBeGreaterThan(g.hot.x);
+    expect(u10.cx).toBeLessThan(g.hot.x + g.hot.w);
+    expect(u10.cy).toBeGreaterThan(g.hot.y);
+    expect(u10.cy).toBeLessThan(g.hot.y + g.hot.h);
+    // Quadrant label is anchored at the top-left; diagonal runs top-left to bottom-right.
+    expect(g.label.anchor).toBe('start');
+    expect(g.label.x).toBeLessThan(g.bg.x + g.bg.w / 4);
+    expect(g.label.y).toBeLessThan(g.bg.y + g.bg.h / 4);
+    expect(g.diag.x1).toBeCloseTo(g.bg.x, 3);
+    expect(g.diag.y1).toBeCloseTo(g.bg.y, 3);
+    expect(g.diag.x2).toBeCloseTo(g.bg.x + g.bg.w, 3);
+    expect(g.diag.y2).toBeCloseTo(g.bg.y + g.bg.h, 3);
+    // The label of the leftmost point is drawn to its right, so it stays inside the frame.
+    const lblX = await page.locator('.matrix-plot .pt[data-key="T-6"] .label').evaluate((t) => +t.getAttribute('x'));
+    expect(lblX).toBeGreaterThan(u10.cx);
+  } finally {
+    await page.request.delete(`/api/items/${created.id}`);
+  }
+});
+
+test('plot fills the panel width and the remaining viewport height, and follows resizes', async ({ page }) => {
+  await openMatrix(page);
+  const check = async () => {
+    const g = await plotGeometry(page);
+    // Width: the SVG spans the panel. Height: its bottom edge sits ~16px above the viewport bottom.
+    expect(g.svg.attrW).toBe(g.panel.width);
+    expect(Math.abs(g.svg.width - g.panel.width)).toBeLessThanOrEqual(1);
+    expect(g.svg.attrH).toBe(Math.round(g.viewport.height - g.panel.top - 16));
+    expect(Math.abs(g.svg.y + g.svg.height - (g.viewport.height - 16))).toBeLessThanOrEqual(1);
+    // Non-square plot area: each axis uses its own extent, with margins for the labels.
+    expect(g.bg.w).toBeGreaterThan(g.bg.h);
+    expect(g.bg.w).toBeGreaterThan(g.svg.attrW - 80);
+    expect(g.bg.h).toBeGreaterThan(g.svg.attrH - 70);
+    return g;
+  };
+  const small = await check(); // 1500x900 (playwright default for this suite)
+
+  // Larger viewport: both width and height follow.
+  await page.setViewportSize({ width: 2200, height: 1300 });
+  await expect.poll(async () => (await plotGeometry(page)).svg.attrH).toBeGreaterThan(small.svg.attrH + 300);
+  const large = await check();
+  expect(large.svg.attrW).toBeGreaterThan(small.svg.attrW + 300);
+
+  // Height-only change: the panel's width is unchanged, so only the window
+  // resize listener can trigger this redraw.
+  await page.setViewportSize({ width: 2200, height: 1000 });
+  await expect.poll(async () => (await plotGeometry(page)).svg.attrH).toBeLessThan(large.svg.attrH - 200);
+  const shorter = await check();
+  expect(shorter.svg.attrW).toBe(large.svg.attrW);
+
+  // Points move with the plot but stay ordered.
+  const byKey = await dotsByKey(page);
+  expect(byKey['T-6'].cx).toBeLessThan(byKey['T-7'].cx);
+  expect(byKey['T-9'].cy).toBeLessThan(byKey['T-1'].cy);
+});
+
 test('points with identical values are jittered apart', async ({ page }) => {
   await openMatrix(page);
   // Seed data has three visible tasks at urgency 5 / importance 5
@@ -108,7 +234,7 @@ test('hovering a point shows a tooltip and highlights the table row', async ({ p
   const row = page.locator('.row.task[data-id]', { hasText: 'Order countertops' });
   await expect(row).toHaveClass(/matrix-hover/);
 
-  // Move onto a point near the top-right edge: tooltip flips to stay in view.
+  // Move onto the point in the top-left corner (urgency 10): tooltip stays in view.
   await page.locator('.matrix-plot .pt[data-key="T-6"]').hover();
   await expect(tip).toContainText('Pay insurance');
   await expect(tip).toContainText('Blocked');

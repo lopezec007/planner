@@ -5,6 +5,12 @@
 //   handle  the table handle from renderTable: rows [{ item, el, kind }]
 //   ctx     { rerender() }
 //
+// Classic Eisenhower orientation: urgency runs 10 on the left to 0 on the
+// right, importance 0 at the bottom to 10 at the top, so the urgent-and-
+// important quadrant is top-left. The plot fills the panel's width and the
+// remaining viewport height, so the plot area is generally not square; each
+// axis uses its own pixel extent and is redrawn on panel or window resize.
+//
 // Only rows of kind 'task' are plotted (parents have no urgency/importance).
 // Tasks sharing the same (urgency, importance) are spread evenly around the
 // grid point, ordered by id, so the layout is deterministic and every point
@@ -23,8 +29,8 @@ const MAX = 10;
 const MARGIN = { top: 14, right: 18, bottom: 46, left: 52 };
 const POINT_R = 5;
 const HIT_R = 13;
-const MIN_PLOT = 280;
-const MAX_PLOT = 720;
+const MIN_PLOT = 320;      // minimum plot-area width and height (px)
+const BOTTOM_GAP = 16;     // viewport margin kept below the plot (px)
 
 function svg(tag, attrs = {}, ...children) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -52,15 +58,19 @@ function jitterRadius(n, cell) {
   return Math.max(POINT_R + 4, Math.min(r, cell * 0.4));
 }
 
-/** Pixel scales for the plot area; half a cell of inner padding keeps points
- *  at 0 and 10 clear of the frame. */
+/** Pixel scales for the plot area; half a cell of inner padding on each axis
+ *  keeps points at 0 and 10 clear of the frame. The x axis is reversed
+ *  (urgency 10 at the left). `cell` is the smaller of the two cell sizes and
+ *  is what jitter is based on, so clusters stay inside a cell on both axes. */
 function scales(plotW, plotH) {
-  const cell = plotW / (MAX + 1);
-  const pad = cell / 2;
+  const cellX = plotW / (MAX + 1);
+  const cellY = plotH / (MAX + 1);
+  const padX = cellX / 2;
+  const padY = cellY / 2;
   return {
-    cell, pad,
-    sx: (u) => MARGIN.left + pad + (u / MAX) * (plotW - 2 * pad),
-    sy: (i) => MARGIN.top + pad + ((MAX - i) / MAX) * (plotH - 2 * pad),
+    cell: Math.min(cellX, cellY),
+    sx: (u) => MARGIN.left + padX + ((MAX - u) / MAX) * (plotW - 2 * padX),
+    sy: (i) => MARGIN.top + padY + ((MAX - i) / MAX) * (plotH - 2 * padY),
   };
 }
 
@@ -179,24 +189,27 @@ function createTooltip(panel) {
 
 // ---------------------------------------------------------------- plot
 
-function drawPlot(root, rows, width) {
-  const plotW = Math.max(MIN_PLOT, Math.min(MAX_PLOT, width - MARGIN.left - MARGIN.right));
-  const plotH = plotW; // square plot area: both axes span 0..10
+function drawPlot(root, rows, width, height) {
+  const plotW = Math.max(MIN_PLOT, width - MARGIN.left - MARGIN.right);
+  const plotH = Math.max(MIN_PLOT, height - MARGIN.top - MARGIN.bottom);
   const W = plotW + MARGIN.left + MARGIN.right;
   const H = plotH + MARGIN.top + MARGIN.bottom;
-  const { sx, sy, pad } = scales(plotW, plotH);
-  const x0 = sx(0) - pad, x1 = sx(MAX) + pad, y0 = sy(0) + pad, y1 = sy(MAX) - pad;
-  const half = (x1 - x0) / 2;
+  const { sx, sy } = scales(plotW, plotH);
+  // Frame edges: x0/x1 are left/right, y0/y1 bottom/top (SVG y grows downward).
+  const x0 = MARGIN.left, x1 = MARGIN.left + plotW, y0 = MARGIN.top + plotH, y1 = MARGIN.top;
+  const halfW = plotW / 2, halfH = plotH / 2;
 
   const node = svg('svg', { class: 'matrix-plot', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Urgency versus importance matrix' });
 
-  // Quadrants: the top-right (urgent and important) gets a faint wash; the
-  // others are told apart by a faint diagonal and the emphasised midlines.
+  // Quadrants: the top-left (urgent and important) gets a faint red wash and
+  // the bottom-right (neither) a grey one; the other two are told apart by
+  // the urgency == importance diagonal (top-left to bottom-right) and the
+  // emphasised midlines.
   const mid = MAX / 2;
   node.append(svg('rect', { class: 'plot-bg', x: x0, y: y1, width: plotW, height: plotH }));
-  node.append(svg('rect', { class: 'quad quad-hot', x: sx(mid), y: y1, width: half, height: half }));
-  node.append(svg('rect', { class: 'quad quad-cold', x: x0, y: sy(mid), width: half, height: half }));
-  node.append(svg('line', { class: 'diagonal', x1: x0, y1: y0, x2: x1, y2: y1 }));
+  node.append(svg('rect', { class: 'quad quad-hot', x: x0, y: y1, width: halfW, height: halfH }));
+  node.append(svg('rect', { class: 'quad quad-cold', x: sx(mid), y: sy(mid), width: halfW, height: halfH }));
+  node.append(svg('line', { class: 'diagonal', x1: x0, y1: y1, x2: x1, y2: y0 }));
 
   const grid = svg('g', { class: 'grid' });
   const ticks = svg('g', { class: 'ticks' });
@@ -212,7 +225,7 @@ function drawPlot(root, rows, width) {
   node.append(
     svg('text', { class: 'axis-label', x: sx(mid), y: H - 8, 'text-anchor': 'middle' }, 'Urgency'),
     svg('text', { class: 'axis-label', x: 14, y: sy(mid), 'text-anchor': 'middle', transform: `rotate(-90 14 ${sy(mid)})` }, 'Importance'),
-    svg('text', { class: 'quad-label', x: x1 - 6, y: y1 + 14, 'text-anchor': 'end' }, 'urgent & important'),
+    svg('text', { class: 'quad-label', x: x0 + 6, y: y1 + 14, 'text-anchor': 'start' }, 'urgent & important'),
   );
 
   const points = svg('g', { class: 'points' });
@@ -227,9 +240,12 @@ function drawPlot(root, rows, width) {
       style: color ? `--pt: ${color}` : null,
     });
     // Label sits on the outward side of the jitter so clustered keys fan
-    // out; near the right edge it flips to the left of the point.
+    // out. Near the right edge (low urgency) it flips to the left of the
+    // point; near the left edge (high urgency) it is forced to the right.
     const vertical = p.angle !== 0 && Math.abs(Math.cos(p.angle)) <= 0.2;
-    const left = Math.cos(p.angle) < -0.2 || p.x + POINT_R + 40 > x1;
+    const nearRight = p.x + POINT_R + 40 > x1;
+    const nearLeft = p.x - POINT_R - 40 < x0;
+    const left = nearRight || (Math.cos(p.angle) < -0.2 && !nearLeft);
     const lx = vertical ? p.x : p.x + (left ? -(POINT_R + 4) : POINT_R + 4);
     const ly = vertical ? p.y + (Math.sin(p.angle) < 0 ? -(POINT_R + 5) : POINT_R + 5) : p.y;
     g.append(
@@ -253,8 +269,9 @@ function drawPlot(root, rows, width) {
 // ---------------------------------------------------------------- entry
 
 export function renderMatrix(panel, handle, ctx) {
-  // Tear down any observer left by a previous render into this panel.
+  // Tear down the observer and window listener left by a previous render.
   if (panel._matrixObserver) { panel._matrixObserver.disconnect(); panel._matrixObserver = null; }
+  if (panel._matrixResize) { window.removeEventListener('resize', panel._matrixResize); panel._matrixResize = null; }
   for (const r of handle.rows) r.el.classList.remove('matrix-hover');
 
   const rows = handle.rows.filter((r) => r.kind === 'task' && r.item.type === 'task');
@@ -269,15 +286,24 @@ export function renderMatrix(panel, handle, ctx) {
   wrap.append(plotRoot);
   const tip = createTooltip(panel);
 
-  let drawnWidth = -1;
+  let drawnW = -1, drawnH = -1;
   let pts = [];
   const byId = new Map();
 
+  /** Height available to the SVG: from the panel's top edge (in document
+   *  coordinates, so scrolling does not change it) to the viewport bottom. */
+  function availableHeight() {
+    const top = panel.getBoundingClientRect().top + window.scrollY;
+    return Math.round(window.innerHeight - top - BOTTOM_GAP);
+  }
+
   function draw() {
     const width = panel.clientWidth || 600;
-    if (width === drawnWidth) return;
-    drawnWidth = width;
-    pts = drawPlot(plotRoot, rows, width);
+    const height = availableHeight();
+    if (width === drawnW && height === drawnH) return;
+    drawnW = width;
+    drawnH = height;
+    pts = drawPlot(plotRoot, rows, width, height);
     byId.clear();
     for (const p of pts) {
       byId.set(p.item.id, p);
@@ -304,9 +330,14 @@ export function renderMatrix(panel, handle, ctx) {
     r.el.addEventListener('pointerleave', () => byId.get(r.item.id)?.g.classList.remove('hover'));
   }
 
+  // Panel width changes come through the ResizeObserver; a viewport height
+  // change alone does not resize the panel, so it needs the window listener.
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(() => draw());
     ro.observe(panel);
     panel._matrixObserver = ro;
   }
+  const onResize = () => draw();
+  window.addEventListener('resize', onResize);
+  panel._matrixResize = onResize;
 }

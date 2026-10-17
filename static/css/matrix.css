@@ -1,4 +1,8 @@
-/* Matrix view (see js/matrix.js): urgency x importance scatter. */
+/* Matrix view (see js/matrix.js): urgency x importance scatter, Eisenhower
+   orientation (urgency 10 at the left, importance 10 at the top). The SVG is
+   sized by the script to the panel width and remaining viewport height; the
+   max-width below only scales it down when the panel is narrower than the
+   plot's minimum size. */
 
 .matrix {
   --pt-neutral: var(--fg-muted);
