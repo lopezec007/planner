@@ -9,9 +9,11 @@
 //
 // Layout: a horizontally scrollable canvas (native scrollbar, shift+wheel,
 // drag to pan) covering a wide date range; zoom (ctrl+wheel or the +/- buttons)
-// changes the pixels-per-day scale. The axis occupies the same height as the
-// table's two header rows so the two tiers line up with them. View state
-// (zoom and scroll position) is kept in memory for the session only.
+// changes the pixels-per-day scale. The axis is a single strip the same height
+// as the table's header row: minor ticks (days/weeks/months) are labelled in
+// place and the major unit (month/year) is a sticky label that stays at the
+// left edge while scrolling. View state (zoom and scroll position) is kept in
+// memory for the session only.
 
 import { el } from './util.js';
 import { state, isClosed, parseYMD, today, daysFromToday } from './state.js';
@@ -166,10 +168,8 @@ export function renderPlan(panel, handle, ctx) {
     canvas.replaceChildren();
     const canvasTop = canvas.getBoundingClientRect().top;
     const tableRect = table?.getBoundingClientRect();
-    // The table has a single header row (made taller in title-only mode);
-    // the two axis tiers split it in half.
-    const axisH = headers.length ? headers[headers.length - 1].getBoundingClientRect().bottom - canvasTop : 52;
-    const tier1 = headers.length >= 2 ? headers[0].getBoundingClientRect().bottom - canvasTop : axisH / 2;
+    // The axis is exactly as tall as the table's header row.
+    const axisH = headers.length ? headers[headers.length - 1].getBoundingClientRect().bottom - canvasTop : 28;
     const bodyTop = axisH;
     let height = tableRect ? tableRect.bottom - 1 - canvasTop : axisH;
     const W = Math.ceil(rangeDays * view.ppd);
@@ -238,22 +238,23 @@ export function renderPlan(panel, handle, ctx) {
     // Axis background (level with the header rows) and tick columns.
     const [majorU, minorU] = tickUnits(ppd);
     canvas.dataset.units = `${majorU}/${minorU}`;
-    canvas.append(el('div', { class: 'plan-axis', style: { height: `${axisH}px` } },
-      el('div', { class: 'plan-axis-tier', style: { height: `${tier1}px` } })));
+    canvas.append(el('div', { class: 'plan-axis', style: { height: `${axisH}px` } }));
     const tickEls = [];
+    const labelStyle = { height: `${axisH}px`, lineHeight: `${axisH}px` };
+    // Minor ticks first so the major (sticky) labels paint over them.
+    for (const t of ticks(minorU, base, rangeStart, rangeEnd)) {
+      const left = x(t.start), w = (t.end - t.start) * ppd;
+      tickEls.push(el('div', {
+        class: `plan-tick minor ${minorU}`,
+        style: { left: `${left}px`, width: `${w}px`, top: '0px' },
+      }, el('span', { class: 'plan-tick-label', style: labelStyle }, tickLabel(minorU, t.date, w))));
+    }
     for (const t of ticks(majorU, base, rangeStart, rangeEnd)) {
       const left = x(t.start), w = (t.end - t.start) * ppd;
       tickEls.push(el('div', {
         class: `plan-tick major ${majorU}`,
         style: { left: `${left}px`, width: `${w}px`, top: '0px' },
-      }, el('span', { class: 'plan-tick-label', style: { height: `${tier1}px`, lineHeight: `${tier1}px` } }, tickLabel(majorU, t.date, w))));
-    }
-    for (const t of ticks(minorU, base, rangeStart, rangeEnd)) {
-      const left = x(t.start), w = (t.end - t.start) * ppd;
-      tickEls.push(el('div', {
-        class: `plan-tick minor ${minorU}`,
-        style: { left: `${left}px`, width: `${w}px`, top: `${tier1}px` },
-      }, el('span', { class: 'plan-tick-label', style: { height: `${axisH - tier1}px`, lineHeight: `${axisH - tier1}px` } }, tickLabel(minorU, t.date, w))));
+      }, el('span', { class: 'plan-tick-label', style: labelStyle }, tickLabel(majorU, t.date, w))));
     }
     canvas.append(el('div', { class: 'plan-rows', style: { top: `${bodyTop}px` } }, ...bands));
     canvas.append(...tickEls);

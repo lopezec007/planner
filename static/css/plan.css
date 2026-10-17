@@ -29,7 +29,7 @@
   min-width: 100%;
 }
 
-/* ---- axis (level with the table header rows) ---- */
+/* ---- axis (a single strip level with the table header row) ---- */
 .plan-axis {
   position: absolute;
   top: 0;
@@ -40,7 +40,6 @@
   z-index: 1;
   pointer-events: none;
 }
-.plan-axis-tier { border-bottom: 1px solid var(--border); }
 
 .plan-tick {
   position: absolute;
@@ -61,13 +60,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.plan-tick.major { z-index: 3; }
 .plan-tick.major .plan-tick-label {
   display: inline-block;
   vertical-align: top;
+  max-width: none;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  position: sticky;   /* keep a wide month's label in view while scrolling */
+  color: var(--fg);
+  background: var(--bg-alt); /* covers the minor labels it slides over */
+  position: sticky;   /* keep the current month/year in view while scrolling */
   left: 0;
 }
 .plan-tick.minor .plan-tick-label { font-weight: 500; padding: 0 4px; }
