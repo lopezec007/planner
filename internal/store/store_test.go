@@ -311,3 +311,77 @@ func TestSettings(t *testing.T) {
 		t.Fatal("clear failed")
 	}
 }
+
+func TestDependencies(t *testing.T) {
+	s := openTest(t)
+	o := mustCreate(t, s, TypeOngoing, Patch{Title: str("bucket")})
+	p1 := mustCreate(t, s, TypeProject, Patch{Title: str("p1")})
+	p2 := mustCreate(t, s, TypeProject, Patch{Title: str("p2")})
+	t1 := mustCreate(t, s, TypeTask, Patch{Title: str("t1"), ParentID: i64(o.ID)})
+	t2 := mustCreate(t, s, TypeTask, Patch{Title: str("t2"), ParentID: i64(p1.ID)})
+
+	must := func(a, b int64) {
+		t.Helper()
+		if err := s.AddDependency(a, b); err != nil {
+			t.Fatalf("add %d->%d: %v", a, b, err)
+		}
+	}
+	must(t1.ID, p1.ID) // task blocks project
+	must(p1.ID, t2.ID) // project blocks task
+	must(p1.ID, p2.ID) // project blocks project
+	must(t2.ID, p2.ID) // task blocks project (second blocker of p2)
+	must(t1.ID, p1.ID) // duplicate is fine
+
+	var ve *ValidationError
+	bad := []struct {
+		name string
+		a, b int64
+	}{
+		{"self", t1.ID, t1.ID},
+		{"ongoing", o.ID, t1.ID},
+		{"mutual", p1.ID, t1.ID},
+		{"cycle", p2.ID, t1.ID},
+		{"missing", 999, t1.ID},
+	}
+	for _, c := range bad {
+		if err := s.AddDependency(c.a, c.b); !errors.As(err, &ve) {
+			t.Errorf("%s: expected validation error, got %v", c.name, err)
+		}
+	}
+
+	got, _ := s.GetItem(p2.ID)
+	if len(got.BlockedBy) != 2 || got.BlockedBy[0] != p1.ID || got.BlockedBy[1] != t2.ID || len(got.Blocks) != 0 {
+		t.Fatalf("p2 deps: %+v", got)
+	}
+	got, _ = s.GetItem(p1.ID)
+	if len(got.Blocks) != 2 || len(got.BlockedBy) != 1 {
+		t.Fatalf("p1 deps: %+v", got)
+	}
+	items, _ := s.ListItems()
+	for _, it := range items {
+		if it.ID == t1.ID && (len(it.Blocks) != 1 || it.Blocks[0] != p1.ID) {
+			t.Fatalf("t1 from list: %+v", it)
+		}
+	}
+
+	// Deleting an item hides its edges; removing an edge is idempotent.
+	if err := s.DeleteItem(t2.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.GetItem(p2.ID)
+	if len(got.BlockedBy) != 1 {
+		t.Fatalf("p2 after delete: %+v", got.BlockedBy)
+	}
+	if err := s.RemoveDependency(p1.ID, p2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveDependency(p1.ID, p2.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.GetItem(p2.ID)
+	if len(got.BlockedBy) != 0 {
+		t.Fatalf("p2 after remove: %+v", got.BlockedBy)
+	}
+	// With the edge gone, the reverse direction is allowed.
+	must(p2.ID, p1.ID)
+}

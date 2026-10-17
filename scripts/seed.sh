@@ -26,18 +26,26 @@ post /api/items "{\"type\":\"task\",\"parent_id\":$MAINT,\"title\":\"Replace HVA
 post /api/items "{\"type\":\"task\",\"parent_id\":$MAINT,\"title\":\"Service lawnmower\",\"status\":\"backlog\",\"urgency\":2,\"importance\":3}" >/dev/null
 post /api/items "{\"type\":\"task\",\"parent_id\":$MAINT,\"title\":\"Fix fence post\",\"status\":\"done\",\"owner_id\":$SAM,\"urgency\":5,\"importance\":5}" >/dev/null
 post /api/items "{\"type\":\"task\",\"parent_id\":$MAINT,\"title\":\"Install smart thermostat\",\"status\":\"idea\",\"urgency\":1,\"importance\":6}" >/dev/null
-post /api/items "{\"type\":\"task\",\"parent_id\":$FIN,\"title\":\"Pay insurance\",\"status\":\"todo\",\"owner_id\":$SAM,\"assignee_id\":$SAM,\"end_date\":\"$(today -2)\",\"end_firm\":true,\"urgency\":10,\"importance\":9,\"blocked\":true,\"description\":\"Waiting on renewal quote.\"}" >/dev/null
-post /api/items "{\"type\":\"task\",\"parent_id\":$FIN,\"title\":\"Review budget\",\"status\":\"in-progress\",\"owner_id\":$SAM,\"start_date\":\"$(today -5)\",\"start_firm\":true,\"urgency\":4,\"importance\":8}" >/dev/null
+INSUR=$(post /api/items "{\"type\":\"task\",\"parent_id\":$FIN,\"title\":\"Pay insurance\",\"status\":\"todo\",\"owner_id\":$SAM,\"assignee_id\":$SAM,\"end_date\":\"$(today -2)\",\"end_firm\":true,\"urgency\":10,\"importance\":9,\"blocked\":true,\"description\":\"Waiting on renewal quote.\"}" | id)
+BUDGET=$(post /api/items "{\"type\":\"task\",\"parent_id\":$FIN,\"title\":\"Review budget\",\"status\":\"in-progress\",\"owner_id\":$SAM,\"start_date\":\"$(today -5)\",\"start_firm\":true,\"urgency\":4,\"importance\":8}" | id)
 
 post /api/items "{\"type\":\"task\",\"parent_id\":$KITCHEN,\"title\":\"Demo old cabinets\",\"status\":\"done\",\"assignee_id\":$EVAN,\"start_date\":\"$(today -20)\",\"start_firm\":true,\"end_date\":\"$(today -15)\",\"end_firm\":true,\"urgency\":8,\"importance\":8}" >/dev/null
-post /api/items "{\"type\":\"task\",\"parent_id\":$KITCHEN,\"title\":\"Order countertops\",\"status\":\"in-progress\",\"assignee_id\":$SAM,\"end_date\":\"$(today 6)\",\"urgency\":8,\"importance\":9,\"description\":\"Quartz, *white with grey veining*.\"}" >/dev/null
-post /api/items "{\"type\":\"task\",\"parent_id\":$KITCHEN,\"title\":\"Electrical rough-in\",\"status\":\"todo\",\"start_date\":\"$(today 2)\",\"end_date\":\"$(today 9)\",\"urgency\":6,\"importance\":7}" >/dev/null
-post /api/items "{\"type\":\"task\",\"parent_id\":$KITCHEN,\"title\":\"Paint walls\",\"status\":\"backlog\",\"start_date\":\"$(today 30)\",\"urgency\":3,\"importance\":4}" >/dev/null
+COUNTER=$(post /api/items "{\"type\":\"task\",\"parent_id\":$KITCHEN,\"title\":\"Order countertops\",\"status\":\"in-progress\",\"assignee_id\":$SAM,\"end_date\":\"$(today 6)\",\"urgency\":8,\"importance\":9,\"description\":\"Quartz, *white with grey veining*.\"}" | id)
+ELEC=$(post /api/items "{\"type\":\"task\",\"parent_id\":$KITCHEN,\"title\":\"Electrical rough-in\",\"status\":\"todo\",\"start_date\":\"$(today 2)\",\"end_date\":\"$(today 9)\",\"urgency\":6,\"importance\":7}" | id)
+PAINT=$(post /api/items "{\"type\":\"task\",\"parent_id\":$KITCHEN,\"title\":\"Paint walls\",\"status\":\"backlog\",\"start_date\":\"$(today 30)\",\"urgency\":3,\"importance\":4}" | id)
 post /api/items "{\"type\":\"task\",\"parent_id\":$KITCHEN,\"title\":\"Choose backsplash\",\"status\":\"cancelled\",\"urgency\":2,\"importance\":2}" >/dev/null
 post /api/items "{\"type\":\"task\",\"parent_id\":$GARDEN,\"title\":\"Buy seeds\",\"status\":\"todo\",\"assignee_id\":$ALEX,\"end_date\":\"$(today 14)\",\"urgency\":5,\"importance\":5}" >/dev/null
 post /api/items "{\"type\":\"task\",\"parent_id\":$GARDEN,\"title\":\"Build raised beds\",\"status\":\"todo\",\"start_date\":\"$(today 20)\",\"start_firm\":true,\"urgency\":4,\"importance\":7}" >/dev/null
 post /api/items "{\"type\":\"task\",\"parent_id\":$TAXES,\"title\":\"Gather W-2s\",\"status\":\"todo\",\"urgency\":5,\"importance\":9}" >/dev/null
 post /api/items "{\"type\":\"task\",\"parent_id\":$SOLAR,\"title\":\"Get quotes\",\"status\":\"idea\",\"urgency\":1,\"importance\":5}" >/dev/null
 post /api/items "{\"type\":\"task\",\"parent_id\":$SHED,\"title\":\"Buy paint\",\"status\":\"done\",\"urgency\":5,\"importance\":5}" >/dev/null
+
+# Dependencies (blocker -> blocked).
+dep() { curl -sS -f -X POST -H 'Content-Type: application/json' "$BASE/api/dependencies" -d "{\"blocker_id\":$1,\"blocked_id\":$2}"; }
+dep $COUNTER $ELEC     # countertops before electrical
+dep $ELEC $PAINT       # electrical before painting
+dep $BUDGET $INSUR     # review budget before paying insurance (open -> Pay insurance stays blocked)
+dep $SHED $GARDEN      # done project blocks a project: no longer locks it
+dep $KITCHEN $GARDEN   # in-progress project blocks Spring garden
 
 echo "seeded $BASE"

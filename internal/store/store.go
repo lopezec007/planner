@@ -91,6 +91,10 @@ type Item struct {
 	// ClosedAt is the timestamp the item most recently entered a closed
 	// status (done/cancelled), or nil if its current status is not closed.
 	ClosedAt *string `json:"closed_at"`
+	// BlockedBy and Blocks list the live items this one depends on / that
+	// depend on it (projects and tasks only).
+	BlockedBy []int64 `json:"blocked_by"`
+	Blocks    []int64 `json:"blocks"`
 }
 
 type StatusChange struct {
@@ -182,6 +186,15 @@ CREATE TABLE IF NOT EXISTS items (
 	deleted_at      TEXT
 );
 CREATE INDEX IF NOT EXISTS items_parent ON items(parent_id);
+
+CREATE TABLE IF NOT EXISTS dependencies (
+	blocker_id INTEGER NOT NULL REFERENCES items(id),
+	blocked_id INTEGER NOT NULL REFERENCES items(id),
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (blocker_id, blocked_id),
+	CHECK (blocker_id <> blocked_id)
+);
+CREATE INDEX IF NOT EXISTS dependencies_blocked ON dependencies(blocked_id);
 
 CREATE TABLE IF NOT EXISTS settings (
 	key   TEXT PRIMARY KEY,
@@ -476,7 +489,34 @@ func scanItem(r scanner) (*Item, error) {
 	it.StartFirm = sfirm != 0
 	it.EndFirm = efirm != 0
 	it.Blocked = blocked != 0
+	it.BlockedBy = []int64{}
+	it.Blocks = []int64{}
 	return &it, nil
+}
+
+// fillDeps attaches dependency ids (between live items only) to the items.
+func (s *Store) fillDeps(items map[int64]*Item) error {
+	rows, err := s.db.Query(`SELECT d.blocker_id, d.blocked_id FROM dependencies d
+		JOIN items a ON a.id = d.blocker_id AND a.deleted_at IS NULL
+		JOIN items b ON b.id = d.blocked_id AND b.deleted_at IS NULL
+		ORDER BY d.created_at, d.blocker_id, d.blocked_id`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a, b int64
+		if err := rows.Scan(&a, &b); err != nil {
+			return err
+		}
+		if it, ok := items[a]; ok {
+			it.Blocks = append(it.Blocks, b)
+		}
+		if it, ok := items[b]; ok {
+			it.BlockedBy = append(it.BlockedBy, a)
+		}
+	}
+	return rows.Err()
 }
 
 // ListItems returns all non-deleted items ordered by (parent, sort_order, id).
@@ -495,7 +535,14 @@ func (s *Store) ListItems() ([]Item, error) {
 		}
 		out = append(out, *it)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]*Item, len(out))
+	for i := range out {
+		byID[out[i].ID] = &out[i]
+	}
+	return out, s.fillDeps(byID)
 }
 
 func (s *Store) GetItem(id int64) (*Item, error) {
@@ -503,7 +550,80 @@ func (s *Store) GetItem(id int64) (*Item, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	return it, err
+	if err != nil {
+		return nil, err
+	}
+	return it, s.fillDeps(map[int64]*Item{it.ID: it})
+}
+
+// ---------------------------------------------------------------- dependencies
+
+// AddDependency records that blocker blocks blocked. Both must be live
+// projects or tasks, distinct, and the edge must not create a cycle (which
+// includes the two items blocking each other).
+func (s *Store) AddDependency(blocker, blocked int64) error {
+	if blocker == blocked {
+		return verr("an item cannot block itself")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range []int64{blocker, blocked} {
+		var typ string
+		err := tx.QueryRow(`SELECT type FROM items WHERE id = ? AND deleted_at IS NULL`, id).Scan(&typ)
+		if errors.Is(err, sql.ErrNoRows) {
+			return verr("item %d does not exist", id)
+		} else if err != nil {
+			return err
+		}
+		if typ == TypeOngoing {
+			return verr("ongoing items cannot take part in dependencies")
+		}
+	}
+	// Cycle check: would blocked (transitively) block blocker?
+	rows, err := tx.Query(`SELECT d.blocker_id, d.blocked_id FROM dependencies d
+		JOIN items a ON a.id = d.blocker_id AND a.deleted_at IS NULL
+		JOIN items b ON b.id = d.blocked_id AND b.deleted_at IS NULL`)
+	if err != nil {
+		return err
+	}
+	next := map[int64][]int64{}
+	for rows.Next() {
+		var a, b int64
+		if err := rows.Scan(&a, &b); err != nil {
+			rows.Close()
+			return err
+		}
+		next[a] = append(next[a], b)
+	}
+	rows.Close()
+	seen := map[int64]bool{blocked: true}
+	queue := []int64{blocked}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur == blocker {
+			return verr("that would create a cycle: the blocked item already blocks the blocker (directly or indirectly)")
+		}
+		for _, n := range next[cur] {
+			if !seen[n] {
+				seen[n] = true
+				queue = append(queue, n)
+			}
+		}
+	}
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO dependencies (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)`, blocker, blocked, now()); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RemoveDependency deletes the edge; it is not an error if it does not exist.
+func (s *Store) RemoveDependency(blocker, blocked int64) error {
+	_, err := s.db.Exec(`DELETE FROM dependencies WHERE blocker_id = ? AND blocked_id = ?`, blocker, blocked)
+	return err
 }
 
 func validDate(d string) bool {

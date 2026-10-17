@@ -38,6 +38,8 @@ func Handler(st *store.Store) http.Handler {
 	mux.HandleFunc("DELETE /api/items/{id}", s.deleteItem)
 	mux.HandleFunc("GET /api/items/{id}/history", s.history)
 	mux.HandleFunc("PUT /api/order", s.reorder)
+	mux.HandleFunc("POST /api/dependencies", s.addDependency)
+	mux.HandleFunc("DELETE /api/dependencies/{blocker}/{blocked}", s.removeDependency)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PATCH /api/settings", s.updateSettings)
 	return mux
@@ -333,6 +335,38 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, h)
+}
+
+// ---------------------------------------------------------------- dependencies
+
+func (s *Server) addDependency(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		BlockerID int64 `json:"blocker_id"`
+		BlockedID int64 `json:"blocked_id"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := s.st.AddDependency(in.BlockerID, in.BlockedID); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) removeDependency(w http.ResponseWriter, r *http.Request) {
+	a, err1 := strconv.ParseInt(r.PathValue("blocker"), 10, 64)
+	b, err2 := strconv.ParseInt(r.PathValue("blocked"), 10, 64)
+	if err1 != nil || err2 != nil {
+		writeErr(w, store.ErrNotFound)
+		return
+	}
+	if err := s.st.RemoveDependency(a, b); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---------------------------------------------------------------- settings

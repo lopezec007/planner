@@ -154,3 +154,29 @@ func TestSettingsEndpoint(t *testing.T) {
 		t.Fatalf("expected 400, got %d", c)
 	}
 }
+
+func TestDependencyEndpoints(t *testing.T) {
+	srv := setup(t)
+	var a, b map[string]any
+	call(t, srv, "POST", "/api/items", map[string]any{"type": "project", "title": "a"}, &a)
+	call(t, srv, "POST", "/api/items", map[string]any{"type": "project", "title": "b"}, &b)
+	if c := call(t, srv, "POST", "/api/dependencies", map[string]any{"blocker_id": a["id"], "blocked_id": b["id"]}, nil); c != 204 {
+		t.Fatalf("add: %d", c)
+	}
+	if c := call(t, srv, "POST", "/api/dependencies", map[string]any{"blocker_id": b["id"], "blocked_id": a["id"]}, nil); c != 400 {
+		t.Fatalf("mutual should be 400, got %d", c)
+	}
+	var got map[string]any
+	call(t, srv, "GET", "/api/items/"+jsonNum(int64(b["id"].(float64))), nil, &got)
+	if bb := got["blocked_by"].([]any); len(bb) != 1 || bb[0].(float64) != a["id"].(float64) {
+		t.Fatalf("blocked_by: %v", got)
+	}
+	path := "/api/dependencies/" + jsonNum(int64(a["id"].(float64))) + "/" + jsonNum(int64(b["id"].(float64)))
+	if c := call(t, srv, "DELETE", path, nil, nil); c != 204 {
+		t.Fatalf("delete: %d", c)
+	}
+	call(t, srv, "GET", "/api/items/"+jsonNum(int64(b["id"].(float64))), nil, &got)
+	if bb := got["blocked_by"].([]any); len(bb) != 0 {
+		t.Fatalf("blocked_by after delete: %v", got)
+	}
+}

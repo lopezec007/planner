@@ -38,6 +38,37 @@ export const STATUS_LABEL = {
 export const isClosed = (status) => status === 'done' || status === 'cancelled';
 export const isParent = (it) => it.type === 'ongoing' || it.type === 'project';
 
+// ---- dependencies ----
+// Items carry blocked_by / blocks (ids of live projects and tasks). An item
+// counts as blocked when its own flag is set or any blocker is still open.
+
+/** Live items that block `it` and are not done/cancelled. */
+export function openBlockers(it) {
+  const out = [];
+  for (const id of it.blocked_by || []) {
+    const b = state.itemsById.get(id);
+    if (b && !isClosed(b.status)) out.push(b);
+  }
+  return out;
+}
+
+/** Effective blocked state: the stored flag (tasks) or any open blocker. */
+export function isBlocked(it) {
+  return !!it.blocked || openBlockers(it).length > 0;
+}
+
+/** All dependency edges among live items as [{ blocker, blocked }] (items). */
+export function dependencyEdges() {
+  const edges = [];
+  for (const it of state.items) {
+    for (const id of it.blocks || []) {
+      const b = state.itemsById.get(id);
+      if (b) edges.push({ blocker: it, blocked: b });
+    }
+  }
+  return edges;
+}
+
 // ---- dates (all in the browser's local timezone) ----
 
 const pad = (n) => String(n).padStart(2, '0');
