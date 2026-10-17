@@ -3,6 +3,7 @@
 // Usage:
 //
 //	planner [-addr :8080] [-db planner.db]
+//	planner -version
 //
 // Environment variables PLANNER_ADDR and PLANNER_DB are used as defaults for
 // the corresponding flags.
@@ -11,10 +12,12 @@ package main
 import (
 	"embed"
 	"flag"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"planner/internal/api"
 	"planner/internal/store"
@@ -22,6 +25,9 @@ import (
 
 //go:embed static
 var staticFS embed.FS
+
+// version is set at build time via -ldflags "-X main.version=...".
+var version = "dev"
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -33,7 +39,23 @@ func envOr(key, def string) string {
 func main() {
 	addr := flag.String("addr", envOr("PLANNER_ADDR", ":8080"), "listen address")
 	dbPath := flag.String("db", envOr("PLANNER_DB", "planner.db"), "path to SQLite database file")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("planner", version)
+		return
+	}
+
+	// SQLite reports a missing parent directory only as a cryptic
+	// "unable to open database file"; check it up front instead.
+	if dir := filepath.Dir(*dbPath); dir != "." {
+		if fi, err := os.Stat(dir); err != nil {
+			log.Fatalf("database directory %s does not exist (create it first): %v", dir, err)
+		} else if !fi.IsDir() {
+			log.Fatalf("database directory %s is not a directory", dir)
+		}
+	}
 
 	st, err := store.Open(*dbPath)
 	if err != nil {
@@ -50,7 +72,7 @@ func main() {
 	mux.Handle("/api/", api.Handler(st))
 	mux.Handle("/", noCache(http.FileServer(http.FS(static))))
 
-	log.Printf("planner listening on %s (db %s)", *addr, *dbPath)
+	log.Printf("planner %s listening on %s (db %s)", version, *addr, *dbPath)
 	if err := http.ListenAndServe(*addr, mux); err != nil {
 		log.Fatal(err)
 	}
