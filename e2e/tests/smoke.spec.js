@@ -20,12 +20,12 @@ test('homepage shows hierarchy with supersede rule and highlighting', async ({ p
   // Blocked row has mask class; overdue end date is red.
   const blocked = page.locator('.row.task', { hasText: 'Pay insurance' });
   await expect(blocked).toHaveClass(/blocked/);
-  await expect(blocked.locator('.hl-red').first()).toBeVisible();
+  await expect(blocked.locator('.hl-alert').first()).toBeVisible();
 
   // Closed items carry no highlighting.
   const done = page.locator('.row.task', { hasText: 'Demo old cabinets' });
   await expect(done).toHaveClass(/closed/);
-  await expect(done.locator('.hl-red, .hl-orange')).toHaveCount(0);
+  await expect(done.locator('.hl-alert, .hl-warn')).toHaveCount(0);
 
   expect(errors).toEqual([]);
 });

@@ -10,7 +10,8 @@ import { renderUsers } from './users.js';
 import { el, toast } from './util.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const DEFAULT_COLORS = { color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad' };
+const DEFAULT_COLORS = { color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d' };
+const DEFAULT_NUMBERS = { level_warn_min: 6, level_alert_min: 9, date_warn_days: 7, date_alert_days: 0 };
 
 async function save(patch, ctx) {
   try {
@@ -50,6 +51,28 @@ function colorRow(key, label, help, ctx) {
     el('span', { class: 'settings-help' }, help));
 }
 
+function numberInput(key, min, max) {
+  const inp = el('input', { type: 'number', id: `setting-${key}`, min, max, value: state.settings[key] ?? DEFAULT_NUMBERS[key], 'aria-label': key });
+  inp.addEventListener('change', () => { if (inp.value !== '') save({ [key]: inp.value }, ctxRef); });
+  return inp;
+}
+let ctxRef = null;
+
+function highlightRows(ctx) {
+  ctxRef = ctx;
+  const row = (key, label, levelKey, dateKey, help) => el('div', { class: 'settings-row settings-hl' },
+    el('label', { for: `setting-${key}` }, label),
+    (() => { const r = colorRow(key, label, '', ctx); r.classList.add('settings-inline'); r.querySelector('label').remove(); return r; })(),
+    el('span', { class: 'settings-preview ' + (key === 'hl_warn_color' ? 'hl-warn' : 'hl-alert') }, 'sample'),
+    el('span', { class: 'settings-help' }, 'urgency/importance from'), numberInput(levelKey, 0, 11),
+    el('span', { class: 'settings-help' }, 'end date within'), numberInput(dateKey, -1, 365), el('span', { class: 'settings-help' }, help));
+  return [
+    el('p', { class: 'settings-help' }, 'Urgency and importance values at or above the threshold, and end dates within the given number of calendar days of today, are highlighted. Alert takes precedence over warn. Use 11 or -1 to disable a rule.'),
+    row('hl_warn_color', 'Warn', 'level_warn_min', 'date_warn_days', 'days'),
+    row('hl_alert_color', 'Alert', 'level_alert_min', 'date_alert_days', 'days (0 = today or overdue)'),
+  ];
+}
+
 export function renderSettings(main, ctx) {
   const usersBox = el('div', { id: 'settings-users' });
   main.replaceChildren(
@@ -61,6 +84,7 @@ export function renderSettings(main, ctx) {
       colorRow('color_project', 'Project rows', '', ctx),
       colorRow('color_task', 'Task rows', 'No tint by default.', ctx),
       colorRow('color_unassigned', 'No assignee', 'Matrix points and Timeline bars of items with no assignee.', ctx)),
+    section('Highlighting', ...highlightRows(ctx)),
     section('Users', usersBox),
   );
   renderUsers(usersBox, ctx);

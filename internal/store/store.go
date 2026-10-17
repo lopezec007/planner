@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -227,6 +228,16 @@ var SettingDefaults = map[string]string{
 	"color_project":    "#5b6cff",
 	"color_task":       "",        // empty = no tint
 	"color_unassigned": "#9aa3ad", // matrix points / timeline bars with no assignee
+	// Highlighting of urgency/importance values and end dates: a "warn" level
+	// and a stronger "alert" level, each with a colour and the values that
+	// trigger it (levels at or above level_*_min; end dates within date_*_days
+	// calendar days of today, where 0 means today or overdue).
+	"hl_warn_color":   "#f5a524",
+	"hl_alert_color":  "#e5484d",
+	"level_warn_min":  "6",
+	"level_alert_min": "9",
+	"date_warn_days":  "7",
+	"date_alert_days": "0",
 }
 
 // Settings returns all settings with defaults applied.
@@ -261,6 +272,18 @@ func validSetting(k, v string) error {
 	case "color_ongoing", "color_project", "color_task", "color_unassigned":
 		if v != "" && !validColor(v) {
 			return verr("%s must be a #rrggbb hex string or empty", k)
+		}
+	case "hl_warn_color", "hl_alert_color":
+		if !validColor(v) {
+			return verr("%s must be a #rrggbb hex string", k)
+		}
+	case "level_warn_min", "level_alert_min":
+		if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 11 {
+			return verr("%s must be 0-11 (11 disables it)", k)
+		}
+	case "date_warn_days", "date_alert_days":
+		if n, err := strconv.Atoi(v); err != nil || n < -1 || n > 365 {
+			return verr("%s must be -1 to 365 (-1 disables it)", k)
 		}
 	default:
 		return verr("unknown setting %q", k)

@@ -21,6 +21,7 @@ const DAY_MS = 86400000;
 const MAX_PPD = 80;        // max pixels per day
 const ZOOM_STEP = 1.35;    // factor per +/- click
 const SHORT_FADE_DAYS = 3; // soft edge width for non-firm dates
+const MISSING_FADE_DAYS = 14; // tail length for a missing start or end date
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -182,7 +183,7 @@ export function renderTimeline(panel, handle, ctx) {
     // Row bands and bars (positions from the rows' real bounding boxes).
     const bands = [];
     const bars = [];
-    const longFade = Math.max(vw * 0.8, 60);
+    const longFade = Math.max(MISSING_FADE_DAYS * ppd, 24); // tail for a missing date
     const shortFade = Math.max(SHORT_FADE_DAYS * ppd, 6);
     for (const r of rows) {
       const it = r.item;

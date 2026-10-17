@@ -42,18 +42,21 @@ export function userChip(id) {
   }, u.name);
 }
 
+// Highlight thresholds come from Settings (see store.SettingDefaults).
+const setting = (k, def) => { const v = Number(state.settings?.[k]); return Number.isFinite(v) ? v : def; };
+
 function levelClass(n) {
   if (n == null) return '';
-  if (n >= 9) return 'hl-red';
-  if (n >= 6) return 'hl-orange';
+  if (n >= setting('level_alert_min', 9)) return 'hl-alert';
+  if (n >= setting('level_warn_min', 6)) return 'hl-warn';
   return '';
 }
 
 function endDateClass(ymd) {
   const d = daysFromToday(ymd);
   if (d == null) return '';
-  if (d <= 0) return 'hl-red';
-  if (d <= 7) return 'hl-orange';
+  if (d <= setting('date_alert_days', 0)) return 'hl-alert';
+  if (d <= setting('date_warn_days', 7)) return 'hl-warn';
   return '';
 }
 

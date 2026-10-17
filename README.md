@@ -36,8 +36,9 @@ the single SQLite file. The directory containing it must already exist.
 5. **Timeline** shows a Gantt chart beside the titles (zoom with the +/−
    buttons or Ctrl+wheel, drag or scroll to pan, Today recentres). **Matrix**
    plots tasks by urgency and importance; hover a point for its description.
-   Settings has the first day of the week and the row tint colours for
-   Ongoing, Project and Task rows.
+   Settings has the first day of the week, the row tint colours for
+   Ongoing, Project and Task rows, and the highlight colours and thresholds
+   for urgency, importance and end dates.
 6. **Backlog** and **Ideas** list items in those statuses; **Everything**
    lists all live items with search and filters.
 7. Deleting hides an item (and its tasks) from the UI; the rows stay in the

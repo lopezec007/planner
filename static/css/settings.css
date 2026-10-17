@@ -1,5 +1,5 @@
 /* styles for the Settings page (see js/settings.js) */
-.settings-section { margin: 0 0 28px; max-width: 760px; }
+.settings-section { margin: 0 0 28px; max-width: 1000px; }
 .settings-section h2 { font-size: 15px; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .settings-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
 .settings-row > label { min-width: 150px; font-weight: 500; }
@@ -8,3 +8,6 @@
 .settings-help { color: var(--fg-muted); font-size: 13px; }
 p.settings-help { margin: 0 0 8px; }
 #settings-users h1, #settings-users h2 { display: none; } /* the section already has a heading */
+.settings-inline { display: inline-flex; margin: 0; }
+.settings-hl input[type="number"] { width: 64px; }
+.settings-preview { font-variant-numeric: tabular-nums; }

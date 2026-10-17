@@ -10,7 +10,7 @@ import { renderTimeline } from './timeline.js';
 import { renderMatrix } from './matrix.js';
 import { renderSettings } from './settings.js';
 import { renderSearch } from './search.js';
-import { el, toast } from './util.js';
+import { el, toast, contrastText } from './util.js';
 import { beginNew, beginEdit, cancelEdit } from './edit.js';
 
 const main = document.getElementById('main');
@@ -56,6 +56,11 @@ function applySettings() {
   root.setProperty('--row-ongoing', s.color_ongoing || 'transparent');
   root.setProperty('--row-project', s.color_project || 'transparent');
   root.setProperty('--row-task', s.color_task || 'transparent');
+  for (const [key, v] of [['warn', s.hl_warn_color], ['alert', s.hl_alert_color]]) {
+    if (!v) continue;
+    root.setProperty(`--hl-${key}`, v);
+    root.setProperty(`--hl-${key}-fg`, contrastText(v));
+  }
 }
 
 // ---------------------------------------------------------------- actions

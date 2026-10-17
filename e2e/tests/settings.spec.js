@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 const weekday = (ymd) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).getDay(); };
 
 test.afterEach(async ({ request }) => {
-  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad' } });
+  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d', level_warn_min: '6', level_alert_min: '9', date_warn_days: '7', date_alert_days: '0' } });
 });
 
 test('settings page hosts the users list and the old #/users route still works', async ({ page }) => {
@@ -74,4 +74,31 @@ test('unassigned items use the no-assignee colour in the matrix, and it is a set
   await page.reload();
   await page.locator('button[data-view=matrix]').click();
   await expect(page.locator('#panel svg g.pt[data-key="T-10"]')).toHaveAttribute('style', /--pt: #ff00ff/);
+});
+
+test('highlight thresholds and colours come from settings', async ({ page, request }) => {
+  await page.goto('/');
+  const gutters = page.locator('.row.task', { hasText: 'Clean gutters' }); // urgency 7, importance 4, ends in 3 days
+  await expect(gutters.locator('.num .hl-warn')).toHaveCount(1);
+  await expect(gutters.locator('.date .hl-warn')).toHaveCount(1);
+  await expect(gutters.locator('.hl-alert')).toHaveCount(0);
+
+  // Lower the alert threshold to 7 and widen the alert date window to 5 days.
+  await request.patch('/api/settings', { data: { level_alert_min: '7', date_alert_days: '5', hl_alert_color: '#112233' } });
+  await page.reload();
+  const g2 = page.locator('.row.task', { hasText: 'Clean gutters' });
+  await expect(g2.locator('.num .hl-alert')).toHaveCount(1);
+  await expect(g2.locator('.date .hl-alert')).toHaveCount(1);
+  expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--hl-alert'))).toBe('#112233');
+  expect(await g2.locator('.date .hl-alert').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(17, 34, 51)');
+
+  // The settings page edits the same values.
+  await page.goto('/#/settings');
+  await expect(page.locator('#setting-level_alert_min')).toHaveValue('7');
+  await page.locator('#setting-level_warn_min').fill('4');
+  await page.locator('#setting-level_warn_min').press('Tab');
+  await page.goto('/');
+  const budget = page.locator('.row.task', { hasText: 'Review budget' }); // urgency 4, importance 8
+  await expect(budget.locator('.num .hl-warn')).toHaveCount(1);  // urgency 4 >= warn 4
+  await expect(budget.locator('.num .hl-alert')).toHaveCount(1); // importance 8 >= alert 7
 });
