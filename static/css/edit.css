@@ -48,16 +48,25 @@
   font-size: 13px;
 }
 .row.editing input[type="date"],
-.edit-detail input[type="date"] { padding: 2px 4px; font-size: 12px; }
+.edit-detail input[type="date"] { padding: 2px 3px; font-size: 12px; }
 .row.editing .num input { text-align: center; padding: 3px 2px; -moz-appearance: textfield; appearance: textfield; }
 .row.editing .num input::-webkit-outer-spin-button,
 .row.editing .num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.row.editing .date-edit { display: flex; flex-direction: column; gap: 2px; }
-.firm-check {
-  display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; color: var(--fg-muted); white-space: nowrap; cursor: pointer;
+.date-edit { display: flex; flex-direction: row; align-items: center; gap: 4px; }
+.date-edit input[type="date"] { flex: 1 1 auto; min-width: 0; }
+/* Firm toggle: a checkbox drawn as a lock icon. */
+input[type="checkbox"].firm-toggle {
+  appearance: none; -webkit-appearance: none;
+  width: 18px; height: 18px; margin: 0; padding: 0; flex: 0 0 auto;
+  border: none; background: transparent; cursor: pointer;
+  font-size: 13px; line-height: 18px; text-align: center; opacity: 0.35;
 }
-.firm-check input { margin: 0; }
+input[type="checkbox"].firm-toggle::after { content: "🔓"; }
+input[type="checkbox"].firm-toggle:checked { opacity: 1; }
+input[type="checkbox"].firm-toggle:checked::after { content: "🔒"; }
+input[type="checkbox"].firm-toggle:hover { opacity: 0.8; }
+input[type="checkbox"].firm-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+.edit-field input[type="checkbox"].firm-toggle { width: 18px; margin: 0; align-self: center; }
 .row.editing .actions { gap: 4px; }
 .row.editing .actions button,
 .edit-detail .actions button { padding: 3px 8px; line-height: 1.2; }

@@ -207,8 +207,18 @@ function field(label, ...controls) {
   return el('label', { class: 'edit-field' }, el('span', { class: 'edit-label' }, label), ...controls);
 }
 
+// The firm checkbox is drawn as a lock icon beside the date (as in view
+// mode): locked = firm, open = flexible. The tooltip explains the state.
 function firmLabel(checkbox) {
-  return el('label', { class: 'firm-check', title: 'Firm date' }, checkbox, ' firm');
+  checkbox.classList.add('firm-toggle');
+  const describe = () => {
+    checkbox.title = checkbox.checked
+      ? 'Firm date: this date will not move. Click to make it flexible.'
+      : 'Flexible date: a best guess that may move. Click to make it firm.';
+  };
+  checkbox.addEventListener('change', describe);
+  describe();
+  return checkbox;
 }
 
 /**
@@ -261,8 +271,8 @@ export function renderEditRows(draft, kind, tableMode, ctx) {
     detailFields.append(field('Owner', ed.owner), field('Assignee', ed.assignee));
     if (type !== 'ongoing') {
       detailFields.append(
-        field('Start', ed.start, firmLabel(ed.startFirm)),
-        field('End', ed.end, firmLabel(ed.endFirm)),
+        field('Start', el('div', { class: 'date-edit' }, ed.start, firmLabel(ed.startFirm))),
+        field('End', el('div', { class: 'date-edit' }, ed.end, firmLabel(ed.endFirm))),
       );
     }
     if (type === 'task') {

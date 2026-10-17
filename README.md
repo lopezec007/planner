@@ -40,7 +40,8 @@ the single SQLite file. The directory containing it must already exist.
    Ongoing, Project and Task rows, and the highlight colours and thresholds
    for urgency, importance and end dates.
 6. **Backlog** and **Ideas** list items in those statuses; **Everything**
-   lists all live items with search and filters.
+   lists all live items with search and filters, which also apply to its
+   Timeline and Matrix views.
 7. Deleting hides an item (and its tasks) from the UI; the rows stay in the
    database and keys are never reused. Each item's status history is kept and
    available at `/api/items/{id}/history`.

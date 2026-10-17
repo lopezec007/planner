@@ -160,5 +160,5 @@ Same as backlog page but for ideas.
 
 #### Everything
 This should display every item that has not been deleted, with the same columns and behaviour as the default
-homepage view.  The "Plan" and "Matrix" views do not apply to this page.  It should additionally offer search and
-filter functionality.
+homepage view, including the "Plan" and "Matrix" views.  It should additionally offer search and filter
+functionality, which also applies to those views.

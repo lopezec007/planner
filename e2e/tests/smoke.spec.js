@@ -54,5 +54,5 @@ test('backlog, ideas and everything pages', async ({ page }) => {
   await expect(page.locator('.row.parent', { hasText: 'Solar panels' })).toBeVisible();
   await page.goto('/#/everything');
   expect(await page.locator('.row.task').count()).toBeGreaterThanOrEqual(17);
-  await expect(page.locator('.toolbar button[data-view]')).toHaveCount(0);
+  await expect(page.locator('.toolbar button[data-view]')).toHaveCount(3);
 });

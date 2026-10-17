@@ -65,7 +65,7 @@ export const PAGES = {
   },
   everything: {
     title: 'Everything',
-    views: ['table'],
+    views: ['table', 'timeline', 'matrix'],
     newStatus: 'todo',
     allowNewOngoing: true,
     groups: () => build({

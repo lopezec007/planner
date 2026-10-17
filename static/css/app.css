@@ -118,7 +118,7 @@ main { padding: 12px 16px; flex: 1; }
    One grid template for every row so the shared columns line up across
    parents and tasks. Task key and title cells are indented via padding. */
 .table {
-  --cols: 28px 92px minmax(220px, 1fr) 110px 120px 120px 112px 112px 44px 44px 80px 96px;
+  --cols: 28px 92px minmax(220px, 1fr) 110px 120px 120px 150px 150px 44px 44px 80px 96px;
   --indent: 26px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
