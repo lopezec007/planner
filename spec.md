@@ -50,9 +50,8 @@ closed items for UI purposes.  There are no constraints on how statuses can be c
 A full status history (each status change with its timestamp) is kept for every item.  Rules such as "marked done
 within the last two weeks" are evaluated against this history.
 
-For display purposes, a project's status supersedes the statuses of its child tasks: a task is shown wherever its
-parent project is shown, regardless of the task's own status.  Since an "Ongoing" has no status, tasks under an
-"Ongoing" are displayed according to their own status.
+Filters apply to each item's own status.  A parent (Ongoing or Project) is shown when it matches itself or has a
+matching task; the "Active" template additionally hides parents with no matching tasks.
 
 ### Fields
 All 3 work types should have the following fields:
@@ -88,6 +87,15 @@ to true.  Dependencies are viewed and edited to the right of the description in 
 listing item key and title.  The Timeline draws a line from the blocking item's end to the blocked item's start;
 the Matrix draws subtle lines with arrows pointing from blocker to blocked.
 
+### Undo
+Ctrl+Z (Cmd+Z) undoes the most recent change made in the current browser session, up to the last 20 changes:
+field edits, creations, deletions (restored with their cascaded tasks), reorders and moves, and dependency
+changes.  Inside a text field the browser's own undo applies instead.
+
+### Backups
+Before a schema migration of an existing database, the application writes a copy of the database file next to it
+("<db>.bak-<timestamp>-v<version>") using SQLite's own backup, and logs the path.
+
 ### Deletion
 Items can be deleted from the UI.  A deleted item remains in the database but becomes entirely inaccessible in the UI
 (it does not appear on any page, including the "Everything" page).
@@ -105,11 +113,12 @@ items.
 
 #### Active (default template)
 This should display:
-- All "Ongoing" items, regardless of whether they have any children
 - All to-do and in-progress items
 - All done and cancelled items that were marked "done" or "cancelled" within the last two weeks
+- Their parent "Ongoing"/"Project" rows; parents with no such tasks are hidden
 
-(Subject to the rule that a project's status supersedes its children's for display purposes.)
+Backlogged (or idea) tasks are not shown, whatever their project's status.  The "Backlog" and "Ideas" templates
+keep every "Ongoing" row visible so that backlogged and idea items can be added to them.
 
 ##### Layout
 The items should be presented as a hierarchical list of ongoing/project w/ child tasks.  Parent rows (ongoing and
@@ -120,9 +129,14 @@ All fields except description should be shown as columns, with the following exc
 - "Blocked" is not a column; it is shown only via the row mask described below.
 - "Start Date Firm" and "End Date Firm" are not columns; each is shown only as an icon on its corresponding date.
 
-The description should be made available by an "expand" arrow.  Any number of items may be expanded at once and
-buttons at the top should allow expansion and collapse of all at once.  Items with no description should offer no
-expand/collapse buttons.
+The description (and, for projects and tasks, the dependencies) is made available by an "expand" arrow on every
+row, including "Ongoing" rows.  Any number of items may be expanded at once and buttons at the top allow
+expansion and collapse of all at once.  Independently, a caret on each "Ongoing"/"Project" row collapses its
+tasks (remembered across reloads).
+
+A "Flat" toggle next to "Narrow" removes the "Ongoing"/"Project" rows and shows that information within each task
+row instead, in the column order: Ongoing/Project key, task key, Ongoing/Project title, task title, and then the
+remaining task columns.
 
 The order of items is user-specified via drag-and-drop, and the order is persisted.
 

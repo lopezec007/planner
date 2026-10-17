@@ -17,7 +17,7 @@ test('a missing start fades in from the latest blocker end; a missing end fades 
   try {
     await request.patch(`/api/items/${garden.id}`, { data: { start_date: null } });
     await request.patch(`/api/items/${countertops.id}`, { data: { end_date: null, start_date: ymd(-10) } });
-    await page.goto('/');
+    await page.goto('/#/all');
     await page.locator('button[data-view=timeline]').click();
     const g = await barFor(page, garden.id).boundingBox();
     const k = await barFor(page, kitchen.id).boundingBox();
@@ -36,7 +36,7 @@ test('a missing start fades in from the latest blocker end; a missing end fades 
 test('dragging a timeline bar moves its dates; dragging an edge resizes', async ({ page, request }) => {
   const elec = await byTitle(request, 'Electrical rough-in'); // start +2, end +9
   try {
-    await page.goto('/');
+    await page.goto('/#/all');
     await page.locator('button[data-view=timeline]').click();
     const ppd = parseFloat(await page.locator('.timeline-canvas').getAttribute('data-ppd'));
     // Move the whole bar three days later.
@@ -73,7 +73,7 @@ test('dragging a timeline bar moves its dates; dragging an edge resizes', async 
 test('dragging a matrix point changes urgency and importance', async ({ page, request }) => {
   const gutters = await byTitle(request, 'Clean gutters'); // urgency 7, importance 4
   try {
-    await page.goto('/');
+    await page.goto('/#/all');
     await page.locator('button[data-view=matrix]').click();
     const bg = await page.locator('.matrix-plot .plot-bg').boundingBox();
     const cellX = bg.width / 11, cellY = bg.height / 11;
@@ -101,7 +101,7 @@ test('dates can be created on the timeline (empty rows and faded ends) and remov
   const fence = await byTitle(request, 'Fix fence post');   // done, no dates
   const budget = await byTitle(request, 'Review budget');   // start only
   try {
-    await page.goto('/');
+    await page.goto('/#/all');
     await page.locator('button[data-view=timeline]').click();
     const ppd = parseFloat(await page.locator('.timeline-canvas').getAttribute('data-ppd'));
     const todayX = async () => (await page.locator('.timeline-today').boundingBox()).x;
@@ -149,4 +149,11 @@ test('dates can be created on the timeline (empty rows and faded ends) and remov
     await request.patch(`/api/items/${fence.id}`, { data: { start_date: fence.start_date, end_date: fence.end_date } });
     await request.patch(`/api/items/${budget.id}`, { data: { start_date: budget.start_date, end_date: budget.end_date } });
   }
+});
+
+test('month boundaries paint above week boundaries', async ({ page }) => {
+  await page.goto('/#/all');
+  await page.locator('button[data-view=timeline]').click();
+  const z = async (sel) => Number(await page.locator(sel).first().evaluate((e) => getComputedStyle(e).zIndex));
+  expect(await z('.timeline-tick.month')).toBeGreaterThan(await z('.timeline-tick.week'));
 });

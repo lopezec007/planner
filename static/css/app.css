@@ -122,6 +122,20 @@ main { padding: 12px 16px; flex: 1; }
   overflow-x: auto;
 }
 .table.title-only { --cols: 28px 92px minmax(200px, 1fr); }
+/* Flat: tasks only, with the parent's key and title as leading columns. */
+.table.flat { --cols: 28px 72px 72px minmax(150px, 0.8fr) minmax(200px, 1.2fr) 110px 120px 120px 150px 150px 44px 44px 80px 96px; }
+.table.flat.title-only { --cols: 28px 72px 72px minmax(140px, 0.8fr) minmax(180px, 1.2fr); }
+.table.flat .row.task .key, .table.flat .row.task .title, .table.flat .row.kind-task > .title { padding-left: 8px; }
+.row .parent-ref { color: var(--fg-muted); font-weight: 400; }
+.row.header .parent-ref { font-weight: 600; }
+.table.flat .row.description > .deps-cell { grid-column: 6 / -1; }
+.table.flat.title-only .row.description > .deps-cell { grid-column: 5 / -1; }
+/* Collapse caret on parent rows (hides their tasks). */
+.caret { flex: 0 0 auto; border: none; background: transparent; padding: 0 6px 0 0; color: var(--fg-muted); cursor: pointer; font-size: 11px; line-height: 1; }
+.caret::before { content: "▾"; display: inline-block; }
+.row.collapsed .caret::before { content: "▸"; }
+.caret:hover { color: var(--fg); background: transparent; }
+.task-count { color: var(--fg-muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
 .table-wrap.constrained { max-width: 1500px; margin: 0 auto; }
 .row {
   display: grid;

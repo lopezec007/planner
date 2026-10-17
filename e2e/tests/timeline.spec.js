@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 async function openPlan(page) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto('/');
+  await page.goto('/#/all');
   await expect(page.locator('.row[data-id].parent').first()).toBeVisible();
   await page.locator('.toolbar button[data-view="timeline"]').click();
   await expect(page.locator('#panel .timeline-canvas')).toBeVisible();
@@ -145,7 +145,7 @@ test('scroll position survives re-renders and page changes (today stays in view)
     const t = document.querySelector('.timeline-today').getBoundingClientRect();
     return t.left >= s.left && t.left <= s.right;
   });
-  await page.goto('/');
+  await page.goto('/#/all');
   await page.locator('button[data-view=timeline]').click();
   expect(await todayInView()).toBe(true);
   // Edit and cancel a title beside the timeline (re-renders the timeline twice).

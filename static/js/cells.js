@@ -13,6 +13,7 @@ import { api } from './api.js';
 import { state, STATUSES, STATUS_LABEL, isClosed, isBlocked, openBlockers, daysFromToday } from './state.js';
 import { renderMarkdown } from './markdown.js';
 import { el, toast, contrastText } from './util.js';
+import { pin } from './search.js';
 
 export const CHIP_MAX_USERS = 3;
 
@@ -58,7 +59,8 @@ export async function commitNew(ctx) {
   if (!d) return false;
   if (!d.title.trim()) { toast('A title is required.'); return false; }
   try {
-    await api.createItem(createBody(d));
+    const created = await api.createItem(createBody(d));
+    pin(created.id); // keep it visible even if the current filters would hide it
   } catch (e) {
     toast(e.message);
     return false;
@@ -70,7 +72,9 @@ export async function commitNew(ctx) {
 
 export function makeSaver(item, ctx) {
   if (isDraft(item)) {
-    return async (patch) => { if (draft.item) Object.assign(draft.item, patch); };
+    // Merge into the draft and redraw so the row reflects the choice (e.g.
+    // the picked owner chip); focus is restored by renderTable.
+    return async (patch) => { if (draft.item) { Object.assign(draft.item, patch); ctx.rerender(); } };
   }
   return async (patch) => {
     try {

@@ -37,6 +37,7 @@ func Handler(st *store.Store) http.Handler {
 	mux.HandleFunc("PATCH /api/items/{id}", s.updateItem)
 	mux.HandleFunc("DELETE /api/items/{id}", s.deleteItem)
 	mux.HandleFunc("GET /api/items/{id}/history", s.history)
+	mux.HandleFunc("POST /api/items/{id}/restore", s.restoreItem)
 	mux.HandleFunc("PUT /api/order", s.reorder)
 	mux.HandleFunc("POST /api/dependencies", s.addDependency)
 	mux.HandleFunc("DELETE /api/dependencies/{blocker}/{blocked}", s.removeDependency)
@@ -321,6 +322,24 @@ func (s *Server) deleteItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) restoreItem(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := s.st.RestoreItem(id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	it, err := s.st.GetItem(id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, it)
 }
 
 func (s *Server) history(w http.ResponseWriter, r *http.Request) {

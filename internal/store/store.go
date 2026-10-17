@@ -126,10 +126,21 @@ type Patch struct {
 	Blocked       *bool
 }
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db *sql.DB
+	// LastBackup is the path of the copy taken before migrating an existing
+	// database on Open, or "" if none was needed.
+	LastBackup string
+}
+
+// schemaVersion is stored in PRAGMA user_version. Bump it whenever migrate()
+// gains a step; an existing database below it is backed up before migrating.
+const schemaVersion = 1
 
 // Open opens (creating if necessary) the SQLite database at path and applies
-// the schema.
+// the schema. An existing database whose schema is behind is first copied to
+// "<path>.bak-<timestamp>-v<old version>" with SQLite's own backup (VACUUM
+// INTO), so a migration can always be rolled back.
 func Open(path string) (*Store, error) {
 	dsn := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", path)
 	db, err := sql.Open("sqlite", dsn)
@@ -140,9 +151,33 @@ func Open(path string) (*Store, error) {
 	// avoid SQLITE_BUSY under concurrent requests.
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db}
+
+	var version, tables int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if version < schemaVersion && tables > 0 && path != ":memory:" {
+		backup := fmt.Sprintf("%s.bak-%s-v%d", path, time.Now().Format("20060102-150405"), version)
+		if _, err := db.Exec(`VACUUM INTO ?`, backup); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("backup before migration to %s: %w", backup, err)
+		}
+		s.LastBackup = backup
+	}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
+	}
+	if version < schemaVersion {
+		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion)); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 	return s, nil
 }
@@ -932,6 +967,45 @@ func (s *Store) DeleteItem(id int64) error {
 		return ErrNotFound
 	}
 	if _, err := tx.Exec(`UPDATE items SET deleted_at = ?, updated_at = ? WHERE parent_id = ? AND deleted_at IS NULL`, ts, ts, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// RestoreItem undoes a soft delete of an item and of the children that were
+// deleted in the same cascade. Restoring a task whose parent is deleted is
+// rejected. Restoring a live item is a no-op.
+func (s *Store) RestoreItem(id int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var deletedAt sql.NullString
+	var parent *int64
+	err = tx.QueryRow(`SELECT deleted_at, parent_id FROM items WHERE id = ?`, id).Scan(&deletedAt, &parent)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if !deletedAt.Valid {
+		return nil
+	}
+	if parent != nil {
+		var parentDeleted sql.NullString
+		if err := tx.QueryRow(`SELECT deleted_at FROM items WHERE id = ?`, *parent).Scan(&parentDeleted); err != nil {
+			return err
+		}
+		if parentDeleted.Valid {
+			return verr("cannot restore: its parent is deleted")
+		}
+	}
+	ts := now()
+	if _, err := tx.Exec(`UPDATE items SET deleted_at = NULL, updated_at = ? WHERE id = ?`, ts, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE items SET deleted_at = NULL, updated_at = ? WHERE parent_id = ? AND deleted_at = ?`, ts, id, deletedAt.String); err != nil {
 		return err
 	}
 	return tx.Commit()

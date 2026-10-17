@@ -9,6 +9,10 @@
 //                  (owned by the caller so it survives re-renders)
 //   opts.actions   { onDelete(item), onAddTask(parent), onChanged() } — optional.
 //                  onChanged() reloads data after any save or reorder.
+//   opts.collapsed Set<number> of parent ids whose tasks are hidden (caller-owned)
+//   opts.onCollapse(parentId, collapsed)  called when the caret is clicked
+//   opts.flat      true: no parent rows; each task row carries its parent's
+//                  key and title in extra leading columns
 //
 // Every field is edited in place (see cells.js): there is no edit mode. A
 // single unsaved "new row" (cells.draft) is rendered where it will live and
@@ -23,7 +27,7 @@
 // hidden siblings keep their positions.
 
 import { state, isClosed, isBlocked } from './state.js';
-import { api } from './api.js';
+import { api, group } from './api.js';
 import { el, contrastText, toast } from './util.js';
 import {
   draft, discardNew, commitNew, isDraft, makeSaver,
@@ -38,11 +42,10 @@ export function userChip(id) {
   return el('span', { class: 'chip', style: { background: u.color, color: contrastText(u.color) }, title: u.name }, u.name);
 }
 
-/** Projects and tasks can always be expanded (dependencies live there);
- *  an Ongoing only when it has a description. */
-export function isExpandable(item) {
-  if (isDraft(item)) return true;
-  return item.type !== 'ongoing' || !!item.description?.trim();
+/** Every row can be expanded: the description is edited there (and, for
+ *  projects and tasks, the dependencies). */
+export function isExpandable() {
+  return true;
 }
 
 function toggleCell(item, expanded, onToggle) {
@@ -78,8 +81,9 @@ function actionButtons(item, ctx) {
   return cell;
 }
 
-function headerRow(mode) {
+function headerRow(mode, flat) {
   const row = el('div', { class: 'row header' }, el('div'), el('div'), el('div'));
+  if (flat) row.append(el('div', { class: 'parent-ref' }, 'Ongoing / Project'), el('div', {}, 'Task'));
   if (mode === 'full') {
     row.append(
       el('div', {}, 'Status'), el('div', {}, 'Owner'), el('div', {}, 'Assignee'),
@@ -114,24 +118,48 @@ function keyCell(item) {
 
 // In the title-only table there is no actions column, so the action buttons
 // sit at the right of the title cell (revealed on hover, see edit.css).
-function titleCell(item, mode, ctx, saver) {
-  const cell = el('div', { class: 'title' }, titleControl(item, saver, ctx));
+function titleCell(item, mode, ctx, saver, kind) {
+  const cell = el('div', { class: 'title' });
+  if (kind === 'parent' && !isDraft(item)) {
+    const n = (state.childrenOf.get(item.id) || []).length;
+    const isCollapsed = ctx.collapsed.has(item.id);
+    cell.append(el('button', {
+      type: 'button', class: 'caret', title: isCollapsed ? `Show ${n} task(s)` : 'Hide tasks',
+      'aria-expanded': isCollapsed ? 'false' : 'true', 'aria-label': isCollapsed ? 'Show tasks' : 'Hide tasks',
+      dataset: { collapse: item.id },
+      onClick: (e) => { e.stopPropagation(); ctx.onCollapse(item.id, !isCollapsed); },
+    }));
+  }
+  cell.append(titleControl(item, saver, ctx));
+  if (kind === 'parent' && !isDraft(item) && ctx.collapsed.has(item.id)) {
+    const n = (state.childrenOf.get(item.id) || []).length;
+    if (n) cell.append(el('span', { class: 'task-count', title: `${n} hidden task(s)` }, `(${n})`));
+  }
   if (mode !== 'full') cell.append(actionButtons(item, ctx));
   return cell;
 }
 
-/** One row for either kind; parents simply leave the task-only cells empty. */
+/** One row for either kind; parents simply leave the task-only cells empty.
+ *  In flat mode a task row starts with its parent's key and title. */
 function itemRow(item, kind, mode, expanded, ctx) {
   const saver = makeSaver(item, ctx);
   const dataset = { kind, type: item.type };
   if (isDraft(item)) dataset.editing = 'new';
   else dataset.id = item.id;
   if (kind === 'task' && item.parent_id != null) dataset.parent = item.parent_id;
-  const row = el('div', { class: rowClasses(item, kind, expanded), dataset },
-    toggleCell(item, expanded, ctx.onToggle),
-    keyCell(item),
-    titleCell(item, mode, ctx, saver),
-  );
+  const row = el('div', { class: rowClasses(item, kind, expanded) + (ctx.collapsed.has(item.id) ? ' collapsed' : ''), dataset },
+    toggleCell(item, expanded, ctx.onToggle));
+  if (ctx.flat) {
+    const parent = item.parent_id != null ? state.itemsById.get(item.parent_id) : null;
+    row.append(
+      el('div', { class: 'key parent-ref' }, parent ? parent.key : ''),
+      keyCell(item),
+      el('div', { class: 'title parent-ref', title: parent ? `${parent.key} ${parent.title}` : '' }, parent ? parent.title : ''),
+      titleCell(item, mode, ctx, saver, kind),
+    );
+  } else {
+    row.append(keyCell(item), titleCell(item, mode, ctx, saver, kind));
+  }
   if (mode === 'full') {
     row.append(
       statusControl(item, saver),
@@ -157,8 +185,10 @@ function detailRow(item, kind, ctx) {
   // dependencies sit under the remaining columns (or below, in title-only
   // mode). Not given the kind class itself, so `.row.task` / `.row.parent`
   // only ever match item rows (detail rows contain other items' titles).
-  const row = el('div', { class: `row description kind-${kind}`, dataset },
-    el('div'), el('div'), el('div', { class: 'title' }, descriptionControl(item, saver)));
+  const lead = ctx.flat ? 4 : 2;
+  const row = el('div', { class: `row description kind-${kind}`, dataset });
+  for (let i = 0; i < lead; i++) row.append(el('div'));
+  row.append(el('div', { class: 'title' }, descriptionControl(item, saver)));
   if (deps) row.append(el('div', { class: 'deps-cell' }, deps));
   return row;
 }
@@ -187,15 +217,22 @@ function restoreFocus(container, f) {
 }
 
 export function renderTable(container, opts) {
-  const { groups, mode = 'full', expanded = new Set(), actions } = opts;
+  const { groups, mode = 'full', expanded = new Set(), actions, collapsed = new Set(), flat = false } = opts;
   const handle = { rows: [], rerender: () => renderTable(container, opts) };
 
   const ctx = {
     actions,
+    collapsed,
+    flat,
     rerender: () => handle.rerender(),
     onChanged: async () => { if (actions?.onChanged) await actions.onChanged(); else handle.rerender(); },
     onToggle: (item) => {
       if (expanded.has(item.id)) expanded.delete(item.id); else expanded.add(item.id);
+      handle.rerender();
+    },
+    onCollapse: (id, isCollapsed) => {
+      if (isCollapsed) collapsed.add(id); else collapsed.delete(id);
+      if (opts.onCollapse) opts.onCollapse(id, isCollapsed);
       handle.rerender();
     },
   };
@@ -203,8 +240,8 @@ export function renderTable(container, opts) {
   // A new task row only makes sense under a parent shown on this page.
   if (draft.item && draft.item.type === 'task' && !groups.some((g) => g.parent.id === draft.item.parent_id)) discardNew();
 
-  const table = el('div', { class: `table ${mode === 'title-only' ? 'title-only' : ''}` });
-  table.append(headerRow(mode));
+  const table = el('div', { class: `table ${mode === 'title-only' ? 'title-only' : ''} ${flat ? 'flat' : ''}` });
+  table.append(headerRow(mode, flat));
 
   if (!groups.length && !draft.item) {
     table.append(el('div', { class: 'empty' }, 'Nothing to show.'));
@@ -225,11 +262,12 @@ export function renderTable(container, opts) {
   let captureFocusActive = false;
 
   for (const g of groups) {
-    appendRow(g.parent, 'parent');
-    for (const t of g.tasks) appendRow(t, 'task');
+    if (!flat) appendRow(g.parent, 'parent');
+    const hidden = !flat && collapsed.has(g.parent.id);
+    if (!hidden) for (const t of g.tasks) appendRow(t, 'task');
     if (draft.item && draft.item.type === 'task' && draft.item.parent_id === g.parent.id) appendNewRow('task');
   }
-  if (draft.item && draft.item.type !== 'task') appendNewRow('parent');
+  if (draft.item && draft.item.type !== 'task' && !flat) appendNewRow('parent');
 
   installDragAndDrop(table, ctx);
 
@@ -362,10 +400,12 @@ function installDragAndDrop(table, ctx) {
     }
     ids.splice(idx, 0, d.id);
     try {
-      if (d.kind === 'task' && (item.parent_id ?? null) !== newParent) {
-        await api.updateItem(d.id, { parent_id: newParent });
-      }
-      await api.reorder(ids);
+      await group(`moving ${item.key}`, async () => {
+        if (d.kind === 'task' && (item.parent_id ?? null) !== newParent) {
+          await api.updateItem(d.id, { parent_id: newParent });
+        }
+        await api.reorder(ids);
+      });
       await ctx.onChanged();
     } catch (err) {
       toast(err.message);

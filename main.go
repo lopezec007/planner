@@ -68,6 +68,9 @@ func main() {
 		log.Fatalf("open database %s: %v", *dbPath, err)
 	}
 	defer st.Close()
+	if st.LastBackup != "" {
+		log.Printf("database schema upgraded; a copy of the previous database was saved to %s", st.LastBackup)
+	}
 
 	static, err := fs.Sub(staticFS, "static")
 	if err != nil {

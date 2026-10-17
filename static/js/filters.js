@@ -15,14 +15,13 @@ export function allGroups() {
   return groups;
 }
 
-// Filter templates. `statuses` apply with the "project status supersedes its
-// tasks" rule, `recentDays` also admits items closed within that many days,
-// and `types` restricts item types (Ongoing rows are exempt from the status
-// filter, so Backlog and Ideas exclude them by type unless they have matching
-// tasks).
+// Filter templates. `statuses` apply to each item's own status (Ongoing rows
+// have none and are never excluded by it), `recentDays` also admits items
+// closed within that many days, `types` restricts item types, and
+// `hideEmptyParents` drops Ongoing/Project rows with no matching tasks.
 export const PRESETS = {
-  active: { title: 'Active', statuses: ['todo', 'in-progress'], recentDays: 14, types: [] },
-  backlog: { title: 'Backlog', statuses: ['backlog'], recentDays: 0, types: ['project', 'task'] },
-  ideas: { title: 'Ideas', statuses: ['idea'], recentDays: 0, types: ['project', 'task'] },
+  active: { title: 'Active', statuses: ['todo', 'in-progress'], recentDays: 14, types: [], hideEmptyParents: true },
+  backlog: { title: 'Backlog', statuses: ['backlog'], recentDays: 0, types: [], hideEmptyParents: false },
+  ideas: { title: 'Ideas', statuses: ['idea'], recentDays: 0, types: [], hideEmptyParents: false },
 };
 export const PRESET_ORDER = ['active', 'backlog', 'ideas'];

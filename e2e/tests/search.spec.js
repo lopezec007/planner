@@ -89,14 +89,14 @@ test('type and status filters', async ({ page }) => {
   await page.locator('[data-search-key="type:task"]').click();
   await expect(page.locator('#btn-filters .search-badge')).toHaveCount(0);
 
-  // Status: a project's status supersedes its tasks; tasks under an Ongoing use their own.
+  // Status applies to each item's own status; Ongoing rows are never excluded by it.
   await page.locator('[data-search-key="status:backlog"]').click();
   await expect(parent(page, 'File taxes')).toBeVisible();
-  await expect(task(page, 'Gather W-2s')).toBeVisible();      // todo task under a backlog project
-  await expect(task(page, 'Paint walls')).toHaveCount(0);     // backlog task under an in-progress project
+  await expect(task(page, 'Gather W-2s')).toHaveCount(0);     // todo task under a backlog project
+  await expect(task(page, 'Paint walls')).toBeVisible();      // backlog task under an in-progress project (context parent)
   await expect(task(page, 'Service lawnmower')).toBeVisible(); // backlog task under an Ongoing
   await expect(tasks(page)).toHaveCount(2);
-  await expect(parents(page)).toHaveCount(3); // + both Ongoing rows, which a status filter never excludes
+  await expect(parents(page)).toHaveCount(4); // Maintenance, Finance, File taxes, Kitchen remodel (context)
   await expect(page.locator('#search-count')).toHaveText('5 items match');
 
   // Combine with text search.
@@ -196,10 +196,13 @@ test('the Active / Backlog / Ideas templates set the filters; other criteria sta
   await expect(tasks(page)).toHaveCount(1);
   await expect(task(page, 'Clean gutters')).toBeVisible();
   await page.locator('#search-text').fill('');
-  await expect(parents(page)).toHaveCount(5); // Maintenance, Finance, Kitchen remodel, Spring garden, Repaint shed
-  await expect(task(page, 'Paint walls')).toBeVisible();        // backlog task under an in-progress project
+  await expect(parents(page)).toHaveCount(6); // Maintenance, Finance, Kitchen remodel, Spring garden, File taxes (context for its To-Do task), Repaint shed
+  await expect(task(page, 'Paint walls')).toHaveCount(0);       // backlog task, even under an in-progress project
   await expect(task(page, 'Service lawnmower')).toHaveCount(0); // backlog task under an Ongoing
-  await expect(parent(page, 'File taxes')).toHaveCount(0);
+  await expect(parent(page, 'File taxes')).toBeVisible();      // context for its To-Do task
+  await expect(task(page, 'Gather W-2s')).toBeVisible();
+  await expect(parent(page, 'Solar panels')).toHaveCount(0);    // no active tasks
+  await expect(page.locator('[data-search-key="hideEmpty"]')).toBeChecked();
   // The template is reflected in the Filters panel and can be adjusted there.
   await openFilters(page);
   await expect(page.locator('[data-search-key="status:todo"]')).toHaveClass(/active/);
@@ -207,13 +210,14 @@ test('the Active / Backlog / Ideas templates set the filters; other criteria sta
   await page.locator('[data-search-key="status:backlog"]').click();
   await expect(task(page, 'Service lawnmower')).toBeVisible();
   await expect(page.locator('.search-preset.active')).toHaveCount(0); // no longer exactly a template
-  // Backlog template: backlog status for projects and tasks only.
+  // Backlog template: backlog status; Ongoing rows stay so backlog items can be added to them.
   await page.locator('.search-preset[data-preset=backlog]').click();
   await expect(parent(page, 'File taxes')).toBeVisible();
-  await expect(task(page, 'Gather W-2s')).toBeVisible();        // task of a backlog project (any status)
-  await expect(task(page, 'Service lawnmower')).toBeVisible();  // backlog task under an Ongoing (context parent)
-  await expect(parent(page, 'Finance')).toHaveCount(0);         // Ongoing without backlog tasks
-  await expect(task(page, 'Paint walls')).toHaveCount(0);       // project status supersedes
+  await expect(task(page, 'Gather W-2s')).toHaveCount(0);       // todo task of a backlog project
+  await expect(task(page, 'Service lawnmower')).toBeVisible();  // backlog task under an Ongoing
+  await expect(parent(page, 'Finance')).toBeVisible();          // Ongoing without backlog tasks, still listed
+  await expect(task(page, 'Paint walls')).toBeVisible();        // backlog task under an in-progress project
+  await expect(page.locator('#btn-new-ongoing')).toBeEnabled();
   // Clear = no filters at all.
   await page.locator('#btn-search-clear').click();
   await expect(parents(page)).toHaveCount(7);

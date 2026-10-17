@@ -180,3 +180,21 @@ func TestDependencyEndpoints(t *testing.T) {
 		t.Fatalf("blocked_by after delete: %v", got)
 	}
 }
+
+func TestRestoreEndpoint(t *testing.T) {
+	srv := setup(t)
+	var p map[string]any
+	call(t, srv, "POST", "/api/items", map[string]any{"type": "project", "title": "p"}, &p)
+	id := jsonNum(int64(p["id"].(float64)))
+	call(t, srv, "DELETE", "/api/items/"+id, nil, nil)
+	if c := call(t, srv, "GET", "/api/items/"+id, nil, nil); c != 404 {
+		t.Fatalf("expected 404, got %d", c)
+	}
+	var got map[string]any
+	if c := call(t, srv, "POST", "/api/items/"+id+"/restore", nil, &got); c != 200 || got["title"] != "p" {
+		t.Fatalf("restore: %d %v", c, got)
+	}
+	if c := call(t, srv, "POST", "/api/items/999/restore", nil, nil); c != 404 {
+		t.Fatalf("expected 404, got %d", c)
+	}
+}

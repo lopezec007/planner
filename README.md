@@ -28,7 +28,10 @@ the single SQLite file. The directory containing it must already exist.
    for projects and tasks. They fill the Filters panel, where you can adjust
    them; Clear removes every filter and shows everything. The gear at the
    far left opens Settings, which has an Items button to come back.
-   Click **New Ongoing** or **New Project** to add a blank row;
+   Active hides Ongoing and Project rows without active tasks; Backlog and
+   Ideas keep every Ongoing row so items can be added to them. Filters apply
+   to each item's own status.
+   Click **+ Ongoing** or **+ Project** to add a blank row;
    fill in the title (required) and anything else, then press Enter or the ✓
    button (✕ or Escape discards). Use the **+** on an Ongoing or Project row
    to add a task beneath it.
@@ -41,7 +44,9 @@ the single SQLite file. The directory containing it must already exist.
    toggle firm. In the urgency and importance fields a single key sets the
    value: 1 to 9, 0 for 10 and ` for 0.
 4. Expand a row (▸) for its description and, for projects and tasks, its
-   dependencies: "Blocked by" and "Blocks" lists with a dropdown to add more.
+   dependencies. The caret before an Ongoing or Project title hides its
+   tasks (remembered across reloads). **Flat** shows tasks only, with the
+   parent's key and title as the first columns. Dependencies: "Blocked by" and "Blocks" lists with a dropdown to add more.
    An item blocked by anything still open has its Blocked box locked on. Two
    items cannot block each other, directly or through a chain. The Timeline
    draws lines from a blocker's end to the blocked item's start; the Matrix
@@ -64,6 +69,9 @@ the single SQLite file. The directory containing it must already exist.
 8. Deleting hides an item (and its tasks) from the UI; the rows stay in the
    database and keys are never reused. Each item's status history is kept and
    available at `/api/items/{id}/history`.
+9. **Ctrl+Z** (Cmd+Z) undoes the last change made in this browser session,
+   up to 20 steps: edits, new items, deletions, moves and dependency changes.
+   Inside a text field the browser's own undo applies.
 
 "Today" and all date highlighting use the browser's timezone, not the
 server's. A project's status decides under which filter its tasks appear.
@@ -127,7 +135,10 @@ and restarts the service, leaving the env file and database alone:
     make dist && sudo deploy/install.sh dist/planner
 
 Or by hand: copy the new binary over `/usr/local/bin/planner` and run
-`systemctl restart planner`. Schema migrations run automatically at startup.
+`systemctl restart planner`. Schema migrations run automatically at startup;
+before migrating an existing database the service first writes a copy next to
+it (`planner.db.bak-<timestamp>-v<version>`) and logs the path, so a failed
+upgrade can be rolled back by stopping the service and copying it back.
 
 ### Backup
 
@@ -202,6 +213,7 @@ API summary (all JSON):
     GET    /api/items/{id}            PATCH /api/items/{id}  partial; null clears
     DELETE /api/items/{id}            soft delete (cascades to tasks)
     GET    /api/items/{id}/history    status changes, oldest first
+    POST   /api/items/{id}/restore    undo a soft delete (and its cascaded tasks)
     PUT    /api/order {ids: [...]}    reorder siblings
     POST   /api/dependencies {blocker_id, blocked_id}   400 on self/ongoing/cycle
     DELETE /api/dependencies/{blocker}/{blocked}

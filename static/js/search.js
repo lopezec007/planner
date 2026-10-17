@@ -12,12 +12,12 @@
 // a full re-render that recreates the controls, focus and caret position are
 // saved before each rerender and restored into the freshly mounted controls.
 //
-// Semantics: an item matches on its own fields, except that the status filter
-// uses a task's parent project's status (a project's status supersedes its
-// tasks) and never excludes Ongoing rows (they have no status); `recentDays`
-// also admits items closed within that many days. A parent row is shown if
-// it matches itself or any of its tasks match; only matching tasks are shown.
-// With nothing active the groups pass through unchanged.
+// Semantics: an item matches on its own fields (the status filter never
+// excludes Ongoing rows, which have no status; `recentDays` also admits items
+// closed within that many days). A parent row is shown if it matches itself
+// or any of its tasks match, and only matching tasks are shown;
+// `hideEmptyParents` additionally drops parents with no matching tasks. With
+// nothing active the groups pass through unchanged.
 
 import { state, STATUSES, STATUS_LABEL, isBlocked, isClosed, withinLastDays } from './state.js';
 import { PRESETS, PRESET_ORDER } from './filters.js';
@@ -31,6 +31,7 @@ function emptyCriteria() {
     types: new Set(),
     statuses: new Set(),
     recentDays: 0,  // also match items closed within this many days (0 = off)
+    hideEmptyParents: false, // drop Ongoing/Project rows without matching tasks
     owner: '',      // '' any | 'none' | user id (string)
     assignee: '',   // '' any | 'none' | user id (string)
     blocked: '',    // '' any | 'yes' | 'no'
@@ -47,16 +48,19 @@ function presetCriteria(name) {
     c.statuses = new Set(p.statuses);
     c.recentDays = p.recentDays;
     c.types = new Set(p.types);
+    c.hideEmptyParents = !!p.hideEmptyParents;
   }
   return c;
 }
 
 /** Apply a template's status/recent/type filters, keeping any other criteria. */
 export function applyPreset(name) {
+  pinned.clear();
   const p = presetCriteria(name);
   criteria.statuses = p.statuses;
   criteria.recentDays = p.recentDays;
   criteria.types = p.types;
+  criteria.hideEmptyParents = p.hideEmptyParents;
 }
 
 const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
@@ -65,7 +69,8 @@ const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
 export function currentPreset() {
   for (const k of PRESET_ORDER) {
     const p = presetCriteria(k);
-    if (sameSet(criteria.statuses, p.statuses) && criteria.recentDays === p.recentDays && sameSet(criteria.types, p.types)) return k;
+    if (sameSet(criteria.statuses, p.statuses) && criteria.recentDays === p.recentDays && sameSet(criteria.types, p.types)
+      && criteria.hideEmptyParents === p.hideEmptyParents) return k;
   }
   return null;
 }
@@ -85,6 +90,11 @@ export function typeAllowed(type) {
 
 // ---- module state (survives re-renders) ----
 let criteria = presetCriteria('active'); // the Active view is the starting point
+// Items created in this session stay visible even when the filters would hide
+// them (a new project has no tasks yet, say). Cleared when the criteria are
+// replaced by a template or Clear.
+const pinned = new Set();
+export function pin(id) { pinned.add(id); }
 let panelOpen = false;
 let currentCtx = null;
 let debounceTimer = null;
@@ -95,7 +105,7 @@ let listenersInstalled = false;
 
 export function isActive() {
   const c = criteria;
-  return !!(c.text.trim() || c.types.size || c.statuses.size || c.recentDays || c.owner || c.assignee || c.blocked || c.endAfter || c.endBefore);
+  return !!(c.text.trim() || c.types.size || c.statuses.size || c.recentDays || c.hideEmptyParents || c.owner || c.assignee || c.blocked || c.endAfter || c.endBefore);
 }
 
 function activeFilterCount() {
@@ -130,19 +140,13 @@ function matches(it) {
   return true;
 }
 
-/** Status filter with the supersede rule: a task under a project is judged by
- *  the project's status (and closed_at); Ongoing rows are never excluded. */
+/** Status filter on the item's own status; Ongoing rows are never excluded. */
 function statusMatches(it) {
   const c = criteria;
   if (!c.statuses.size && !c.recentDays) return true;
   if (it.type === 'ongoing') return true;
-  let owner = it;
-  if (it.type === 'task' && it.parent_id != null) {
-    const parent = state.itemsById.get(it.parent_id);
-    if (parent && parent.type === 'project') owner = parent;
-  }
-  if (c.statuses.has(owner.status)) return true;
-  if (c.recentDays && isClosed(owner.status) && withinLastDays(owner.closed_at, c.recentDays)) return true;
+  if (c.statuses.has(it.status)) return true;
+  if (c.recentDays && isClosed(it.status) && withinLastDays(it.closed_at, c.recentDays)) return true;
   return false;
 }
 
@@ -158,8 +162,10 @@ function applyFilter(groups) {
   const out = [];
   let n = 0;
   for (const g of groups) {
-    const parentMatch = matches(g.parent);
-    const tasks = g.tasks.filter(matches);
+    const isPinned = pinned.has(g.parent.id);
+    const parentMatch = matches(g.parent) || isPinned;
+    const tasks = g.tasks.filter((t) => pinned.has(t.id) || matches(t));
+    if (criteria.hideEmptyParents && !tasks.length && !isPinned) continue;
     if (parentMatch || tasks.length) {
       out.push({ parent: g.parent, tasks });
       n += (parentMatch ? 1 : 0) + tasks.length;
@@ -262,6 +268,10 @@ function buildPanel() {
       dateInput('endAfter', 'End on/after', c.endAfter, (v) => { c.endAfter = v; }),
       dateInput('endBefore', 'End on/before', c.endBefore, (v) => { c.endBefore = v; }),
     ),
+    el('label', { class: 'search-check' },
+      el('input', { type: 'checkbox', checked: c.hideEmptyParents ? true : null, dataset: { searchKey: 'hideEmpty' },
+        onChange: (e) => { c.hideEmptyParents = e.target.checked; rerender(); } }),
+      ' Hide Ongoing and Project rows with no matching tasks'),
   );
   return panel;
 }
@@ -301,7 +311,7 @@ export function renderSearch(slot, ctx) {
 
   const clearBtn = el('button', {
     type: 'button', id: 'btn-search-clear', disabled: !isActive(), title: 'Clear search and filters',
-    onClick: () => { clearTimeout(debounceTimer); criteria = emptyCriteria(); rerender(); },
+    onClick: () => { clearTimeout(debounceTimer); criteria = emptyCriteria(); pinned.clear(); rerender(); },
   }, 'Clear');
 
   countEl = el('span', { class: 'search-count', id: 'search-count', 'aria-live': 'polite', hidden: true });

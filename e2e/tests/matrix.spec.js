@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-async function openMatrix(page, path = '/') {
+async function openMatrix(page, path = '/#/all') {
   await page.goto(path);
   await expect(page.locator('.row[data-id].parent').first()).toBeVisible();
   await page.locator('.toolbar button[data-view="matrix"]').click();

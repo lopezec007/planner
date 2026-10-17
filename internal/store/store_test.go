@@ -396,3 +396,89 @@ func TestDependencies(t *testing.T) {
 	// With the edge gone, the reverse direction is allowed.
 	must(p2.ID, p1.ID)
 }
+
+func TestRestoreItem(t *testing.T) {
+	s := openTest(t)
+	p := mustCreate(t, s, TypeProject, Patch{Title: str("P")})
+	t1 := mustCreate(t, s, TypeTask, Patch{Title: str("t1"), ParentID: i64(p.ID)})
+	t2 := mustCreate(t, s, TypeTask, Patch{Title: str("t2"), ParentID: i64(p.ID)})
+	// t2 deleted on its own first, then the project cascades t1.
+	if err := s.DeleteItem(t2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteItem(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	// A task under a deleted parent cannot be restored alone.
+	var ve *ValidationError
+	if err := s.RestoreItem(t1.ID); !errors.As(err, &ve) {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+	if err := s.RestoreItem(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetItem(p.ID); err != nil {
+		t.Fatal("project should be live")
+	}
+	if _, err := s.GetItem(t1.ID); err != nil {
+		t.Fatal("t1 (same cascade) should be live")
+	}
+	if _, err := s.GetItem(t2.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatal("t2 (deleted separately) should stay deleted")
+	}
+	if err := s.RestoreItem(t2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RestoreItem(t2.ID); err != nil {
+		t.Fatal("restoring a live item is a no-op")
+	}
+	if err := s.RestoreItem(999); !errors.Is(err, ErrNotFound) {
+		t.Fatal("missing item")
+	}
+}
+
+func TestBackupBeforeMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "p.db")
+	// A fresh database: no backup.
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.LastBackup != "" {
+		t.Fatalf("fresh database should not be backed up, got %s", s.LastBackup)
+	}
+	mustCreate(t, s, TypeOngoing, Patch{Title: str("keep me")})
+	// Pretend it predates schema versioning.
+	if _, err := s.db.Exec(`PRAGMA user_version = 0`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if s2.LastBackup == "" {
+		t.Fatal("expected a backup before migrating an old database")
+	}
+	b, err := Open(s2.LastBackup)
+	if err != nil {
+		t.Fatalf("backup should be a valid database: %v", err)
+	}
+	defer b.Close()
+	items, _ := b.ListItems()
+	if len(items) != 1 || items[0].Title != "keep me" {
+		t.Fatalf("backup contents: %+v", items)
+	}
+	// Up to date now: reopening takes no further backup.
+	s2.Close()
+	s3, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s3.Close()
+	if s3.LastBackup != "" {
+		t.Fatalf("no backup expected when up to date, got %s", s3.LastBackup)
+	}
+}

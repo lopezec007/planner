@@ -68,3 +68,4 @@
 .search-presets button { padding: 4px 9px; }
 .search-recent { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; color: var(--fg-muted); font-size: 12px; }
 .search-recent input { width: 56px; padding: 2px 4px; font-size: 12px; }
+.search-check { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; }

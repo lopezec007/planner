@@ -43,7 +43,7 @@ const editTitle = async (page, row, value) => {
 const detailOf = (page, row) => row.locator('xpath=following-sibling::*[1]');
 
 test('New project: a blank row with the title focused; Enter saves with the page status', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/#/all');
   await page.locator('#btn-new-project').click();
   await expect(newRow(page)).toBeVisible();
   await expect(newRow(page).locator('input[name=title]')).toBeFocused();
@@ -51,6 +51,7 @@ test('New project: a blank row with the title focused; Enter saves with the page
   // The detail row (description) is open beneath it.
   await expect(page.locator('.row.description[data-editing="new"]')).toBeVisible();
   await pickUser(newRow(page), 'owner', 'Evan');
+  await expect(newRow(page).locator('.chip-pick[data-name=owner]')).toHaveText('Evan'); // the choice is visible before saving
   await newRow(page).locator('input[name=title]').fill('E2E Project');
   await newRow(page).locator('input[name=title]').press('Enter');
   await expect(newRow(page)).toHaveCount(0);
@@ -62,9 +63,9 @@ test('New project: a blank row with the title focused; Enter saves with the page
   expect(it.owner_id).toBe(await userId(request, 'Evan'));
 });
 
-test('New ongoing from the toolbar; Backlog greys out New Ongoing and defaults to backlog; discard works', async ({ page, request }) => {
+test('New ongoing from the toolbar; Backlog defaults to backlog; discard works', async ({ page, request }) => {
   await page.goto('/#/backlog');
-  await expect(page.locator('#btn-new-ongoing')).toBeDisabled(); // greyed out, not hidden
+  await expect(page.locator('#btn-new-ongoing')).toBeEnabled(); // Ongoings are listed under Backlog, so one can be added
   await page.locator('#btn-new-project').click();
   await expect(newRow(page).locator('select[name=status]')).toHaveValue('backlog');
   await page.locator('button[title=Discard]').click();
@@ -89,7 +90,7 @@ test('New ongoing from the toolbar; Backlog greys out New Ongoing and defaults t
 });
 
 test('Saving a new row without a title shows a toast and keeps the row', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/#/all');
   const before = (await items(request)).length;
   await page.locator('#btn-new-project').click();
   await page.locator('button[title=Save]').click();
@@ -100,7 +101,7 @@ test('Saving a new row without a title shows a toast and keeps the row', async (
 });
 
 test('Add task puts a blank task row under the parent and saves it there', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/#/all');
   const project = parentRow(page, 'E2E Project');
   await project.locator('button[title="Add task"]').click();
   await expect(newRow(page)).toHaveAttribute('data-kind', 'task');
@@ -123,7 +124,7 @@ test('Add task puts a blank task row under the parent and saves it there', async
 });
 
 test('Click-to-edit every field type on a task', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/#/all');
   const row = taskRow(page, 'E2E Task A');
   // Title.
   await editTitle(page, row, 'E2E Task A2');
@@ -176,7 +177,7 @@ test('Click-to-edit every field type on a task', async ({ page, request }) => {
 });
 
 test('Clearing fields, Escape reverts, and an empty title is rejected', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/#/all');
   const row = taskRow(page, 'E2E Task A2');
   // Clear the start date by emptying the input.
   await row.locator('.date-text[data-field=start_date]').click();
@@ -210,7 +211,7 @@ test('Clearing fields, Escape reverts, and an empty title is rejected', async ({
 });
 
 test('Description edits in place in the expanded row', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/#/all');
   const row = taskRow(page, 'E2E Task A2');
   await row.locator('.toggle button').click();
   const detail = detailOf(page, row);
@@ -229,7 +230,7 @@ test('Description edits in place in the expanded row', async ({ page, request })
 });
 
 test('Dependencies: add, lock Blocked, reject cycles, remove', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/#/all');
   const a2 = taskRow(page, 'E2E Task A2');
   await a2.locator('.toggle button').click();
   let detail = detailOf(page, a2);
@@ -271,7 +272,7 @@ test('Dependencies: add, lock Blocked, reject cycles, remove', async ({ page, re
 });
 
 test('A project blocked by an open project shows the locked state', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/#/all');
   const garden = parentRow(page, 'Spring garden'); // seeded: blocked by Kitchen remodel (in progress)
   await expect(garden).toHaveClass(/blocked/);
   await expect(garden.locator('input[name=blocked]')).toBeChecked();
@@ -280,7 +281,7 @@ test('A project blocked by an open project shows the locked state', async ({ pag
 });
 
 test('Beside the Timeline only the title is editable in the row; the expanded row still works', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/#/all');
   await page.locator('button[data-view=timeline]').click();
   await expect(page.locator('.table.title-only')).toBeVisible();
   const row = taskRow(page, 'E2E Task B');
@@ -297,7 +298,7 @@ test('With more than three users the picker is a dropdown', async ({ page, reque
   const res = await request.post('/api/users', { data: { name: 'E2E Fourth' } });
   const u = await res.json();
   try {
-    await page.goto('/');
+    await page.goto('/#/all');
     const row = taskRow(page, 'Clean gutters');
     await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('Evan');
     await row.locator('.chip-pick[data-name=owner]').click();
@@ -312,7 +313,11 @@ test('With more than three users the picker is a dropdown', async ({ page, reque
 });
 
 test('Reorder tasks and top-level rows by drag-and-drop; drop into another parent; order persists', async ({ page, request }) => {
-  await page.goto('/');
+  // Source and target of each drag must both be on screen: a scroll between
+  // mouse-down and the first move would start the drag on whatever row ends
+  // up under the pointer.
+  await page.setViewportSize({ width: 1500, height: 1500 });
+  await page.goto('/#/all');
   const p = await byTitle(request, 'E2E Project');
   const taskOrder = async () => (await items(request)).filter((i) => i.parent_id === p.id).map((i) => i.title);
   expect(await taskOrder()).toEqual(['E2E Task A2', 'E2E Task B2', 'E2E Task C']);
@@ -345,7 +350,7 @@ test('Reorder tasks and top-level rows by drag-and-drop; drop into another paren
 });
 
 test('Delete a task and a parent (with its tasks)', async ({ page, request }) => {
-  await page.goto('/');
+  await page.goto('/#/all');
   page.on('dialog', (d) => d.accept());
   await taskRow(page, 'E2E Task C').locator('button[title=Delete]').click();
   await expect(taskRow(page, 'E2E Task C')).toHaveCount(0);

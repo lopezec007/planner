@@ -2,11 +2,10 @@
 //
 // There is one planner page (all items, narrowed by the search/filter
 // controls, which start on the Active template) and a Settings page reached
-// from the gear at the far left. Routes: #/ and #/settings. The old
-// #/active, #/backlog, #/ideas and #/all (or #/everything) apply that filter
-// template and then drop back to #/.
+// from the gear at the far left. Routes: #/ and #/settings; #/active,
+// #/backlog, #/ideas and #/all (or #/everything) apply that filter template.
 
-import { api } from './api.js';
+import { api, undo } from './api.js';
 import { state, load } from './state.js';
 import { allGroups } from './filters.js';
 import { renderTable, expandableIds } from './table.js';
@@ -25,20 +24,26 @@ const VIEWS = ['table', 'timeline', 'matrix'];
 const LEGACY_FILTER_ROUTES = { active: 'active', backlog: 'backlog', ideas: 'ideas', all: 'all', everything: 'all', home: 'active' };
 
 // UI state for the planner page, surviving re-renders.
-const ui = { view: 'table', expanded: new Set(), searchFilter: null };
+const ui = { view: 'table', expanded: new Set(), collapsed: new Set(), searchFilter: null };
 let narrow = false; // table-view width constraint for very wide windows
+let flat = false;   // tasks only, with their parent's key and title as columns
 try {
   ui.view = VIEWS.includes(localStorage.getItem('planner.view')) ? localStorage.getItem('planner.view') : 'table';
   narrow = localStorage.getItem('planner.narrow') === '1';
+  flat = localStorage.getItem('planner.flat') === '1';
+  for (const id of JSON.parse(localStorage.getItem('planner.collapsed') || '[]')) ui.collapsed.add(Number(id));
 } catch {}
 const remember = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 
+// A filter route (#/active, #/backlog, #/ideas, #/all) applies its template
+// once, when first seen; the hash is kept so a reload returns to that view.
+let appliedRoute = null;
 function route() {
   const hash = location.hash.replace(/^#\/?/, '').split('?')[0];
   if (hash === 'settings' || hash === 'users') return { page: 'settings' };
-  if (hash in LEGACY_FILTER_ROUTES) {
+  if (Object.prototype.hasOwnProperty.call(LEGACY_FILTER_ROUTES, hash) && hash !== appliedRoute) {
     applyPreset(LEGACY_FILTER_ROUTES[hash]);
-    history.replaceState(null, '', '#/');
+    appliedRoute = hash;
   }
   return { page: 'main' };
 }
@@ -77,6 +82,8 @@ const actions = {
     if (beginNew({ type, status: newStatus() })) render();
   },
   onAddTask(parent) {
+    ui.collapsed.delete(parent.id); // the new row must be visible
+    remember('planner.collapsed', JSON.stringify([...ui.collapsed]));
     if (beginNew({ type: 'task', parentId: parent.id, status: newStatus() })) render();
   },
   onChanged: reload,
@@ -115,20 +122,25 @@ function render() {
   const ongoingOk = typeAllowed('ongoing');
   toolbar.append(el('button', {
     class: 'primary', type: 'button', id: 'btn-new-ongoing', disabled: ongoingOk ? null : true,
-    title: ongoingOk ? null : 'The current type filter hides Ongoing items; clear it to add one',
+    title: ongoingOk ? 'New ongoing bucket' : 'The current type filter hides Ongoing items; clear it to add one',
     onClick: () => actions.onNew('ongoing'),
-  }, 'New Ongoing'));
-  toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', onClick: () => actions.onNew('project') }, 'New Project'));
+  }, '+ Ongoing'));
+  toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', title: 'New project', onClick: () => actions.onNew('project') }, '+ Project'));
 
   toolbar.append(
-    el('button', { type: 'button', id: 'btn-expand-all', onClick: () => { for (const id of expandableIds(currentGroups)) ui.expanded.add(id); render(); } }, 'Expand all'),
-    el('button', { type: 'button', id: 'btn-collapse-all', onClick: () => { ui.expanded.clear(); render(); } }, 'Collapse all'),
+    el('button', { type: 'button', id: 'btn-expand-all', title: 'Expand every row (descriptions and dependencies)', onClick: () => { for (const id of expandableIds(currentGroups)) ui.expanded.add(id); render(); } }, 'Expand'),
+    el('button', { type: 'button', id: 'btn-collapse-all', title: 'Collapse every row', onClick: () => { ui.expanded.clear(); render(); } }, 'Collapse'),
   );
 
   const searchSlot = el('div', { class: 'search-slot' });
   toolbar.append(searchSlot);
   toolbar.append(el('div', { class: 'spacer' }));
 
+  toolbar.append(el('button', {
+    type: 'button', id: 'btn-flat', class: flat ? 'active' : '', 'aria-pressed': flat ? 'true' : 'false',
+    title: 'Flat: tasks only, with their Ongoing/Project as columns',
+    onClick: () => { flat = !flat; remember('planner.flat', flat ? '1' : '0'); render(); },
+  }, 'Flat'));
   if (ui.view === 'table') {
     toolbar.append(el('button', {
       type: 'button', id: 'btn-narrow', class: narrow ? 'active' : '', title: 'Constrain the table width on wide screens',
@@ -161,7 +173,7 @@ function render() {
   if (ui.view === 'table') {
     const wrap = el('div', { class: `table-wrap ${narrow ? 'constrained' : ''}` });
     main.replaceChildren(...[hint, wrap].filter(Boolean));
-    renderTable(wrap, { groups: currentGroups, mode: 'full', expanded: ui.expanded, actions });
+    renderTable(wrap, { groups: currentGroups, mode: 'full', expanded: ui.expanded, actions, collapsed: ui.collapsed, flat, onCollapse: rememberCollapsed });
   } else {
     const wrap = el('div', { class: 'table-wrap' });
     const panel = el('div', { class: 'panel', id: 'panel' });
@@ -171,9 +183,31 @@ function render() {
       if (ui.view === 'timeline') renderTimeline(panel, handle, ctx);
       else renderMatrix(panel, handle, ctx);
     };
-    renderTable(wrap, { groups: currentGroups, mode: 'title-only', expanded: ui.expanded, actions, onRendered: draw });
+    renderTable(wrap, { groups: currentGroups, mode: 'title-only', expanded: ui.expanded, actions, collapsed: ui.collapsed, flat, onCollapse: rememberCollapsed, onRendered: draw });
   }
 }
+
+const rememberCollapsed = () => remember('planner.collapsed', JSON.stringify([...ui.collapsed]));
+
+// Ctrl+Z / Cmd+Z undoes the last change made in this browser session, unless
+// the focus is in a text field (where the browser's own undo applies).
+document.addEventListener('keydown', async (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'z') return;
+  const a = document.activeElement;
+  const textual = a && (a.tagName === 'TEXTAREA' || a.isContentEditable
+    || (a.tagName === 'INPUT' && ['text', 'search', 'number', 'date', 'color'].includes(a.type)));
+  if (textual) return;
+  e.preventDefault();
+  try {
+    const label = await undo();
+    if (!label) { toast('Nothing to undo'); return; }
+    toast(`Undid ${label}`);
+    await reload();
+  } catch (err) {
+    toast(`Undo failed: ${err.message}`);
+    await reload();
+  }
+});
 
 window.addEventListener('hashchange', () => { discardNew(); render(); });
 reload();

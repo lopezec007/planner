@@ -58,8 +58,8 @@
 }
 .timeline-axis-tier { border-bottom: 1px solid var(--border); }
 .timeline-tick.major { border-left-color: var(--timeline-grid-strong); }
-.timeline-tick.month { border-left-color: var(--timeline-month); }
-.timeline-tick.year { border-left-color: var(--timeline-year); border-left-width: 2px; }
+.timeline-tick.month { border-left-color: var(--timeline-month); z-index: 3; } /* above week lines that coincide */
+.timeline-tick.year { border-left-color: var(--timeline-year); border-left-width: 2px; z-index: 3; }
 .timeline-tick-label {
   display: block;
   box-sizing: border-box;

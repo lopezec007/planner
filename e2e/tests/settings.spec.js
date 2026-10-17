@@ -22,7 +22,7 @@ test('settings page hosts the users list and the old #/users route still works',
   // The filter templates sit beside the Filters button and set the filters.
   await page.locator('.search-preset[data-preset=backlog]').click();
   await expect(page.locator('.search-preset.active')).toHaveText('Backlog');
-  await expect(page.locator('#btn-filters .search-badge')).toHaveText('2'); // status + type
+  await expect(page.locator('#btn-filters .search-badge')).toHaveText('1'); // status
 });
 
 test('week start defaults to Saturday and can be changed', async ({ page }) => {
