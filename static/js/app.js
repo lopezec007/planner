@@ -161,7 +161,7 @@ function render() {
     const panel = el('div', { class: 'panel', id: 'panel' });
     main.replaceChildren(el('div', { class: 'split' }, wrap, panel));
     const draw = (handle) => {
-      const ctx = { rerender: render, page };
+      const ctx = { rerender: render, onChanged: reload, page };
       if (st.view === 'timeline') renderTimeline(panel, handle, ctx);
       else renderMatrix(panel, handle, ctx);
     };

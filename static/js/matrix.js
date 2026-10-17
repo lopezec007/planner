@@ -27,7 +27,8 @@
 
 import { state, isClosed, isBlocked, openBlockers, dependencyEdges, STATUS_LABEL } from './state.js';
 import { renderMarkdown } from './markdown.js';
-import { el } from './util.js';
+import { api } from './api.js';
+import { el, toast } from './util.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const MAX = 10;
@@ -77,6 +78,9 @@ function scales(plotW, plotH) {
     cell: Math.min(cellX, cellY),
     sx: (u) => MARGIN.left + padX + ((MAX - u) / MAX) * (plotW - 2 * padX),
     sy: (i) => MARGIN.top + padY + ((MAX - i) / MAX) * (plotH - 2 * padY),
+    // Inverses (unrounded) for dragging points.
+    ux: (x) => MAX - ((x - MARGIN.left - padX) / (plotW - 2 * padX)) * MAX,
+    iy: (y) => MAX - ((y - MARGIN.top - padY) / (plotH - 2 * padY)) * MAX,
   };
 }
 
@@ -241,7 +245,7 @@ function drawPlot(root, rows, width, height) {
   const plotH = Math.max(MIN_PLOT, height - MARGIN.top - MARGIN.bottom);
   const W = plotW + MARGIN.left + MARGIN.right;
   const H = plotH + MARGIN.top + MARGIN.bottom;
-  const { sx, sy } = scales(plotW, plotH);
+  const { sx, sy, ux, iy } = scales(plotW, plotH);
   // Frame edges: x0/x1 are left/right, y0/y1 bottom/top (SVG y grows downward).
   const x0 = MARGIN.left, x1 = MARGIN.left + plotW, y0 = MARGIN.top + plotH, y1 = MARGIN.top;
   const halfW = plotW / 2, halfH = plotH / 2;
@@ -249,14 +253,12 @@ function drawPlot(root, rows, width, height) {
   const node = svg('svg', { class: 'matrix-plot', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Urgency versus importance matrix' });
 
   // Quadrants: the top-left (urgent and important) gets a faint red wash and
-  // the bottom-right (neither) a grey one; the other two are told apart by
-  // the urgency == importance diagonal (top-left to bottom-right) and the
-  // emphasised midlines.
+  // the bottom-right (neither) a grey one; the emphasised midlines separate
+  // the other two.
   const mid = MAX / 2;
   node.append(svg('rect', { class: 'plot-bg', x: x0, y: y1, width: plotW, height: plotH }));
   node.append(svg('rect', { class: 'quad quad-hot', x: x0, y: y1, width: halfW, height: halfH }));
   node.append(svg('rect', { class: 'quad quad-cold', x: sx(mid), y: sy(mid), width: halfW, height: halfH }));
-  node.append(svg('line', { class: 'diagonal', x1: x0, y1: y1, x2: x1, y2: y0 }));
 
   const grid = svg('g', { class: 'grid' });
   const ticks = svg('g', { class: 'ticks' });
@@ -313,7 +315,7 @@ function drawPlot(root, rows, width, height) {
   }
   node.append(points);
   root.replaceChildren(node);
-  return pts;
+  return { pts, inv: { ux, iy }, svg: node };
 }
 
 // ---------------------------------------------------------------- entry
@@ -333,6 +335,7 @@ export function renderMatrix(panel, handle, ctx) {
   const tip = createTooltip(panel);
 
   let drawnW = -1, drawnH = -1;
+  let dragging = false;
   let pts = [];
   const byId = new Map();
 
@@ -356,22 +359,76 @@ export function renderMatrix(panel, handle, ctx) {
     if (width === drawnW && height === drawnH) return;
     drawnW = width;
     drawnH = height;
-    pts = drawPlot(plotRoot, rows, width, height);
+    const res = drawPlot(plotRoot, rows, width, height);
+    pts = res.pts;
+    const { ux, iy } = res.inv;
+    const svgNode = res.svg;
     byId.clear();
     for (const p of pts) {
       byId.set(p.item.id, p);
+      let dragged = false;
       p.g.addEventListener('pointerenter', () => {
+        if (dragging) return;
         setHover(p, true);
         p.row.el.classList.add('matrix-hover');
         tip.show(p.item, p.g.querySelector('.dot'));
       });
       p.g.addEventListener('pointerleave', () => {
+        if (dragging) return;
         setHover(p, false);
         p.row.el.classList.remove('matrix-hover');
         tip.hide();
       });
       p.g.addEventListener('click', () => {
+        if (dragged) { dragged = false; return; }
         p.row.el.scrollIntoView({ block: 'nearest' });
+      });
+      // Drag a point to change its urgency (x) and importance (y); the value
+      // snaps to the nearest integer on release.
+      p.g.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const ctm = svgNode.getScreenCTM();
+        const scale = ctm ? ctm.a : 1;
+        const start = { x: e.clientX, y: e.clientY };
+        let dx = 0, dy = 0;
+        dragging = true;
+        p.g.setPointerCapture(e.pointerId);
+        p.g.classList.add('dragging');
+        tip.hide();
+        for (const l of p.lines) l.classList.add('moving');
+        const onMove = (ev) => {
+          dx = (ev.clientX - start.x) / scale;
+          dy = (ev.clientY - start.y) / scale;
+          if (!dragged && Math.hypot(dx, dy) > 3) dragged = true;
+          if (dragged) p.g.setAttribute('transform', `translate(${dx} ${dy})`);
+        };
+        const onUp = async () => {
+          p.g.removeEventListener('pointermove', onMove);
+          p.g.removeEventListener('pointerup', onUp);
+          p.g.removeEventListener('pointercancel', onUp);
+          dragging = false;
+          p.g.classList.remove('dragging');
+          for (const l of p.lines) l.classList.remove('moving');
+          if (!dragged) return;
+          const u = Math.max(0, Math.min(MAX, Math.round(ux(p.x + dx))));
+          const i = Math.max(0, Math.min(MAX, Math.round(iy(p.y + dy))));
+          if (u === level(p.item.urgency) && i === level(p.item.importance)) {
+            p.g.removeAttribute('transform');
+            dragged = false;
+            return;
+          }
+          try {
+            await api.updateItem(p.item.id, { urgency: u, importance: i });
+            await ctx.onChanged();
+          } catch (err) {
+            toast(err.message);
+            p.g.removeAttribute('transform');
+          }
+        };
+        p.g.addEventListener('pointermove', onMove);
+        p.g.addEventListener('pointerup', onUp);
+        p.g.addEventListener('pointercancel', onUp);
       });
     }
   }

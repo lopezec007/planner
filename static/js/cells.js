@@ -162,7 +162,7 @@ export function userControl(item, field, saver) {
   const u = current != null ? state.usersById.get(current) : null;
   const chip = u
     ? el('span', { class: 'chip chip-pick', tabindex: '0', role: 'button', title: `${u.name}: click to change`, style: { background: u.color, color: contrastText(u.color) }, dataset: { name } }, u.name)
-    : el('span', { class: 'chip chip-pick empty', tabindex: '0', role: 'button', title: 'Click to set', dataset: { name } }, '—');
+    : el('span', { class: 'chip chip-pick empty', tabindex: '0', role: 'button', title: 'Click to set', dataset: { name }, 'aria-label': `${name}: none` });
 
   const openSelect = () => {
     const sel = el('select', { name, class: 'cell-select', 'aria-label': name });
@@ -237,7 +237,7 @@ export function dateControl(item, field, saver, { highlight = false } = {}) {
   tilde.addEventListener('click', () => saver({ [firmKey]: !firm }));
 
   const cls = ['date-text', value ? '' : 'empty', highlight && value && !isClosed(item.status) ? endDateClass(value) : ''].filter(Boolean).join(' ');
-  const text = el('span', { class: cls, tabindex: '0', role: 'button', title: 'Click to change', dataset: { field: dateKey } }, value || '—');
+  const text = el('span', { class: cls, tabindex: '0', role: 'button', title: value ? 'Click to change' : 'Click to set a date', dataset: { field: dateKey }, 'aria-label': value ? dateKey.replace('_', ' ') : `${dateKey.replace('_', ' ')}: none` }, value || '');
   const edit = () => {
     const inp = el('input', { type: 'date', name: dateKey, class: 'cell-input date-input', value: value || '', 'aria-label': dateKey.replace('_', ' ') });
     let done = false;

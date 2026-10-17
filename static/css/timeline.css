@@ -19,6 +19,7 @@
 .timeline-scroll {
   overflow-x: auto;
   overflow-y: hidden;
+  scrollbar-width: none;      /* the wheel scrolls it; no scrollbar */
   width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -26,6 +27,7 @@
   cursor: grab;
 }
 .timeline-scroll.dragging { cursor: grabbing; }
+.timeline-scroll::-webkit-scrollbar { display: none; }
 
 /* No overflow clipping here: the scroll container must stay the nearest
    scrolling ancestor so sticky axis labels work. Bars are clamped in JS. */
@@ -103,6 +105,8 @@
   cursor: default;
 }
 .timeline-bar.parent { border-radius: 3px; }
+.timeline-bar.editing { opacity: 0.9; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 0 2px var(--accent); z-index: 5; }
+.timeline-bar.editing ~ .timeline-tooltip { display: none; }
 .timeline-bar.closed { filter: grayscale(0.8); opacity: 0.5; }
 .timeline-bar.blocked { opacity: 0.4; }
 .timeline-bar.closed.blocked { opacity: 0.3; }

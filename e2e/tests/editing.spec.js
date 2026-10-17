@@ -181,11 +181,11 @@ test('Clearing fields, Escape reverts, and an empty title is rejected', async ({
   // Clear the start date by emptying the input.
   await row.locator('.date-text[data-field=start_date]').click();
   await row.locator('input[name=start_date]').fill('');
-  await expect(row.locator('.date-text[data-field=start_date]')).toHaveText('—');
+  await expect(row.locator('.date-text[data-field=start_date]')).toHaveText('');
   await expect(row.locator('button[name=start_firm]')).toBeHidden();
   // Clicking the pressed owner chip clears the owner; assignee switches to Alex.
   await pickUser(row, 'owner', 'Sam');
-  await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('—');
+  await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('');
   await pickUser(row, 'assignee', 'Alex');
   await expect(row.locator('.chip-pick[data-name=assignee]')).toHaveText('Alex');
   // Escape in the title reverts without saving.

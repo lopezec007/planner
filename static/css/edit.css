@@ -50,7 +50,7 @@
 .title-text.empty { color: var(--fg-muted); font-style: italic; }
 .row.closed .title-text { text-decoration: line-through; opacity: 0.8; }
 .cell-select { cursor: pointer; }
-.status .cell-select { padding: 1px 2px; width: auto; max-width: 100%; font-size: 12px; }
+.status .cell-select { padding: 1px 2px; width: auto; max-width: 100%; font-size: 12px; appearance: none; -webkit-appearance: none; }
 .num-input {
   width: 36px; text-align: center; padding: 2px 0;
   -moz-appearance: textfield; appearance: textfield;
@@ -73,7 +73,8 @@
 .date-text { cursor: text; padding: 2px 4px; border: 1px solid transparent; border-radius: 4px; white-space: nowrap; }
 .date-text:hover { border-color: var(--border); }
 .date-text:focus-visible { outline: 2px solid var(--accent); }
-.date-text.empty { color: var(--fg-muted); }
+.date-text.empty { min-width: 72px; min-height: 20px; }
+.date-text.empty:hover { border-style: dashed; }
 .date-input { width: auto; font-size: 12px; padding: 1px 2px; }
 
 /* New (unsaved) row */
@@ -91,14 +92,14 @@
 .user-pick .chip[aria-pressed="true"] { opacity: 1; border-color: var(--fg); }
 
 /* ---------- expanded row: description + dependencies ---------- */
-.desc-wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: flex-start; width: 100%; }
-.desc-main { flex: 1 1 320px; min-width: 0; }
+.desc-main { width: 100%; min-width: 0; }
+.row.description > .deps-cell { grid-column: 4 / -1; align-self: start; padding-top: 0; padding-bottom: 10px; white-space: normal; overflow: visible; }
+.table.title-only .row.description > .deps-cell { grid-column: 3 / -1; }
 .desc-main .md { cursor: text; border: 1px solid transparent; border-radius: 4px; padding: 2px 4px; margin: -2px -4px; }
 .desc-main .md:hover { border-color: var(--border); }
 .desc-main .md.placeholder { color: var(--fg-muted); font-style: italic; }
 .desc-textarea { width: 100%; min-height: 84px; resize: vertical; font-family: var(--mono); font-size: 12.5px; }
-.desc-deps { flex: 0 1 420px; min-width: 260px; }
-.deps { font-size: 12.5px; }
+.deps { font-size: 12.5px; width: 100%; }
 .deps-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 0 6px; }
 .deps-label { min-width: 78px; color: var(--fg-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; }
 .deps-note { color: var(--fg-muted); font-style: italic; }
@@ -114,5 +115,6 @@
 .dep-remove:hover { color: var(--hl-alert); background: transparent; }
 .dep-add { font-size: 12px; padding: 1px 4px; max-width: 220px; }
 .chip-pick { cursor: pointer; }
-.chip-pick.empty { background: transparent; color: var(--fg-muted); border: 1px dashed var(--border); }
+.chip-pick.empty { background: transparent; min-width: 36px; min-height: 18px; border: 1px dashed transparent; }
+.chip-pick.empty:hover { border-color: var(--border); }
 .chip-pick:hover { outline: 2px solid var(--border); }

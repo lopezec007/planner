@@ -151,13 +151,16 @@ function itemRow(item, kind, mode, expanded, ctx) {
 /** The expanded detail row: description on the left, dependencies on the right. */
 function detailRow(item, kind, ctx) {
   const saver = makeSaver(item, ctx);
-  const wrap = el('div', { class: 'desc-wrap' }, descriptionControl(item, saver));
   const deps = dependencyPanel(item, ctx);
-  if (deps) wrap.append(el('div', { class: 'desc-deps' }, deps));
   const dataset = isDraft(item) ? { editing: 'new' } : { descFor: item.id };
-  // Not given the kind class itself, so `.row.task` / `.row.parent` only ever
-  // match item rows (detail rows contain other items' titles in chips).
-  return el('div', { class: `row description kind-${kind}`, dataset }, el('div'), el('div'), el('div', { class: 'title' }, wrap));
+  // Same grid as the item row: the description fills the title column and the
+  // dependencies sit under the remaining columns (or below, in title-only
+  // mode). Not given the kind class itself, so `.row.task` / `.row.parent`
+  // only ever match item rows (detail rows contain other items' titles).
+  const row = el('div', { class: `row description kind-${kind}`, dataset },
+    el('div'), el('div'), el('div', { class: 'title' }, descriptionControl(item, saver)));
+  if (deps) row.append(el('div', { class: 'deps-cell' }, deps));
+  return row;
 }
 
 /** Remember which control has focus so a re-render can give it back. */

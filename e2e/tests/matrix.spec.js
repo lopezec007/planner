@@ -59,7 +59,6 @@ async function plotGeometry(page) {
       .filter((t) => t.getAttribute('text-anchor') === 'middle') // x-axis ticks
       .map((t) => ({ v: +t.textContent, x: +t.getAttribute('x') }));
     const label = svg.querySelector('.quad-label');
-    const diag = svg.querySelector('.diagonal');
     return {
       svg: { x: box.x, y: box.y, width: box.width, height: box.height, attrW: +svg.getAttribute('width'), attrH: +svg.getAttribute('height') },
       panel: { width: panel.clientWidth, top: panel.getBoundingClientRect().top },
@@ -67,7 +66,6 @@ async function plotGeometry(page) {
       bg: rect('.plot-bg'), hot: rect('.quad-hot'), cold: rect('.quad-cold'),
       xTicks: Object.fromEntries(ticks.map((t) => [t.v, t.x])),
       label: { x: +label.getAttribute('x'), y: +label.getAttribute('y'), anchor: label.getAttribute('text-anchor') },
-      diag: { x1: +diag.getAttribute('x1'), y1: +diag.getAttribute('y1'), x2: +diag.getAttribute('x2'), y2: +diag.getAttribute('y2') },
     };
   });
 }
@@ -112,14 +110,11 @@ test('x axis is reversed: urgency 10 at the left, 0 at the right; hot quadrant t
     expect(u10.cx).toBeLessThan(g.hot.x + g.hot.w);
     expect(u10.cy).toBeGreaterThan(g.hot.y);
     expect(u10.cy).toBeLessThan(g.hot.y + g.hot.h);
-    // Quadrant label is anchored at the top-left; diagonal runs top-left to bottom-right.
+    // Quadrant label is anchored at the top-left; there is no diagonal line.
     expect(g.label.anchor).toBe('start');
     expect(g.label.x).toBeLessThan(g.bg.x + g.bg.w / 4);
     expect(g.label.y).toBeLessThan(g.bg.y + g.bg.h / 4);
-    expect(g.diag.x1).toBeCloseTo(g.bg.x, 3);
-    expect(g.diag.y1).toBeCloseTo(g.bg.y, 3);
-    expect(g.diag.x2).toBeCloseTo(g.bg.x + g.bg.w, 3);
-    expect(g.diag.y2).toBeCloseTo(g.bg.y + g.bg.h, 3);
+    expect(await page.locator('.matrix-plot .diagonal').count()).toBe(0);
     // The label of the leftmost point is drawn to its right, so it stays inside the frame.
     const lblX = await page.locator('.matrix-plot .pt[data-key="T-6"] .label').evaluate((t) => +t.getAttribute('x'));
     expect(lblX).toBeGreaterThan(u10.cx);

@@ -20,8 +20,9 @@
 // live in one SVG overlay in canvas coordinates, so they zoom and scroll with
 // the bars. Open blockers (not done/cancelled) use the alert colour.
 
-import { el } from './util.js';
-import { state, isClosed, isBlocked, dependencyEdges, parseYMD, today, daysFromToday } from './state.js';
+import { el, toast } from './util.js';
+import { api } from './api.js';
+import { state, isClosed, isBlocked, dependencyEdges, parseYMD, today, daysFromToday, addDays } from './state.js';
 
 const DAY_MS = 86400000;
 const MAX_PPD = 80;        // max pixels per day
@@ -283,11 +284,25 @@ export function renderTimeline(panel, handle, ctx) {
       if (!it.start_date && !it.end_date) continue;
       const s = daysFromToday(it.start_date);
       const e = daysFromToday(it.end_date);
+      const e_ = e;
       let x0, x1, fadeL, fadeR;
       if (s != null) { x0 = x(s); fadeL = it.start_firm ? 0 : shortFade; }
       if (e != null) { x1 = x(e + 1); fadeR = it.end_firm ? 0 : shortFade; }
-      if (s == null) { x0 = x1 - longFade; fadeL = longFade; }
-      if (e == null) { x1 = x0 + longFade; fadeR = longFade; }
+      // A missing date fades in/out over two weeks, unless dependencies pin
+      // it: no start -> from the latest end among its blockers; no end -> to
+      // the earliest start among the items it blocks.
+      if (s == null) {
+        const ends = (it.blocked_by || []).map((id) => state.itemsById.get(id)).filter((b) => b?.end_date).map((b) => daysFromToday(b.end_date));
+        const dep = ends.length ? x(Math.max(...ends) + 1) : null;
+        if (dep != null && dep < x1 - 4) { x0 = dep; fadeL = x1 - x0; }
+        else { x0 = x1 - longFade; fadeL = longFade; }
+      }
+      if (e == null) {
+        const starts = (it.blocks || []).map((id) => state.itemsById.get(id)).filter((b) => b?.start_date).map((b) => daysFromToday(b.start_date));
+        const dep = starts.length ? x(Math.min(...starts)) : null;
+        if (dep != null && dep > x0 + 4) { x1 = dep; fadeR = x1 - x0; }
+        else { x1 = x0 + longFade; fadeR = longFade; }
+      }
       if (x1 < x0 + 4) x1 = x0 + 4;
       // Clamp to the canvas; the mask is offset so the fade stays put.
       let clipL = 0, clipR = 0;
@@ -312,9 +327,10 @@ export function renderTimeline(panel, handle, ctx) {
           maskImage: mask, webkitMaskImage: mask,
         },
       });
-      bar.addEventListener('mouseenter', () => showTip(it, user));
-      bar.addEventListener('mousemove', moveTip);
+      bar.addEventListener('mouseenter', () => { if (!barDrag) showTip(it, user); });
+      bar.addEventListener('mousemove', (e) => { if (!barDrag) { moveTip(e); bar.style.cursor = cursorFor(bar, it, e); } });
       bar.addEventListener('mouseleave', hideTip);
+      bar.addEventListener('pointerdown', (e) => startBarDrag(e, bar, it, s, e_));
       bars.push(bar);
       geom.set(it.id, { x0, x1, yc: top + h / 2, rowTop: top, rowBottom: top + h });
     }
@@ -358,6 +374,69 @@ export function renderTimeline(panel, handle, ctx) {
     scroll.scrollLeft = Math.round((view.leftDay - rangeStart) * ppd);
     btnIn.disabled = ppd >= MAX_PPD - 1e-6;
     btnOut.disabled = ppd <= minPpd() + 1e-6;
+  }
+
+  // ---- editing dates by dragging bars ----
+  // Edges resize the start/end (only when that date exists); the middle moves
+  // every date the item has. One pixel row = view.ppd pixels per day.
+  const EDGE = 8;
+  let barDrag = null;
+  function zoneFor(bar, it, e) {
+    const r = bar.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    if (it.start_date && px <= EDGE) return 'start';
+    if (it.end_date && px >= r.width - EDGE) return 'end';
+    return 'move';
+  }
+  function cursorFor(bar, it, e) {
+    const z = zoneFor(bar, it, e);
+    return z === 'move' ? 'grab' : 'ew-resize';
+  }
+  function startBarDrag(e, bar, it) {
+    if (e.button !== 0) return;
+    e.stopPropagation(); // not a pan
+    e.preventDefault();
+    hideTip();
+    const zone = zoneFor(bar, it, e);
+    const left0 = parseFloat(bar.style.left), width0 = parseFloat(bar.style.width);
+    barDrag = { bar, it, zone, x: e.clientX, left0, width0, days: 0 };
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add('editing');
+    bar.style.cursor = zone === 'move' ? 'grabbing' : 'ew-resize';
+    const sDay = daysFromToday(it.start_date), eDay = daysFromToday(it.end_date);
+    const onMove = (ev) => {
+      let days = Math.round((ev.clientX - barDrag.x) / view.ppd);
+      // Keep start <= end while resizing.
+      if (zone === 'start' && eDay != null) days = Math.min(days, eDay - sDay);
+      if (zone === 'end' && sDay != null) days = Math.max(days, sDay - eDay);
+      barDrag.days = days;
+      const dx = days * view.ppd;
+      if (zone === 'move') bar.style.left = `${left0 + dx}px`;
+      else if (zone === 'start') { bar.style.left = `${left0 + dx}px`; bar.style.width = `${Math.max(4, width0 - dx)}px`; }
+      else bar.style.width = `${Math.max(4, width0 + dx)}px`;
+    };
+    const onUp = async () => {
+      bar.removeEventListener('pointermove', onMove);
+      bar.removeEventListener('pointerup', onUp);
+      bar.removeEventListener('pointercancel', onUp);
+      const { days } = barDrag;
+      barDrag = null;
+      bar.classList.remove('editing');
+      if (!days) { draw(); return; }
+      const patch = {};
+      if (zone !== 'end' && it.start_date) patch.start_date = addDays(it.start_date, days);
+      if (zone !== 'start' && it.end_date) patch.end_date = addDays(it.end_date, days);
+      try {
+        await api.updateItem(it.id, patch);
+        await ctx.onChanged();
+      } catch (err) {
+        toast(err.message);
+        draw();
+      }
+    };
+    bar.addEventListener('pointermove', onMove);
+    bar.addEventListener('pointerup', onUp);
+    bar.addEventListener('pointercancel', onUp);
   }
 
   // ---- tooltip ----
@@ -410,10 +489,15 @@ export function renderTimeline(panel, handle, ctx) {
   }, { passive: true });
 
   scroll.addEventListener('wheel', (e) => {
-    if (!e.ctrlKey && !e.metaKey) return; // plain / shift wheel: native scrolling
     e.preventDefault();
-    const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.002));
-    zoomTo(view.ppd * factor, e.clientX - scroll.getBoundingClientRect().left);
+    if (e.ctrlKey || e.metaKey) {
+      const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.002));
+      zoomTo(view.ppd * factor, e.clientX - scroll.getBoundingClientRect().left);
+      return;
+    }
+    // Plain wheel (either axis) scrolls the timeline sideways.
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? viewportW() : 1;
+    scroll.scrollLeft += (e.deltaY + e.deltaX) * unit;
   }, { passive: false });
 
   // Drag to pan.

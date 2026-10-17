@@ -34,7 +34,6 @@
 .matrix-plot .plot-bg { fill: var(--bg-alt); stroke: var(--grid); stroke-width: 1; }
 .matrix-plot .quad-hot { fill: var(--quad-hot); }
 .matrix-plot .quad-cold { fill: var(--quad-cold); }
-.matrix-plot .diagonal { stroke: var(--diag); stroke-width: 1; stroke-dasharray: 2 5; }
 .matrix-plot .grid line { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; opacity: 0.6; }
 .matrix-plot .grid line.major { opacity: 1; }
 .matrix-plot .ticks text { fill: var(--fg-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -136,3 +135,9 @@
   padding-top: 8px;
   border-top: 1px solid var(--border);
 }
+
+/* dragging a point */
+.matrix-plot .pt { cursor: grab; }
+.matrix-plot .pt.dragging { cursor: grabbing; }
+.matrix-plot .pt.dragging .dot { stroke: var(--accent); stroke-width: 2px; }
+.matrix-plot .deps .dep.moving { opacity: 0.12; }
