@@ -82,8 +82,9 @@
 
 /* Owner / assignee chip picker */
 .user-pick { display: flex; flex-wrap: wrap; gap: 4px; padding: 0; }
+.user-pick { outline: none; }
 .user-pick .chip {
-  cursor: pointer; border: 2px solid transparent; opacity: 0.4;
+  cursor: pointer; border: 2px solid transparent; opacity: 0.45;
   padding: 0 8px; line-height: 18px; font: inherit; font-size: 12px; font-weight: 500;
 }
 .user-pick .chip:hover { opacity: 0.75; }

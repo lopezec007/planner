@@ -26,10 +26,19 @@ const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const exact = (page, title) => page.locator('.title-text', { hasText: new RegExp(`^${esc(title)}$`) });
 const taskRow = (page, title) => page.locator('.row.task', { has: exact(page, title) });
 const parentRow = (page, title) => page.locator('.row.parent', { has: exact(page, title) });
-const editTitle = async (row, value) => {
+// Clicking the title text swaps it for an input, so the row can no longer be
+// found by its title text; the single open title input is page-wide.
+const titleInput = (page) => page.locator('input[name=title]');
+// Owner/assignee: the collapsed chip opens the picker; click a user chip to pick
+// (clicking the pressed one clears).
+const pickUser = async (row, which, name) => {
+  await row.locator(`.chip-pick[data-name=${which}]`).click();
+  await row.locator(`.user-pick[data-name=${which}] .chip`, { hasText: name }).click();
+};
+const editTitle = async (page, row, value) => {
   await row.locator('.title-text').click();
-  await row.locator('input[name=title]').fill(value);
-  await row.locator('input[name=title]').press('Enter');
+  await titleInput(page).fill(value);
+  await titleInput(page).press('Enter');
 };
 const detailOf = (page, row) => row.locator('xpath=following-sibling::*[1]');
 
@@ -41,7 +50,7 @@ test('New project: a blank row with the title focused; Enter saves with the page
   await expect(newRow(page).locator('select[name=status]')).toHaveValue('todo');
   // The detail row (description) is open beneath it.
   await expect(page.locator('.row.description[data-editing="new"]')).toBeVisible();
-  await newRow(page).locator('.user-pick[data-name=owner] .chip', { hasText: 'Evan' }).click();
+  await pickUser(newRow(page), 'owner', 'Evan');
   await newRow(page).locator('input[name=title]').fill('E2E Project');
   await newRow(page).locator('input[name=title]').press('Enter');
   await expect(newRow(page)).toHaveCount(0);
@@ -71,7 +80,7 @@ test('New ongoing from the toolbar; Backlog offers no Ongoing and defaults to ba
 
   await page.locator('#btn-new-ongoing').click();
   await newRow(page).locator('input[name=title]').fill('E2E Ongoing');
-  await newRow(page).locator('.user-pick[data-name=assignee] .chip', { hasText: 'Sam' }).click();
+  await pickUser(newRow(page), 'assignee', 'Sam');
   await page.locator('button[title=Save]').click();
   await expect(parentRow(page, 'E2E Ongoing')).toBeVisible();
   const it = await byTitle(request, 'E2E Ongoing');
@@ -117,28 +126,27 @@ test('Click-to-edit every field type on a task', async ({ page, request }) => {
   await page.goto('/');
   const row = taskRow(page, 'E2E Task A');
   // Title.
-  await editTitle(row, 'E2E Task A2');
+  await editTitle(page, row, 'E2E Task A2');
   const r2 = taskRow(page, 'E2E Task A2');
   await expect(r2).toBeVisible();
   // Status.
   await r2.locator('select[name=status]').selectOption('in-progress');
   await expect(r2.locator('.status')).toHaveClass(/in-progress/);
-  // Owner / assignee chips (three seeded users -> chips, not selects).
+  // Owner / assignee: the collapsed chip opens a chip picker (three seeded users).
   await expect(r2.locator('select[name=owner]')).toHaveCount(0);
-  await r2.locator('.user-pick[data-name=owner] .chip', { hasText: 'Sam' }).click();
-  await expect(r2.locator('.user-pick[data-name=owner] .chip', { hasText: 'Sam' })).toHaveAttribute('aria-pressed', 'true');
-  await r2.locator('.user-pick[data-name=assignee] .chip', { hasText: 'Evan' }).click();
-  // Dates: click the text, type into the input; the tilde marks it approximate until clicked.
+  await pickUser(r2, 'owner', 'Sam');
+  await expect(r2.locator('.chip-pick[data-name=owner]')).toHaveText('Sam');
+  await pickUser(r2, 'assignee', 'Evan');
+  await expect(r2.locator('.chip-pick[data-name=assignee]')).toHaveText('Evan');
+  // Dates: click the text, type into the input (change saves); the tilde marks it approximate until clicked.
   await r2.locator('.date-text[data-field=start_date]').click();
   await r2.locator('input[name=start_date]').fill(ymd(-1));
-  await r2.locator('input[name=start_date]').press('Enter');
   await expect(r2.locator('.date-text[data-field=start_date]')).toHaveText(ymd(-1));
   await expect(r2.locator('button[name=start_firm]')).toHaveClass(/approx/);
   await r2.locator('button[name=start_firm]').click();
   await expect(r2.locator('button[name=start_firm]')).toHaveClass(/firm/);
   await r2.locator('.date-text[data-field=end_date]').click();
   await r2.locator('input[name=end_date]').fill(ymd(2));
-  await r2.locator('input[name=end_date]').press('Enter');
   await expect(r2.locator('.date-text[data-field=end_date]')).toHaveClass(/hl-warn/); // within a week
   // Urgency / importance single keys: 9, then ` -> 0, then 0 -> 10, then 2.
   await r2.locator('input[name=urgency]').press('9');
@@ -173,20 +181,20 @@ test('Clearing fields, Escape reverts, and an empty title is rejected', async ({
   // Clear the start date by emptying the input.
   await row.locator('.date-text[data-field=start_date]').click();
   await row.locator('input[name=start_date]').fill('');
-  await row.locator('input[name=start_date]').press('Enter');
   await expect(row.locator('.date-text[data-field=start_date]')).toHaveText('—');
   await expect(row.locator('button[name=start_firm]')).toBeHidden();
   // Clicking the pressed owner chip clears the owner; assignee switches to Alex.
-  await row.locator('.user-pick[data-name=owner] .chip[aria-pressed=true]').click();
-  await expect(row.locator('.user-pick[data-name=owner] .chip[aria-pressed=true]')).toHaveCount(0);
-  await row.locator('.user-pick[data-name=assignee] .chip', { hasText: 'Alex' }).click();
+  await pickUser(row, 'owner', 'Sam');
+  await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('—');
+  await pickUser(row, 'assignee', 'Alex');
+  await expect(row.locator('.chip-pick[data-name=assignee]')).toHaveText('Alex');
   // Escape in the title reverts without saving.
   await row.locator('.title-text').click();
-  await row.locator('input[name=title]').fill('Not saved');
-  await row.locator('input[name=title]').press('Escape');
+  await titleInput(page).fill('Not saved');
+  await titleInput(page).press('Escape');
   await expect(row.locator('.title-text')).toHaveText('E2E Task A2');
   // An empty title is rejected and restored.
-  await editTitle(row, '');
+  await editTitle(page, row, '');
   await expect(page.locator('#toast')).toContainText('title is required');
   await expect(row.locator('.title-text')).toHaveText('E2E Task A2');
   await row.locator('input[name=blocked]').uncheck();
@@ -277,7 +285,7 @@ test('Beside the Timeline only the title is editable in the row; the expanded ro
   await expect(page.locator('.table.title-only')).toBeVisible();
   const row = taskRow(page, 'E2E Task B');
   await expect(row.locator('select[name=status]')).toHaveCount(0);
-  await editTitle(row, 'E2E Task B2');
+  await editTitle(page, row, 'E2E Task B2');
   await expect(taskRow(page, 'E2E Task B2')).toBeVisible();
   expect(await byTitle(request, 'E2E Task B2')).toBeDefined();
   await taskRow(page, 'E2E Task B2').locator('.toggle button').click();
@@ -285,15 +293,19 @@ test('Beside the Timeline only the title is editable in the row; the expanded ro
   await page.locator('button[data-view=table]').click();
 });
 
-test('With more than three users the pickers become dropdowns', async ({ page, request }) => {
+test('With more than three users the picker is a dropdown', async ({ page, request }) => {
   const res = await request.post('/api/users', { data: { name: 'E2E Fourth' } });
   const u = await res.json();
   try {
     await page.goto('/');
     const row = taskRow(page, 'Clean gutters');
+    await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('Evan');
+    await row.locator('.chip-pick[data-name=owner]').click();
     await expect(row.locator('select[name=owner]')).toBeVisible();
-    await expect(row.locator('select[name=assignee] option')).toHaveCount(5); // blank + 4 users
+    await expect(row.locator('select[name=owner] option')).toHaveCount(5); // blank + 4 users
     await expect(row.locator('.user-pick')).toHaveCount(0);
+    await row.locator('select[name=owner]').evaluate((e) => e.blur()); // closes without a change
+    await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('Evan');
   } finally {
     await request.delete(`/api/users/${u.id}`);
   }

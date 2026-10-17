@@ -153,51 +153,61 @@ export function statusControl(item, saver) {
   return el('div', {}, el('span', { class: `status ${item.status}` }, sel));
 }
 
-/** Owner / assignee: clickable chips with a handful of users, else a select. */
+/** Owner / assignee: the current user's chip (or a dash). Clicking it opens
+ *  the picker in place: a row of user chips with a handful of users, else a
+ *  select. Picking saves; clicking elsewhere or Escape closes it. */
 export function userControl(item, field, saver) {
   const name = field === 'owner_id' ? 'owner' : 'assignee';
   const current = item[field];
-  if (state.users.length > CHIP_MAX_USERS) {
-    // Many users: the current user's chip (or a dash), which opens a select when clicked.
-    const u = current != null ? state.usersById.get(current) : null;
-    const chip = u
-      ? el('span', { class: 'chip chip-pick', tabindex: '0', role: 'button', title: `${u.name}: click to change`, style: { background: u.color, color: contrastText(u.color) }, dataset: { name } }, u.name)
-      : el('span', { class: 'chip chip-pick empty', tabindex: '0', role: 'button', title: 'Click to set', dataset: { name } }, '—');
-    const edit = () => {
-      const sel = el('select', { name, class: 'cell-select', 'aria-label': name });
-      sel.append(el('option', { value: '', selected: current == null ? true : null }, '—'));
-      for (const x of state.users) sel.append(el('option', { value: String(x.id), selected: current === x.id ? true : null }, x.name));
-      let done = false;
-      const finish = (save) => {
-        if (done) return;
-        done = true;
-        const v = sel.value ? Number(sel.value) : null;
-        if (save && v !== (current ?? null)) saver({ [field]: v });
-        else sel.replaceWith(chip);
-      };
-      sel.addEventListener('change', () => finish(true));
-      sel.addEventListener('blur', () => finish(false));
-      sel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
-      chip.replaceWith(sel);
-      sel.focus();
-      try { sel.showPicker?.(); } catch {}
+  const u = current != null ? state.usersById.get(current) : null;
+  const chip = u
+    ? el('span', { class: 'chip chip-pick', tabindex: '0', role: 'button', title: `${u.name}: click to change`, style: { background: u.color, color: contrastText(u.color) }, dataset: { name } }, u.name)
+    : el('span', { class: 'chip chip-pick empty', tabindex: '0', role: 'button', title: 'Click to set', dataset: { name } }, '—');
+
+  const openSelect = () => {
+    const sel = el('select', { name, class: 'cell-select', 'aria-label': name });
+    sel.append(el('option', { value: '', selected: current == null ? true : null }, '—'));
+    for (const x of state.users) sel.append(el('option', { value: String(x.id), selected: current === x.id ? true : null }, x.name));
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      const v = sel.value ? Number(sel.value) : null;
+      if (save && v !== (current ?? null)) saver({ [field]: v });
+      else sel.replaceWith(chip);
     };
-    chip.addEventListener('click', edit);
-    chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); edit(); } });
-    return el('div', {}, chip);
-  }
-  const wrap = el('div', { class: 'user-pick', role: 'group', 'aria-label': name, dataset: { name } });
-  for (const u of state.users) {
-    const pressed = current === u.id;
-    const b = el('button', {
-      type: 'button', class: 'chip', title: `${u.name}: click to ${pressed ? 'clear' : 'select'}`,
-      dataset: { user: String(u.id) }, 'aria-pressed': pressed ? 'true' : 'false',
-      style: { background: u.color, color: contrastText(u.color) },
-    }, u.name);
-    b.addEventListener('click', () => saver({ [field]: pressed ? null : u.id }));
-    wrap.append(b);
-  }
-  return el('div', {}, wrap);
+    sel.addEventListener('change', () => finish(true));
+    sel.addEventListener('blur', () => finish(false));
+    sel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
+    chip.replaceWith(sel);
+    sel.focus();
+    try { sel.showPicker?.(); } catch {}
+  };
+
+  const openChips = () => {
+    const wrap = el('div', { class: 'user-pick', role: 'group', 'aria-label': name, tabindex: '-1', dataset: { name } });
+    let done = false;
+    const close = () => { if (done) return; done = true; wrap.replaceWith(chip); };
+    for (const x of state.users) {
+      const pressed = current === x.id;
+      const b = el('button', {
+        type: 'button', class: 'chip', title: pressed ? `${x.name}: click to clear` : x.name,
+        dataset: { user: String(x.id) }, 'aria-pressed': pressed ? 'true' : 'false',
+        style: { background: x.color, color: contrastText(x.color) },
+      }, x.name);
+      b.addEventListener('click', () => { done = true; saver({ [field]: pressed ? null : x.id }); });
+      wrap.append(b);
+    }
+    wrap.addEventListener('focusout', (e) => { if (!wrap.contains(e.relatedTarget)) close(); });
+    wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
+    chip.replaceWith(wrap);
+    (wrap.querySelector('[aria-pressed="true"]') || wrap.firstElementChild)?.focus();
+  };
+
+  const open = state.users.length > CHIP_MAX_USERS ? openSelect : openChips;
+  chip.addEventListener('click', open);
+  chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+  return el('div', {}, chip);
 }
 
 function endDateClass(ymd) {

@@ -80,6 +80,14 @@ Title is the only required field; all others are optional.
 All date logic uses calendar days.  Weekends have no meaning to this software.  "Today" is determined using the
 timezone of the user's device (the browser), not the server's, in case the server ever runs in UTC.
 
+### Dependencies
+Any Project or Task can be blocked by any number of other Projects or Tasks, and can block any number of them
+(Ongoing items take no part).  Two items cannot block each other, directly or through a chain of dependencies.
+An item that is blocked by another item whose status is not "Done" or "Cancelled" has its "Blocked" state locked
+to true.  Dependencies are viewed and edited to the right of the description in the expanded row, with dropdowns
+listing item key and title.  The Timeline draws a line from the blocking item's end to the blocked item's start;
+the Matrix draws subtle lines with arrows pointing from blocker to blocked.
+
 ### Deletion
 Items can be deleted from the UI.  A deleted item remains in the database but becomes entirely inaccessible in the UI
 (it does not appear on any page, including the "Everything" page).
@@ -112,10 +120,11 @@ expand/collapse buttons.
 The order of items is user-specified via drag-and-drop, and the order is persisted.
 
 ##### Creating, editing, and deleting
-- A "New" button at the top adds a blank row to the table for the user to fill in, with its description pre-expanded.
+- "New Ongoing" and "New Project" buttons at the top add a blank row to the table for the user to fill in, with its
+  description pre-expanded.  The row is created when the title is confirmed with Enter or the ✓ button.
 - Every "Ongoing" and "Project" row has an "Add task" button that adds a blank child task row in the same manner.
-- Editing is done directly within the table but must be enabled via a per-row "Edit" button, so that clicking into a
-  cell does not accidentally change anything.
+- There is no separate edit mode: to edit a field the user simply clicks into it, and the change is saved
+  immediately.  Firm dates are toggled with a clickable "~" before the date ("~" shown = approximate).
 - Each row offers a "Delete" option (see Deletion above).
 
 ##### Views
