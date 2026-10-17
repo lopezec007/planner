@@ -15,6 +15,32 @@ Flags can also be given as environment variables `PLANNER_ADDR` and
 `PLANNER_DB`; `planner -version` prints the build version. All data lives in
 the single SQLite file. The directory containing it must already exist.
 
+## Using it
+
+1. Open the **Users** page and add the people who will own or be assigned
+   work. Each gets a colour (click the swatch to change it) that highlights
+   the Owner and Assignee columns everywhere.
+2. On **Home**, click **New** to add an Ongoing bucket or a Project as a blank
+   row; fill in the title (required) and anything else, then press Enter or
+   the ✓ button. Use the **+** on an Ongoing or Project row to add a task
+   beneath it.
+3. Rows are read-only until you click ✎ on that row. Escape cancels, Enter
+   saves (Ctrl+Enter inside the description). Only one row edits at a time.
+4. Drag the ⠿ handle to reorder: Ongoing/Project rows among themselves, tasks
+   within their parent. Reparent a task through its Parent field in edit mode.
+5. **Plan** shows a Gantt timeline beside the titles (zoom with the +/−
+   buttons or Ctrl+wheel, drag or scroll to pan, Today recentres). **Matrix**
+   plots tasks by urgency and importance; hover a point for its description.
+6. **Backlog** and **Ideas** list items in those statuses; **Everything**
+   lists all live items with search and filters.
+7. Deleting hides an item (and its tasks) from the UI; the rows stay in the
+   database and keys are never reused. Each item's status history is kept and
+   available at `/api/items/{id}/history`.
+
+"Today" and all date highlighting use the browser's timezone, not the
+server's. The homepage shows To-Do and In-Progress work plus anything closed
+in the last 14 days; a project's status decides where its tasks appear.
+
 ## Deploying on Debian
 
 The app runs as a systemd service on a Debian 13 host; see `deploy/`. It
@@ -120,7 +146,8 @@ Layout:
       js/app.js           hash router, toolbar, page rendering
       js/state.js         client cache + local-timezone date helpers
       js/filters.js       which items each page shows (supersede rule lives here)
-      js/table.js         hierarchical table renderer and highlighting
+      js/table.js         hierarchical table renderer, highlighting, drag reordering
+      js/edit.js          in-table create/edit forms
       js/plan.js          Plan (Gantt) view
       js/matrix.js        Matrix (scatter) view
       js/users.js         Users page

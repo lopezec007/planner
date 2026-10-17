@@ -124,9 +124,15 @@ function render() {
     currentGroups = st.searchFilter(currentGroups);
   }
 
+  // First-run guidance: an empty database has no users to pick as owner/assignee.
+  const hint = (!state.users.length && !state.items.length)
+    ? el('p', { class: 'hint', id: 'first-run-hint' },
+        'Welcome. Start by adding people on the ', el('a', { href: '#/users' }, 'Users'), ' page, then use New to create an Ongoing bucket or a Project.')
+    : null;
+
   if (st.view === 'table') {
     const wrap = el('div', { class: 'table-wrap' });
-    main.replaceChildren(wrap);
+    main.replaceChildren(...[hint, wrap].filter(Boolean));
     renderTable(wrap, { groups: currentGroups, mode: 'full', expanded: st.expanded, actions });
   } else {
     const wrap = el('div', { class: 'table-wrap' });
