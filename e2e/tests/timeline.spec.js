@@ -161,3 +161,122 @@ test('scroll position survives re-renders and page changes (today stays in view)
   expect(await todayInView()).toBe(true);
   await page.locator('button[data-view=table]').click();
 });
+
+// ---- dependency connectors ----
+
+/** Every connector with its endpoints (canvas coordinates) and the edges of
+ *  the two bars it should join, keyed "blocker->blocked" by item key. */
+async function connectors(page) {
+  const items = await (await page.request.get('/api/items')).json();
+  const keyOf = Object.fromEntries(items.map((i) => [String(i.id), i.key]));
+  const raw = await page.evaluate(() => {
+    const canvas = document.querySelector('.timeline-canvas');
+    const c = canvas.getBoundingClientRect();
+    const bar = (id) => {
+      const r = canvas.querySelector(`.timeline-bar[data-id="${id}"]`).getBoundingClientRect();
+      return { x0: r.left - c.left, x1: r.right - c.left, yc: r.top + r.height / 2 - c.top };
+    };
+    return [...canvas.querySelectorAll('.timeline-deps .timeline-dep')].map((p) => {
+      const len = p.getTotalLength();
+      const s = p.getPointAtLength(0), e = p.getPointAtLength(len);
+      let minX = Infinity, maxX = -Infinity;
+      for (let l = 0; l <= len; l += 2) {
+        const q = p.getPointAtLength(l);
+        minX = Math.min(minX, q.x);
+        maxX = Math.max(maxX, q.x);
+      }
+      return {
+        blocker: p.dataset.blocker, blocked: p.dataset.blocked,
+        open: p.classList.contains('open'), stroke: getComputedStyle(p).stroke,
+        marker: p.getAttribute('marker-end'),
+        start: { x: s.x, y: s.y }, end: { x: e.x, y: e.y }, minX, maxX,
+        a: bar(p.dataset.blocker), b: bar(p.dataset.blocked),
+      };
+    });
+  });
+  const out = {};
+  for (const l of raw) out[`${keyOf[l.blocker]}->${keyOf[l.blocked]}`] = l;
+  return out;
+}
+
+/** The connector starts at the end of the blocker's bar and ends at the start
+ *  of the blocked bar, both at the bar's vertical centre. */
+function expectJoined(l) {
+  expect(Math.abs(l.start.x - l.a.x1)).toBeLessThan(1);
+  expect(Math.abs(l.start.y - l.a.yc)).toBeLessThan(1);
+  expect(Math.abs(l.end.x - l.b.x0)).toBeLessThan(1);
+  expect(Math.abs(l.end.y - l.b.yc)).toBeLessThan(1);
+}
+
+const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`; };
+
+test('dependency connectors join the blocker bar end to the blocked bar start', async ({ page }) => {
+  const errors = await openPlan(page);
+  const svg = page.locator('.timeline-canvas > svg.timeline-deps');
+  await expect(svg).toHaveCount(1);
+  await expect(svg).toHaveCSS('pointer-events', 'none');
+
+  // Seeded edges whose two items both have a bar on the Active page.
+  const lines = await connectors(page);
+  expect(Object.keys(lines).sort()).toEqual(['P-1->P-2', 'P-5->P-2', 'T-10->T-11', 'T-7->T-6', 'T-9->T-10']);
+  for (const l of Object.values(lines)) {
+    expectJoined(l);
+    expect(l.marker).toMatch(/^url\(["']?#tl-dep-arrow(-open)?["']?\)$/);
+  }
+
+  // Open blockers use the alert colour; a done blocker stays muted.
+  const alert = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--hl-alert').trim());
+  const muted = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--fg-muted').trim());
+  expect(lines['T-7->T-6'].open).toBe(true); // Review budget is in progress
+  expect(lines['T-7->T-6'].stroke).toBe(rgb(alert));
+  expect(lines['T-7->T-6'].marker).toContain('tl-dep-arrow-open');
+  expect(lines['P-1->P-2'].open).toBe(true);
+  expect(lines['P-5->P-2'].open).toBe(false); // Repaint shed is done
+  expect(lines['P-5->P-2'].stroke).toBe(rgb(muted));
+  expect(lines['P-5->P-2'].marker).not.toContain('open');
+
+  // Electrical rough-in starts before Order countertops ends: the connector
+  // is routed out past the blocker's end and back in from the left.
+  const back = lines['T-9->T-10'];
+  expect(back.b.x0).toBeLessThan(back.a.x1);
+  expect(back.maxX).toBeGreaterThan(back.a.x1 + 5);
+  expect(back.minX).toBeLessThan(back.b.x0 - 5);
+  // Paint walls starts well after Electrical ends: a simple elbow in the gap.
+  const fwd = lines['T-10->T-11'];
+  expect(fwd.b.x0).toBeGreaterThan(fwd.a.x1);
+  expect(fwd.maxX).toBeLessThanOrEqual(fwd.b.x0 + 0.5);
+  expect(fwd.minX).toBeGreaterThanOrEqual(fwd.a.x1 - 0.5);
+
+  // A project blocked by an open project reads as blocked.
+  await expect(await barFor(page, 'Spring garden')).toHaveClass(/blocked/);
+  expect(errors).toEqual([]);
+});
+
+test('dependency connectors move with their bars when zooming', async ({ page }) => {
+  await openPlan(page);
+  const canvas = page.locator('.timeline-canvas');
+  const ppd0 = parseFloat(await canvas.getAttribute('data-ppd'));
+  const before = (await connectors(page))['T-10->T-11'];
+  expectJoined(before);
+  // Electrical ends day +9 (bar edge at +10), Paint walls starts day +30: 20 days apart.
+  expect(Math.abs((before.end.x - before.start.x) - 20 * ppd0)).toBeLessThan(1);
+
+  for (let i = 0; i < 3; i++) await page.locator('button[data-plan="zoom-in"]').click();
+  const ppd1 = parseFloat(await canvas.getAttribute('data-ppd'));
+  expect(ppd1).toBeGreaterThan(ppd0 * 2);
+  const after = (await connectors(page))['T-10->T-11'];
+  expectJoined(after);
+  expect(Math.abs((after.end.x - after.start.x) - 20 * ppd1)).toBeLessThan(1);
+  expect(Math.abs(after.start.x - before.start.x)).toBeGreaterThan(10);
+  // Rows did not move: the vertical positions are unchanged.
+  expect(Math.abs(after.start.y - before.start.y)).toBeLessThan(1);
+  expect(Math.abs(after.end.y - before.end.y)).toBeLessThan(1);
+  // The overlay is the size of the canvas.
+  const size = await page.evaluate(() => {
+    const c = document.querySelector('.timeline-canvas').getBoundingClientRect();
+    const s = document.querySelector('.timeline-deps').getBoundingClientRect();
+    return { dw: Math.abs(c.width - s.width), dh: Math.abs(c.height - s.height) };
+  });
+  expect(size.dw).toBeLessThan(2);
+  expect(size.dh).toBeLessThan(2);
+});

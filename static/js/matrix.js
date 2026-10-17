@@ -19,8 +19,13 @@
 // Hovering a point shows a tooltip (title + rendered markdown description) and
 // toggles .matrix-hover on the matching table row; hovering a table row
 // highlights its point in return.
+//
+// Dependencies between two plotted tasks are drawn as a thin straight line
+// from the blocker's dot to the blocked dot (shortened to the dots' edges,
+// arrowhead at the blocked end) in a group beneath the points. Lines from an
+// open blocker use the alert colour; hovering a point lights up its lines.
 
-import { state, isClosed, STATUS_LABEL } from './state.js';
+import { state, isClosed, isBlocked, openBlockers, dependencyEdges, STATUS_LABEL } from './state.js';
 import { renderMarkdown } from './markdown.js';
 import { el } from './util.js';
 
@@ -31,6 +36,7 @@ const POINT_R = 5;
 const HIT_R = 13;
 const MIN_PLOT = 320;      // minimum plot-area width and height (px)
 const BOTTOM_GAP = 16;     // viewport margin kept below the plot (px)
+const MIN_DEP_LEN = 6;     // shortest dependency line worth drawing (px)
 
 function svg(tag, attrs = {}, ...children) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -109,7 +115,7 @@ function layout(rows, plotW, plotH) {
 function pointClass(item) {
   const cls = ['pt'];
   if (isClosed(item.status)) cls.push('closed');
-  if (item.blocked) cls.push('blocked');
+  if (isBlocked(item)) cls.push('blocked');
   return cls.join(' ');
 }
 
@@ -143,7 +149,10 @@ function createTooltip(panel) {
       el('span', {}, STATUS_LABEL[item.status] || item.status));
     const who = assigneeName(item);
     if (who) meta.append(el('span', {}, who));
-    if (item.blocked) meta.append(el('span', { class: 'tip-blocked' }, 'Blocked'));
+    if (isBlocked(item)) {
+      const by = openBlockers(item).map((b) => b.key);
+      meta.append(el('span', { class: 'tip-blocked' }, by.length ? `Blocked by ${by.join(', ')}` : 'Blocked'));
+    }
     tip.replaceChildren(header, meta);
     if (item.description && item.description.trim()) {
       const md = el('div', { class: 'md tip-desc' });
@@ -187,6 +196,44 @@ function createTooltip(panel) {
   };
 }
 
+// ---------------------------------------------------------------- dependencies
+
+function arrowMarker(id, cls) {
+  return svg('marker', {
+    id, class: cls, viewBox: '0 0 8 6', refX: 8, refY: 3, markerWidth: 7, markerHeight: 5,
+    markerUnits: 'userSpaceOnUse', orient: 'auto',
+  }, svg('path', { d: 'M0 0 L8 3 L0 6 Z' }));
+}
+
+/** Group of dependency lines between plotted points, drawn beneath the points.
+ *  Each line runs from the edge of the blocker's dot to the edge of the
+ *  blocked dot and is recorded on both points (p.lines) for hover lighting. */
+function drawDependencies(pts) {
+  const byId = new Map(pts.map((p) => [p.item.id, p]));
+  const g = svg('g', { class: 'deps' },
+    svg('defs', {}, arrowMarker('mx-dep-arrow', 'dep-arrow'), arrowMarker('mx-dep-arrow-open', 'dep-arrow open')));
+  for (const { blocker, blocked } of dependencyEdges()) {
+    const a = byId.get(blocker.id), b = byId.get(blocked.id);
+    if (!a || !b) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 2 * POINT_R + MIN_DEP_LEN) continue; // dots overlap: nothing to draw between them
+    const ux = dx / len, uy = dy / len;
+    const open = !isClosed(blocker.status);
+    const line = svg('line', {
+      class: `dep${open ? ' open' : ''}`,
+      x1: a.x + ux * POINT_R, y1: a.y + uy * POINT_R,
+      x2: b.x - ux * POINT_R, y2: b.y - uy * POINT_R,
+      'marker-end': `url(#${open ? 'mx-dep-arrow-open' : 'mx-dep-arrow'})`,
+      dataset: { blocker: blocker.id, blocked: blocked.id },
+    });
+    a.lines.push(line);
+    b.lines.push(line);
+    g.append(line);
+  }
+  return g;
+}
+
 // ---------------------------------------------------------------- plot
 
 function drawPlot(root, rows, width, height) {
@@ -228,10 +275,13 @@ function drawPlot(root, rows, width, height) {
     svg('text', { class: 'quad-label', x: x0 + 6, y: y1 + 14, 'text-anchor': 'start' }, 'urgent & important'),
   );
 
-  const points = svg('g', { class: 'points' });
   const pts = layout(rows, plotW, plotH);
   // Draw closed/blocked first so live points sit on top of muted ones.
-  pts.sort((a, b) => Number(isClosed(a.item.status) || a.item.blocked) - Number(isClosed(b.item.status) || b.item.blocked));
+  pts.sort((a, b) => Number(isClosed(a.item.status) || isBlocked(a.item)) - Number(isClosed(b.item.status) || isBlocked(b.item)));
+  for (const p of pts) p.lines = [];
+  node.append(drawDependencies(pts));
+
+  const points = svg('g', { class: 'points' });
   for (const p of pts) {
     const color = pointColor(p.item);
     const g = svg('g', {
@@ -250,7 +300,7 @@ function drawPlot(root, rows, width, height) {
     const ly = vertical ? p.y + (Math.sin(p.angle) < 0 ? -(POINT_R + 5) : POINT_R + 5) : p.y;
     g.append(
       svg('circle', { class: 'hit', cx: p.x, cy: p.y, r: HIT_R }),
-      p.item.blocked ? svg('circle', { class: 'ring', cx: p.x, cy: p.y, r: POINT_R + 3.5 }) : null,
+      isBlocked(p.item) ? svg('circle', { class: 'ring', cx: p.x, cy: p.y, r: POINT_R + 3.5 }) : null,
       svg('circle', { class: 'dot', cx: p.x, cy: p.y, r: POINT_R }),
       svg('text', {
         class: 'label', x: lx, y: ly,
@@ -293,6 +343,13 @@ export function renderMatrix(panel, handle, ctx) {
     return Math.round(window.innerHeight - top - BOTTOM_GAP);
   }
 
+  /** Highlight a point and the dependency lines attached to it. */
+  function setHover(p, on) {
+    if (!p) return;
+    p.g.classList.toggle('hover', on);
+    for (const l of p.lines) l.classList.toggle('lit', on);
+  }
+
   function draw() {
     const width = panel.clientWidth || 600;
     const height = availableHeight();
@@ -304,12 +361,12 @@ export function renderMatrix(panel, handle, ctx) {
     for (const p of pts) {
       byId.set(p.item.id, p);
       p.g.addEventListener('pointerenter', () => {
-        p.g.classList.add('hover');
+        setHover(p, true);
         p.row.el.classList.add('matrix-hover');
         tip.show(p.item, p.g.querySelector('.dot'));
       });
       p.g.addEventListener('pointerleave', () => {
-        p.g.classList.remove('hover');
+        setHover(p, false);
         p.row.el.classList.remove('matrix-hover');
         tip.hide();
       });
@@ -322,8 +379,8 @@ export function renderMatrix(panel, handle, ctx) {
 
   // Table row hover highlights the point in return.
   for (const r of rows) {
-    r.el.addEventListener('pointerenter', () => byId.get(r.item.id)?.g.classList.add('hover'));
-    r.el.addEventListener('pointerleave', () => byId.get(r.item.id)?.g.classList.remove('hover'));
+    r.el.addEventListener('pointerenter', () => setHover(byId.get(r.item.id), true));
+    r.el.addEventListener('pointerleave', () => setHover(byId.get(r.item.id), false));
   }
 
   // Panel width changes come through the ResizeObserver; a viewport height

@@ -13,15 +13,24 @@
 // header row and has two tiers: the major unit (month/year, a sticky label that
 // stays in view while scrolling) above the minor unit (days/weeks/months).
 // View state (zoom and scroll position) is kept in memory for the session only.
+//
+// Dependencies: every edge whose two items both have a bar is drawn as a
+// rounded orthogonal connector from the end of the blocker's bar to the start
+// of the blocked bar, with an arrowhead at the blocked end. The connectors
+// live in one SVG overlay in canvas coordinates, so they zoom and scroll with
+// the bars. Open blockers (not done/cancelled) use the alert colour.
 
 import { el } from './util.js';
-import { state, isClosed, parseYMD, today, daysFromToday } from './state.js';
+import { state, isClosed, isBlocked, dependencyEdges, parseYMD, today, daysFromToday } from './state.js';
 
 const DAY_MS = 86400000;
 const MAX_PPD = 80;        // max pixels per day
 const ZOOM_STEP = 1.35;    // factor per +/- click
 const SHORT_FADE_DAYS = 3; // soft edge width for non-firm dates
 const MISSING_FADE_DAYS = 14; // tail length for a missing start or end date
+const DEP_PAD = 10;        // connector stub length beyond a bar edge (px)
+const DEP_RADIUS = 6;      // connector corner radius (px)
+const SVG_NS = 'http://www.w3.org/2000/svg';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -106,6 +115,79 @@ function* ticks(unit, base, from, to) {
   }
 }
 
+// ---------------------------------------------------------------- dependency connectors
+
+function svg(tag, attrs = {}, ...children) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === 'dataset') Object.assign(node.dataset, v);
+    else node.setAttribute(k, String(v));
+  }
+  node.append(...children);
+  return node;
+}
+
+const px = (n) => Math.round(n * 100) / 100;
+
+/** SVG path data for an orthogonal polyline with rounded corners. The path
+ *  starts exactly at the first point and ends exactly at the last. */
+function roundedPath(points, r) {
+  const pts = points.filter((p, i) => i === 0 || p[0] !== points[i - 1][0] || p[1] !== points[i - 1][1]);
+  let d = `M${px(pts[0][0])} ${px(pts[0][1])}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i - 1], [cx, cy] = pts[i], [bx, by] = pts[i + 1];
+    const inLen = Math.hypot(cx - ax, cy - ay), outLen = Math.hypot(bx - cx, by - cy);
+    const rr = Math.min(r, inLen / 2, outLen / 2);
+    const ix = cx + ((ax - cx) / inLen) * rr, iy = cy + ((ay - cy) / inLen) * rr;
+    const ox = cx + ((bx - cx) / outLen) * rr, oy = cy + ((by - cy) / outLen) * rr;
+    d += ` L${px(ix)} ${px(iy)} Q${px(cx)} ${px(cy)} ${px(ox)} ${px(oy)}`;
+  }
+  const [lx, ly] = pts[pts.length - 1];
+  return d + ` L${px(lx)} ${px(ly)}`;
+}
+
+/** Route from the end of the blocker bar (a) to the start of the blocked bar (b).
+ *  Each bar is { x0, x1, yc, rowTop, rowBottom }. When the blocked bar starts
+ *  after the blocker ends the connector is a simple elbow through the gap;
+ *  otherwise it steps out past the blocker's end, runs back along the edge of
+ *  the blocker's row, and comes in from the left of the blocked bar. */
+function connectorPoints(a, b) {
+  const gap = b.x0 - a.x1;
+  if (gap >= 2 * DEP_PAD) {
+    const mx = a.x1 + gap / 2;
+    return [[a.x1, a.yc], [mx, a.yc], [mx, b.yc], [b.x0, b.yc]];
+  }
+  const ym = b.yc > a.yc ? a.rowBottom : a.rowTop;
+  return [[a.x1, a.yc], [a.x1 + DEP_PAD, a.yc], [a.x1 + DEP_PAD, ym], [b.x0 - DEP_PAD, ym], [b.x0 - DEP_PAD, b.yc], [b.x0, b.yc]];
+}
+
+function arrowMarker(id, cls) {
+  return svg('marker', {
+    id, class: cls, viewBox: '0 0 8 6', refX: 8, refY: 3, markerWidth: 8, markerHeight: 6,
+    markerUnits: 'userSpaceOnUse', orient: 'auto',
+  }, svg('path', { d: 'M0 0 L8 3 L0 6 Z' }));
+}
+
+/** The SVG overlay with one connector per edge whose bars are both drawn
+ *  (`geom` maps item id to bar geometry). */
+function drawDependencies(geom, width, height) {
+  const node = svg('svg', { class: 'timeline-deps', width, height, 'aria-hidden': 'true' },
+    svg('defs', {}, arrowMarker('tl-dep-arrow', 'timeline-dep-arrow'), arrowMarker('tl-dep-arrow-open', 'timeline-dep-arrow open')));
+  for (const { blocker, blocked } of dependencyEdges()) {
+    const a = geom.get(blocker.id), b = geom.get(blocked.id);
+    if (!a || !b) continue;
+    const open = !isClosed(blocker.status);
+    node.append(svg('path', {
+      class: `timeline-dep${open ? ' open' : ''}`,
+      d: roundedPath(connectorPoints(a, b), DEP_RADIUS),
+      'marker-end': `url(#${open ? 'tl-dep-arrow-open' : 'tl-dep-arrow'})`,
+      dataset: { blocker: blocker.id, blocked: blocked.id },
+    }));
+  }
+  return node;
+}
+
 // ---------------------------------------------------------------- render
 
 export function renderTimeline(panel, handle, ctx) {
@@ -183,6 +265,7 @@ export function renderTimeline(panel, handle, ctx) {
     // Row bands and bars (positions from the rows' real bounding boxes).
     const bands = [];
     const bars = [];
+    const geom = new Map(); // item id -> bar geometry for the dependency connectors
     const longFade = Math.max(MISSING_FADE_DAYS * ppd, 24); // tail for a missing date
     const shortFade = Math.max(SHORT_FADE_DAYS * ppd, 6);
     for (const r of rows) {
@@ -216,7 +299,7 @@ export function renderTimeline(panel, handle, ctx) {
       const user = it.assignee_id != null ? state.usersById.get(it.assignee_id) : null;
       const cls = ['timeline-bar', r.kind];
       if (isClosed(it.status)) cls.push('closed');
-      if (it.blocked) cls.push('blocked');
+      if (isBlocked(it)) cls.push('blocked');
       if (s == null) cls.push('no-start');
       if (e == null) cls.push('no-end');
       const bar = el('div', {
@@ -233,6 +316,7 @@ export function renderTimeline(panel, handle, ctx) {
       bar.addEventListener('mousemove', moveTip);
       bar.addEventListener('mouseleave', hideTip);
       bars.push(bar);
+      geom.set(it.id, { x0, x1, yc: top + h / 2, rowTop: top, rowBottom: top + h });
     }
 
     canvas.style.width = `${W}px`;
@@ -265,6 +349,7 @@ export function renderTimeline(panel, handle, ctx) {
     canvas.append(el('div', { class: 'timeline-rows', style: { top: '0px' } }, ...bands));
     canvas.append(...tickEls);
     canvas.append(...bars);
+    canvas.append(drawDependencies(geom, W, height));
 
     // Today marker.
     canvas.append(el('div', { class: 'timeline-today', style: { left: `${x(0)}px` } },

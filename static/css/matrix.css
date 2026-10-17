@@ -48,6 +48,19 @@
   opacity: 0.55;
 }
 
+/* ---- dependency lines (blocker -> blocked), beneath the points ---- */
+.matrix-plot .deps .dep {
+  stroke: var(--fg-muted);
+  stroke-width: 1;
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.08s;
+}
+.matrix-plot .deps .dep.open { stroke: var(--hl-alert); opacity: 0.5; }
+.matrix-plot .deps .dep.lit { opacity: 0.9; stroke-width: 1.5; }
+.matrix-plot .dep-arrow path { fill: var(--fg-muted); }
+.matrix-plot .dep-arrow.open path { fill: var(--hl-alert); }
+
 /* ---- points ---- */
 .matrix-plot .pt { cursor: pointer; }
 .matrix-plot .pt .hit { fill: transparent; stroke: none; pointer-events: all; }
