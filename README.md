@@ -22,11 +22,12 @@ the single SQLite file. The directory containing it must already exist.
 
 1. Open **Settings** and add the people who will own or be assigned work. Each gets a colour (click the swatch to change it) that highlights
    the Owner and Assignee columns everywhere.
-2. The single planner page has predefined filters along the top: **Active**
-   (To-Do and In-Progress work plus anything closed in the last 14 days),
-   **Backlog**, **Ideas** and **All**. The search box and Filters apply on top
-   of whichever is selected. The ☰ menu at the far left switches filters and
-   opens Settings.
+2. The planner is a single page. **Active**, **Backlog** and **Ideas** beside
+   the search box are filter templates: Active sets To-Do and In-Progress
+   plus anything closed in the last 14 days, the other two set that status
+   for projects and tasks. They fill the Filters panel, where you can adjust
+   them; Clear removes every filter and shows everything. The gear at the
+   far left opens Settings, which has an Items button to come back.
    Click **New Ongoing** or **New Project** to add a blank row;
    fill in the title (required) and anything else, then press Enter or the ✓
    button (✕ or Escape discards). Use the **+** on an Ongoing or Project row
@@ -59,8 +60,7 @@ the single SQLite file. The directory containing it must already exist.
    Ongoing, Project and Task rows, the end-date highlight colours and
    windows, and a colour for each urgency and importance value (two ramps,
    with presets).
-7. Table, Timeline and Matrix are available for every filter, and the search
-   and filters apply to all three.
+7. Table, Timeline and Matrix show the same filtered items.
 8. Deleting hides an item (and its tasks) from the UI; the rows stay in the
    database and keys are never reused. Each item's status history is kept and
    available at `/api/items/{id}/history`.
@@ -172,14 +172,14 @@ Layout:
     static/               Frontend: vanilla ES modules, no build step
       js/app.js           hash router, toolbar, page rendering
       js/state.js         client cache + local-timezone date helpers
-      js/filters.js       the predefined filters (Active/Backlog/Ideas/All; supersede rule lives here)
+      js/filters.js       grouping of items and the Active/Backlog/Ideas filter templates
       js/table.js         hierarchical table renderer, drag reordering, expanded rows
       js/cells.js         inline-editable cells, new-row draft, dependency panel
       js/timeline.js      Timeline (Gantt) view
       js/matrix.js        Matrix (scatter) view
       js/settings.js      Settings page (week start, row colours)
       js/users.js         Users section of Settings
-      js/search.js        search box and filter popover
+      js/search.js        search box, filter templates and the filter popover (supersede rule lives here)
       css/app.css         theme tokens + table; one css file per feature module
     scripts/seed.sh       sample data for a running instance
     deploy/               systemd unit, env example, install/uninstall scripts

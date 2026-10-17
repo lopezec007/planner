@@ -70,7 +70,7 @@ test('New ongoing from the toolbar; Backlog offers no Ongoing and defaults to ba
   await page.locator('button[title=Discard]').click();
   await expect(newRow(page)).toHaveCount(0);
 
-  await page.goto('/');
+  await page.locator('.search-preset[data-preset=active]').click();
   await page.locator('#btn-new-ongoing').click();
   await expect(newRow(page).locator('select[name=status]')).toHaveCount(0); // ongoing has no status
   await newRow(page).locator('input[name=title]').fill('Should be discarded');

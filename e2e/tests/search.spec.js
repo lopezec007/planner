@@ -89,20 +89,20 @@ test('type and status filters', async ({ page }) => {
   await page.locator('[data-search-key="type:task"]').click();
   await expect(page.locator('#btn-filters .search-badge')).toHaveCount(0);
 
-  // Status: backlog project matches itself; backlog tasks under other parents match.
+  // Status: a project's status supersedes its tasks; tasks under an Ongoing use their own.
   await page.locator('[data-search-key="status:backlog"]').click();
   await expect(parent(page, 'File taxes')).toBeVisible();
-  await expect(task(page, 'Gather W-2s')).toHaveCount(0); // todo task under backlog project
-  await expect(task(page, 'Paint walls')).toBeVisible();
-  await expect(task(page, 'Service lawnmower')).toBeVisible();
+  await expect(task(page, 'Gather W-2s')).toBeVisible();      // todo task under a backlog project
+  await expect(task(page, 'Paint walls')).toHaveCount(0);     // backlog task under an in-progress project
+  await expect(task(page, 'Service lawnmower')).toBeVisible(); // backlog task under an Ongoing
   await expect(tasks(page)).toHaveCount(2);
-  await expect(parents(page)).toHaveCount(3);
-  await expect(page.locator('#search-count')).toHaveText('3 items match');
+  await expect(parents(page)).toHaveCount(3); // + both Ongoing rows, which a status filter never excludes
+  await expect(page.locator('#search-count')).toHaveText('5 items match');
 
   // Combine with text search.
-  await page.locator('#search-text').fill('paint');
+  await page.locator('#search-text').fill('lawn');
   await expect(tasks(page)).toHaveCount(1);
-  await expect(task(page, 'Paint walls')).toBeVisible();
+  await expect(task(page, 'Service lawnmower')).toBeVisible();
   await expect(parents(page)).toHaveCount(1);
 
   await page.locator('#btn-search-clear').click();
@@ -186,25 +186,36 @@ test('end date before/after filters', async ({ page }) => {
   await expect(page.locator('[data-search-key="endAfter"]')).toHaveValue('');
 });
 
-test('criteria persist across presets and stack on top of them', async ({ page }) => {
+test('the Active / Backlog / Ideas templates set the filters; other criteria stack on top', async ({ page }) => {
   await page.locator('#search-text').fill('gutters');
   await expect(tasks(page)).toHaveCount(1);
-  // Switch to the Active preset: the search still applies there.
-  await page.locator('.presets button[data-preset=active]').click();
-  await expect(page.locator('.presets button.active')).toHaveText('Active');
+  // Active template: status To-Do/In-Progress (+ recently closed); the search still applies.
+  await page.locator('.search-preset[data-preset=active]').click();
+  await expect(page.locator('.search-preset.active')).toHaveText('Active');
   await expect(page.locator('#search-text')).toHaveValue('gutters');
   await expect(tasks(page)).toHaveCount(1);
   await expect(task(page, 'Clean gutters')).toBeVisible();
-  // Back to All; clearing restores everything.
-  await page.goto('/#/all');
-  await expect(page.locator('#search-text')).toHaveValue('gutters');
+  await page.locator('#search-text').fill('');
+  await expect(parents(page)).toHaveCount(5); // Maintenance, Finance, Kitchen remodel, Spring garden, Repaint shed
+  await expect(task(page, 'Paint walls')).toBeVisible();        // backlog task under an in-progress project
+  await expect(task(page, 'Service lawnmower')).toHaveCount(0); // backlog task under an Ongoing
+  await expect(parent(page, 'File taxes')).toHaveCount(0);
+  // The template is reflected in the Filters panel and can be adjusted there.
+  await openFilters(page);
+  await expect(page.locator('[data-search-key="status:todo"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-search-key="recentDays"]')).toHaveValue('14');
+  await page.locator('[data-search-key="status:backlog"]').click();
+  await expect(task(page, 'Service lawnmower')).toBeVisible();
+  await expect(page.locator('.search-preset.active')).toHaveCount(0); // no longer exactly a template
+  // Backlog template: backlog status for projects and tasks only.
+  await page.locator('.search-preset[data-preset=backlog]').click();
+  await expect(parent(page, 'File taxes')).toBeVisible();
+  await expect(task(page, 'Gather W-2s')).toBeVisible();        // task of a backlog project (any status)
+  await expect(task(page, 'Service lawnmower')).toBeVisible();  // backlog task under an Ongoing (context parent)
+  await expect(parent(page, 'Finance')).toHaveCount(0);         // Ongoing without backlog tasks
+  await expect(task(page, 'Paint walls')).toHaveCount(0);       // project status supersedes
+  // Clear = no filters at all.
   await page.locator('#btn-search-clear').click();
   await expect(parents(page)).toHaveCount(7);
-  // A status filter on the Active preset narrows within it.
-  await page.goto('/#/active');
-  await openFilters(page);
-  await page.locator('[data-search-key="status:backlog"]').click();
-  await expect(task(page, 'Paint walls')).toBeVisible(); // backlog task shown under its in-progress project
-  await expect(task(page, 'Service lawnmower')).toHaveCount(0); // not on Active (under an Ongoing)
-  await page.locator('#btn-search-clear').click();
+  await expect(page.locator('.search-preset.active')).toHaveCount(0);
 });

@@ -1,7 +1,7 @@
 /* styles for search (see js/search.js) */
 .search-slot { display: flex; align-items: center; }
 .search-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.search-text { width: 260px; }
+.search-text { width: 190px; }
 .search-text::placeholder { color: var(--fg-muted); }
 
 .search-badge {
@@ -63,3 +63,8 @@
   border-color: var(--accent);
   outline: none;
 }
+
+/* filter templates beside the Filters button */
+.search-presets button { padding: 4px 9px; }
+.search-recent { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; color: var(--fg-muted); font-size: 12px; }
+.search-recent input { width: 56px; padding: 2px 4px; font-size: 12px; }

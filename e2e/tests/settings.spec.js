@@ -12,14 +12,17 @@ test('settings page hosts the users list and the old #/users route still works',
   await expect(page.locator('#settings-users .chip', { hasText: 'Evan' })).toBeVisible();
   await page.goto('/#/users');
   await expect(page.locator('h1')).toHaveText('Settings');
-  // The hamburger menu marks the current page and offers the presets.
-  await page.locator('#menu-btn').click();
-  await expect(page.locator('#menu a.active')).toHaveText('Settings');
-  await expect(page.locator('#menu a[data-preset]')).toHaveCount(4);
-  await page.locator('#menu a[data-preset=backlog]').click();
-  await expect(page.locator('#menu')).toBeHidden();
-  await expect(page.locator('.presets button.active')).toHaveText('Backlog');
+  // The gear opens Settings directly and the toolbar offers a way back.
+  await page.locator('#btn-back').click();
+  await expect(page.locator('.row.parent').first()).toBeVisible();
   await expect(page.locator('#nav')).toHaveCount(0); // the old tab bar is gone
+  await page.locator('#btn-settings').click();
+  await expect(page.locator('h1')).toHaveText('Settings');
+  await page.locator('#btn-back').click();
+  // The filter templates sit beside the Filters button and set the filters.
+  await page.locator('.search-preset[data-preset=backlog]').click();
+  await expect(page.locator('.search-preset.active')).toHaveText('Backlog');
+  await expect(page.locator('#btn-filters .search-badge')).toHaveText('2'); // status + type
 });
 
 test('week start defaults to Saturday and can be changed', async ({ page }) => {

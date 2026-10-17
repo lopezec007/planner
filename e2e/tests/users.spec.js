@@ -16,7 +16,7 @@ test('users page lists seeded users with colour chips', async ({ page }) => {
     expect(bg).toMatch(/^rgb\(/);
     await expect(r.locator('input[type="color"]')).toHaveValue(/^#[0-9a-f]{6}$/);
   }
-  await expect(page.locator('#toolbar > *:not(.spacer):not(.version)')).toHaveCount(0); // only the version badge
+  await expect(page.locator('#toolbar > *:not(.spacer):not(.version):not(#btn-back)')).toHaveCount(0); // only Back and the version badge
   expect(errors).toEqual([]);
 });
 

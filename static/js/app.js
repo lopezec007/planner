@@ -1,30 +1,30 @@
-// Application shell: hash router, hamburger menu, toolbar, page rendering.
+// Application shell: hash router, toolbar, page rendering.
 //
-// There is one planner page with predefined filters ("presets"): Active,
-// Backlog, Ideas and All. Routes: #/ (Active), #/active,
-// #/backlog, #/ideas, #/all, #/settings. (#/everything and #/home are kept
-// as aliases.)
+// There is one planner page (all items, narrowed by the search/filter
+// controls, which start on the Active template) and a Settings page reached
+// from the gear at the far left. Routes: #/ and #/settings. The old
+// #/active, #/backlog, #/ideas and #/all (or #/everything) apply that filter
+// template and then drop back to #/.
 
 import { api } from './api.js';
 import { state, load } from './state.js';
-import { PRESETS } from './filters.js';
+import { allGroups } from './filters.js';
 import { renderTable, expandableIds } from './table.js';
 import { renderTimeline } from './timeline.js';
 import { renderMatrix } from './matrix.js';
 import { renderSettings } from './settings.js';
-import { renderSearch } from './search.js';
+import { renderSearch, applyPreset, newStatus, typeAllowed } from './search.js';
 import { el, toast, contrastText } from './util.js';
 import { beginNew, discardNew } from './cells.js';
 
 const main = document.getElementById('main');
 const toolbar = document.getElementById('toolbar');
-const menuBtn = document.getElementById('menu-btn');
-const menu = document.getElementById('menu');
+const settingsBtn = document.getElementById('btn-settings');
 
-const PRESET_ORDER = ['active', 'backlog', 'ideas', 'all'];
 const VIEWS = ['table', 'timeline', 'matrix'];
+const LEGACY_FILTER_ROUTES = { active: 'active', backlog: 'backlog', ideas: 'ideas', all: 'all', everything: 'all', home: 'active' };
 
-// UI state for the planner page (shared by all presets), surviving re-renders.
+// UI state for the planner page, surviving re-renders.
 const ui = { view: 'table', expanded: new Set(), searchFilter: null };
 let narrow = false; // table-view width constraint for very wide windows
 try {
@@ -36,11 +36,11 @@ const remember = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 function route() {
   const hash = location.hash.replace(/^#\/?/, '').split('?')[0];
   if (hash === 'settings' || hash === 'users') return { page: 'settings' };
-  let preset = hash || 'active';
-  if (preset === 'home') preset = 'active';
-  if (preset === 'everything') preset = 'all';
-  if (!PRESETS[preset]) preset = 'active';
-  return { page: 'main', preset };
+  if (hash in LEGACY_FILTER_ROUTES) {
+    applyPreset(LEGACY_FILTER_ROUTES[hash]);
+    history.replaceState(null, '', '#/');
+  }
+  return { page: 'main' };
 }
 
 async function reload() {
@@ -73,12 +73,11 @@ function applySettings() {
 // Every field edits in place (see cells.js). These actions add a new row,
 // delete, and reload after any change.
 const actions = {
-  onNew(type, preset) {
-    if (beginNew({ type, status: PRESETS[preset].newStatus })) render();
+  onNew(type) {
+    if (beginNew({ type, status: newStatus() })) render();
   },
   onAddTask(parent) {
-    const r = route();
-    if (beginNew({ type: 'task', parentId: parent.id, status: PRESETS[r.preset]?.newStatus || 'todo' })) render();
+    if (beginNew({ type: 'task', parentId: parent.id, status: newStatus() })) render();
   },
   onChanged: reload,
   async onDelete(item) {
@@ -97,48 +96,25 @@ function versionBadge() {
   return el('span', { class: 'version', id: 'app-version', title }, v.version ? `v${v.version}` : '');
 }
 
-// ---- hamburger menu: presets and Settings ----
-function renderMenu(r) {
-  menu.replaceChildren(el('div', { class: 'menu-title' }, 'Show'));
-  for (const k of PRESET_ORDER) {
-    menu.append(el('a', { href: `#/${k}`, class: r.page === 'main' && r.preset === k ? 'active' : '', dataset: { preset: k } }, PRESETS[k].title));
-  }
-  menu.append(el('div', { class: 'sep' }), el('a', { href: '#/settings', class: r.page === 'settings' ? 'active' : '', dataset: { page: 'settings' } }, 'Settings'));
-}
-function setMenu(open) {
-  menu.hidden = !open;
-  menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-menuBtn.addEventListener('click', () => setMenu(menu.hidden));
-document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap')) setMenu(false); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) { setMenu(false); menuBtn.focus(); } });
-menu.addEventListener('click', (e) => { if (e.target.closest('a')) setMenu(false); });
+settingsBtn.addEventListener('click', () => { location.hash = '#/settings'; });
 
 function render() {
   const r = route();
-  renderMenu(r);
+  settingsBtn.classList.toggle('active', r.page === 'settings');
   if (r.page === 'settings') {
-    toolbar.replaceChildren(el('div', { class: 'spacer' }), versionBadge());
+    toolbar.replaceChildren(
+      el('button', { type: 'button', id: 'btn-back', title: 'Back to the items', onClick: () => { location.hash = '#/'; } }, '← Items'),
+      el('div', { class: 'spacer' }), versionBadge());
     renderSettings(main, { reload });
     return;
   }
-  const { preset } = r;
-  const def = PRESETS[preset];
 
   // ---- toolbar ----
   toolbar.replaceChildren();
-  const presets = el('div', { class: 'group presets', role: 'group', 'aria-label': 'Predefined filter' });
-  for (const k of PRESET_ORDER) {
-    presets.append(el('button', {
-      type: 'button', class: preset === k ? 'active' : '', dataset: { preset: k }, title: `Show ${PRESETS[k].title.toLowerCase()} items`,
-      onClick: () => { location.hash = `#/${k}`; },
-    }, PRESETS[k].title));
+  if (typeAllowed('ongoing')) {
+    toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-ongoing', onClick: () => actions.onNew('ongoing') }, 'New Ongoing'));
   }
-  toolbar.append(presets);
-  if (def.allowNewOngoing) {
-    toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-ongoing', onClick: () => actions.onNew('ongoing', preset) }, 'New Ongoing'));
-  }
-  toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', onClick: () => actions.onNew('project', preset) }, 'New Project'));
+  toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', onClick: () => actions.onNew('project') }, 'New Project'));
 
   toolbar.append(
     el('button', { type: 'button', id: 'btn-expand-all', onClick: () => { for (const id of expandableIds(currentGroups)) ui.expanded.add(id); render(); } }, 'Expand all'),
@@ -166,8 +142,8 @@ function render() {
   }
   toolbar.append(group, versionBadge());
 
-  // ---- content: preset, then search/filter criteria on top ----
-  let currentGroups = def.groups();
+  // ---- content: all items, narrowed by the search/filter criteria ----
+  let currentGroups = allGroups();
   if (!ui.searchFilter) ui.searchFilter = renderSearch(searchSlot, { rerender: render });
   else renderSearch(searchSlot, { rerender: render }); // re-mount controls into the fresh toolbar
   currentGroups = ui.searchFilter(currentGroups);
@@ -187,7 +163,7 @@ function render() {
     const panel = el('div', { class: 'panel', id: 'panel' });
     main.replaceChildren(el('div', { class: 'split' }, wrap, panel));
     const draw = (handle) => {
-      const ctx = { rerender: render, onChanged: reload, preset };
+      const ctx = { rerender: render, onChanged: reload };
       if (ui.view === 'timeline') renderTimeline(panel, handle, ctx);
       else renderMatrix(panel, handle, ctx);
     };
@@ -195,5 +171,5 @@ function render() {
   }
 }
 
-window.addEventListener('hashchange', () => { discardNew(); setMenu(false); render(); });
+window.addEventListener('hashchange', () => { discardNew(); render(); });
 reload();

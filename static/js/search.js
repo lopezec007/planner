@@ -1,4 +1,5 @@
-// Search and filter controls for the Everything page.
+// Search and filter controls, including the Active / Backlog / Ideas filter
+// templates (see filters.js PRESETS).
 //
 // renderSearch(slot, ctx) renders controls into the toolbar slot and returns
 // a function (groups) => groups that applies the current search/filter.
@@ -11,11 +12,15 @@
 // a full re-render that recreates the controls, focus and caret position are
 // saved before each rerender and restored into the freshly mounted controls.
 //
-// Semantics: an item matches on its own fields. A parent row is shown if it
-// matches itself or any of its tasks match; only matching tasks are shown.
+// Semantics: an item matches on its own fields, except that the status filter
+// uses a task's parent project's status (a project's status supersedes its
+// tasks) and never excludes Ongoing rows (they have no status); `recentDays`
+// also admits items closed within that many days. A parent row is shown if
+// it matches itself or any of its tasks match; only matching tasks are shown.
 // With nothing active the groups pass through unchanged.
 
-import { state, STATUSES, STATUS_LABEL, isBlocked } from './state.js';
+import { state, STATUSES, STATUS_LABEL, isBlocked, isClosed, withinLastDays } from './state.js';
+import { PRESETS, PRESET_ORDER } from './filters.js';
 import { el } from './util.js';
 
 const TYPES = [['ongoing', 'Ongoing'], ['project', 'Project'], ['task', 'Task']];
@@ -25,6 +30,7 @@ function emptyCriteria() {
     text: '',
     types: new Set(),
     statuses: new Set(),
+    recentDays: 0,  // also match items closed within this many days (0 = off)
     owner: '',      // '' any | 'none' | user id (string)
     assignee: '',   // '' any | 'none' | user id (string)
     blocked: '',    // '' any | 'yes' | 'no'
@@ -33,8 +39,52 @@ function emptyCriteria() {
   };
 }
 
+/** Criteria for a filter template ('all' = nothing). */
+function presetCriteria(name) {
+  const c = emptyCriteria();
+  const p = PRESETS[name];
+  if (p) {
+    c.statuses = new Set(p.statuses);
+    c.recentDays = p.recentDays;
+    c.types = new Set(p.types);
+  }
+  return c;
+}
+
+/** Apply a template's status/recent/type filters, keeping any other criteria. */
+export function applyPreset(name) {
+  const p = presetCriteria(name);
+  criteria.statuses = p.statuses;
+  criteria.recentDays = p.recentDays;
+  criteria.types = p.types;
+}
+
+const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+
+/** The template whose status/recent/type filters are exactly in effect, or null. */
+export function currentPreset() {
+  for (const k of PRESET_ORDER) {
+    const p = presetCriteria(k);
+    if (sameSet(criteria.statuses, p.statuses) && criteria.recentDays === p.recentDays && sameSet(criteria.types, p.types)) return k;
+  }
+  return null;
+}
+
+/** Default status for a new project/task under the current filters. */
+export function newStatus() {
+  const st = criteria.statuses;
+  if (st.size === 1) return [...st][0];
+  if (st.has('todo') || !st.size) return 'todo';
+  return STATUSES.find((s) => st.has(s)) || 'todo';
+}
+
+/** Whether the type filter lets a newly created item of this type show. */
+export function typeAllowed(type) {
+  return !criteria.types.size || criteria.types.has(type);
+}
+
 // ---- module state (survives re-renders) ----
-let criteria = emptyCriteria();
+let criteria = presetCriteria('active'); // the Active view is the starting point
 let panelOpen = false;
 let currentCtx = null;
 let debounceTimer = null;
@@ -45,12 +95,12 @@ let listenersInstalled = false;
 
 export function isActive() {
   const c = criteria;
-  return !!(c.text.trim() || c.types.size || c.statuses.size || c.owner || c.assignee || c.blocked || c.endAfter || c.endBefore);
+  return !!(c.text.trim() || c.types.size || c.statuses.size || c.recentDays || c.owner || c.assignee || c.blocked || c.endAfter || c.endBefore);
 }
 
 function activeFilterCount() {
   const c = criteria;
-  return (c.types.size ? 1 : 0) + (c.statuses.size ? 1 : 0) + (c.owner ? 1 : 0) + (c.assignee ? 1 : 0)
+  return (c.types.size ? 1 : 0) + (c.statuses.size || c.recentDays ? 1 : 0) + (c.owner ? 1 : 0) + (c.assignee ? 1 : 0)
     + (c.blocked ? 1 : 0) + ((c.endAfter || c.endBefore) ? 1 : 0);
 }
 
@@ -64,7 +114,7 @@ function matches(it) {
     if (!hay.includes(q)) return false;
   }
   if (c.types.size && !c.types.has(it.type)) return false;
-  if (c.statuses.size && !c.statuses.has(it.status)) return false; // Ongoing has no status
+  if (!statusMatches(it)) return false;
   if (c.owner) {
     if (c.owner === 'none' ? it.owner_id != null : String(it.owner_id) !== c.owner) return false;
   }
@@ -78,6 +128,22 @@ function matches(it) {
     if (c.endBefore && it.end_date > c.endBefore) return false;
   }
   return true;
+}
+
+/** Status filter with the supersede rule: a task under a project is judged by
+ *  the project's status (and closed_at); Ongoing rows are never excluded. */
+function statusMatches(it) {
+  const c = criteria;
+  if (!c.statuses.size && !c.recentDays) return true;
+  if (it.type === 'ongoing') return true;
+  let owner = it;
+  if (it.type === 'task' && it.parent_id != null) {
+    const parent = state.itemsById.get(it.parent_id);
+    if (parent && parent.type === 'project') owner = parent;
+  }
+  if (c.statuses.has(owner.status)) return true;
+  if (c.recentDays && isClosed(owner.status) && withinLastDays(owner.closed_at, c.recentDays)) return true;
+  return false;
 }
 
 function countLabel(n) {
@@ -179,8 +245,14 @@ function buildPanel() {
   panel.append(
     chipGroup('Type', TYPES.map(([v, text]) => toggleChip(text, `type:${v}`, c.types.has(v),
       () => { if (c.types.has(v)) c.types.delete(v); else c.types.add(v); }))),
-    chipGroup('Status', STATUSES.map((s) => toggleChip(STATUS_LABEL[s], `status:${s}`, c.statuses.has(s),
-      () => { if (c.statuses.has(s)) c.statuses.delete(s); else c.statuses.add(s); }))),
+    chipGroup('Status', [
+      ...STATUSES.map((s) => toggleChip(STATUS_LABEL[s], `status:${s}`, c.statuses.has(s),
+        () => { if (c.statuses.has(s)) c.statuses.delete(s); else c.statuses.add(s); })),
+      el('label', { class: 'search-recent' }, 'or closed within',
+        el('input', { type: 'number', min: 0, max: 365, value: c.recentDays || '', placeholder: '0', dataset: { searchKey: 'recentDays' }, 'aria-label': 'Closed within days',
+          onChange: (e) => { c.recentDays = Math.max(0, Number(e.target.value) || 0); rerender(); } }),
+        'days'),
+    ]),
     el('div', { class: 'search-row' },
       select('owner', 'Owner', c.owner, [['', 'Any'], ['none', 'No owner'], ...userOpts], (v) => { c.owner = v; }),
       select('assignee', 'Assignee', c.assignee, [['', 'Any'], ['none', 'Unassigned'], ...userOpts], (v) => { c.assignee = v; }),
@@ -200,7 +272,7 @@ export function renderSearch(slot, ctx) {
   slot.classList.add('search-slot');
 
   const text = el('input', {
-    type: 'search', id: 'search-text', class: 'search-text', placeholder: 'Search key, title, description…',
+    type: 'search', id: 'search-text', class: 'search-text', placeholder: 'Search…', title: 'Search key, title and description',
     value: criteria.text, autocomplete: 'off', dataset: { searchKey: 'text' }, 'aria-label': 'Search',
     onInput: () => {
       criteria.text = text.value;
@@ -209,6 +281,16 @@ export function renderSearch(slot, ctx) {
     },
     onKeydown: (e) => { if (e.key === 'Escape') { text.value = ''; criteria.text = ''; rerender(); } },
   });
+
+  const cur = currentPreset();
+  const presets = el('div', { class: 'group search-presets', role: 'group', 'aria-label': 'Filter templates' });
+  for (const k of PRESET_ORDER) {
+    presets.append(el('button', {
+      type: 'button', class: `search-preset${cur === k ? ' active' : ''}`, dataset: { preset: k, searchKey: `preset:${k}` },
+      'aria-pressed': cur === k ? 'true' : 'false', title: `Set the status and type filters for ${PRESETS[k].title.toLowerCase()} items`,
+      onClick: () => { applyPreset(k); rerender(); },
+    }, PRESETS[k].title));
+  }
 
   const nActive = activeFilterCount();
   const filtersBtn = el('button', {
@@ -226,7 +308,7 @@ export function renderSearch(slot, ctx) {
   panelEl = buildPanel();
 
   slot.replaceChildren(
-    el('div', { class: 'search-controls' }, text, el('div', { class: 'menu-wrap search-filters-wrap' }, filtersBtn, panelEl), clearBtn, countEl),
+    el('div', { class: 'search-controls' }, text, presets, el('div', { class: 'menu-wrap search-filters-wrap' }, filtersBtn, panelEl), clearBtn, countEl),
   );
   restoreFocus(slot);
 
