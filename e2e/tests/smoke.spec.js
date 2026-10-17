@@ -68,7 +68,7 @@ test('the version badge shows the semantic version with the release date on hove
   await expect(badge).toHaveText(`v${v.version}`);
   await expect(badge).toHaveAttribute('title', new RegExp(`Version ${v.version.replace(/\./g, '\\.')}, released ${v.date}`));
   // Sits to the right of the view picker.
-  const group = await page.locator('.toolbar .group').boundingBox();
+  const group = await page.locator('.toolbar .group[aria-label="View"]').boundingBox();
   const b = await badge.boundingBox();
   expect(b.x).toBeGreaterThan(group.x + group.width);
   await page.goto('/#/settings');

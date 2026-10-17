@@ -1,10 +1,13 @@
-// Application shell: hash router, toolbar, page rendering.
+// Application shell: hash router, hamburger menu, toolbar, page rendering.
 //
-// Routes: #/ (active), #/backlog, #/ideas, #/everything, #/settings
+// There is one planner page with predefined filters ("presets"): Active,
+// Backlog, Ideas and All. Routes: #/ (Active), #/active,
+// #/backlog, #/ideas, #/all, #/settings. (#/everything and #/home are kept
+// as aliases.)
 
 import { api } from './api.js';
 import { state, load } from './state.js';
-import { PAGES } from './filters.js';
+import { PRESETS } from './filters.js';
 import { renderTable, expandableIds } from './table.js';
 import { renderTimeline } from './timeline.js';
 import { renderMatrix } from './matrix.js';
@@ -15,27 +18,29 @@ import { beginNew, discardNew } from './cells.js';
 
 const main = document.getElementById('main');
 const toolbar = document.getElementById('toolbar');
+const menuBtn = document.getElementById('menu-btn');
+const menu = document.getElementById('menu');
 
-// Per-page UI state that survives re-renders.
-const pageState = {};
-// Table-view width constraint for very wide windows (shared by all pages).
-let narrow = false;
-try { narrow = localStorage.getItem('planner.narrow') === '1'; } catch {}
-function ps(page) {
-  if (!pageState[page]) {
-    let view = 'table';
-    try { view = localStorage.getItem(`planner.view.${page}`) || 'table'; } catch {}
-    pageState[page] = { view, expanded: new Set(), searchFilter: null };
-  }
-  return pageState[page];
-}
+const PRESET_ORDER = ['active', 'backlog', 'ideas', 'all'];
+const VIEWS = ['table', 'timeline', 'matrix'];
+
+// UI state for the planner page (shared by all presets), surviving re-renders.
+const ui = { view: 'table', expanded: new Set(), searchFilter: null };
+let narrow = false; // table-view width constraint for very wide windows
+try {
+  ui.view = VIEWS.includes(localStorage.getItem('planner.view')) ? localStorage.getItem('planner.view') : 'table';
+  narrow = localStorage.getItem('planner.narrow') === '1';
+} catch {}
+const remember = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 
 function route() {
-  const hash = location.hash.replace(/^#\/?/, '');
-  let page = hash.split('?')[0] || 'active';
-  if (page === 'home') page = 'active';
-  if (page === 'users') page = 'settings';
-  return PAGES[page] || page === 'settings' ? page : 'active';
+  const hash = location.hash.replace(/^#\/?/, '').split('?')[0];
+  if (hash === 'settings' || hash === 'users') return { page: 'settings' };
+  let preset = hash || 'active';
+  if (preset === 'home') preset = 'active';
+  if (preset === 'everything') preset = 'all';
+  if (!PRESETS[preset]) preset = 'active';
+  return { page: 'main', preset };
 }
 
 async function reload() {
@@ -68,13 +73,12 @@ function applySettings() {
 // Every field edits in place (see cells.js). These actions add a new row,
 // delete, and reload after any change.
 const actions = {
-  onNew(type, page) {
-    const def = PAGES[page];
-    if (beginNew({ type, status: def.newStatus })) render();
+  onNew(type, preset) {
+    if (beginNew({ type, status: PRESETS[preset].newStatus })) render();
   },
   onAddTask(parent) {
-    const page = route();
-    if (beginNew({ type: 'task', parentId: parent.id, status: PAGES[page]?.newStatus || 'todo' })) render();
+    const r = route();
+    if (beginNew({ type: 'task', parentId: parent.id, status: PRESETS[r.preset]?.newStatus || 'todo' })) render();
   },
   onChanged: reload,
   async onDelete(item) {
@@ -93,66 +97,80 @@ function versionBadge() {
   return el('span', { class: 'version', id: 'app-version', title }, v.version ? `v${v.version}` : '');
 }
 
-function setActiveNav(page) {
-  for (const a of document.querySelectorAll('#nav a')) a.classList.toggle('active', a.dataset.page === page);
+// ---- hamburger menu: presets and Settings ----
+function renderMenu(r) {
+  menu.replaceChildren(el('div', { class: 'menu-title' }, 'Show'));
+  for (const k of PRESET_ORDER) {
+    menu.append(el('a', { href: `#/${k}`, class: r.page === 'main' && r.preset === k ? 'active' : '', dataset: { preset: k } }, PRESETS[k].title));
+  }
+  menu.append(el('div', { class: 'sep' }), el('a', { href: '#/settings', class: r.page === 'settings' ? 'active' : '', dataset: { page: 'settings' } }, 'Settings'));
 }
+function setMenu(open) {
+  menu.hidden = !open;
+  menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+menuBtn.addEventListener('click', () => setMenu(menu.hidden));
+document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap')) setMenu(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) { setMenu(false); menuBtn.focus(); } });
+menu.addEventListener('click', (e) => { if (e.target.closest('a')) setMenu(false); });
 
 function render() {
-  const page = route();
-  setActiveNav(page);
-  if (page === 'settings') {
+  const r = route();
+  renderMenu(r);
+  if (r.page === 'settings') {
     toolbar.replaceChildren(el('div', { class: 'spacer' }), versionBadge());
     renderSettings(main, { reload });
     return;
   }
-  const def = PAGES[page];
-  const st = ps(page);
+  const { preset } = r;
+  const def = PRESETS[preset];
 
   // ---- toolbar ----
   toolbar.replaceChildren();
-  if (def.allowNewOngoing) {
-    toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-ongoing', onClick: () => actions.onNew('ongoing', page) }, 'New Ongoing'));
+  const presets = el('div', { class: 'group presets', role: 'group', 'aria-label': 'Predefined filter' });
+  for (const k of PRESET_ORDER) {
+    presets.append(el('button', {
+      type: 'button', class: preset === k ? 'active' : '', dataset: { preset: k }, title: `Show ${PRESETS[k].title.toLowerCase()} items`,
+      onClick: () => { location.hash = `#/${k}`; },
+    }, PRESETS[k].title));
   }
-  toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', onClick: () => actions.onNew('project', page) }, 'New Project'));
+  toolbar.append(presets);
+  if (def.allowNewOngoing) {
+    toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-ongoing', onClick: () => actions.onNew('ongoing', preset) }, 'New Ongoing'));
+  }
+  toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', onClick: () => actions.onNew('project', preset) }, 'New Project'));
 
   toolbar.append(
-    el('button', { type: 'button', id: 'btn-expand-all', onClick: () => { for (const id of expandableIds(currentGroups)) st.expanded.add(id); render(); } }, 'Expand all'),
-    el('button', { type: 'button', id: 'btn-collapse-all', onClick: () => { st.expanded.clear(); render(); } }, 'Collapse all'),
+    el('button', { type: 'button', id: 'btn-expand-all', onClick: () => { for (const id of expandableIds(currentGroups)) ui.expanded.add(id); render(); } }, 'Expand all'),
+    el('button', { type: 'button', id: 'btn-collapse-all', onClick: () => { ui.expanded.clear(); render(); } }, 'Collapse all'),
   );
 
   const searchSlot = el('div', { class: 'search-slot' });
-  if (page === 'everything') toolbar.append(searchSlot);
+  toolbar.append(searchSlot);
   toolbar.append(el('div', { class: 'spacer' }));
 
-  if (st.view === 'table') {
+  if (ui.view === 'table') {
     toolbar.append(el('button', {
       type: 'button', id: 'btn-narrow', class: narrow ? 'active' : '', title: 'Constrain the table width on wide screens',
       'aria-pressed': narrow ? 'true' : 'false',
-      onClick: () => { narrow = !narrow; try { localStorage.setItem('planner.narrow', narrow ? '1' : '0'); } catch {} render(); },
+      onClick: () => { narrow = !narrow; remember('planner.narrow', narrow ? '1' : '0'); render(); },
     }, 'Narrow'));
   }
 
-  if (def.views.length > 1) {
-    const group = el('div', { class: 'group', role: 'group', 'aria-label': 'View' });
-    for (const v of def.views) {
-      group.append(el('button', {
-        type: 'button', class: st.view === v ? 'active' : '', dataset: { view: v },
-        onClick: () => { st.view = v; try { localStorage.setItem(`planner.view.${page}`, v); } catch {} render(); },
-      }, v[0].toUpperCase() + v.slice(1)));
-    }
-    toolbar.append(group);
-  } else {
-    st.view = 'table';
+  const group = el('div', { class: 'group', role: 'group', 'aria-label': 'View' });
+  for (const v of VIEWS) {
+    group.append(el('button', {
+      type: 'button', class: ui.view === v ? 'active' : '', dataset: { view: v },
+      onClick: () => { ui.view = v; remember('planner.view', v); render(); },
+    }, v[0].toUpperCase() + v.slice(1)));
   }
-  toolbar.append(versionBadge());
+  toolbar.append(group, versionBadge());
 
-  // ---- content ----
+  // ---- content: preset, then search/filter criteria on top ----
   let currentGroups = def.groups();
-  if (page === 'everything') {
-    if (!st.searchFilter) st.searchFilter = renderSearch(searchSlot, { rerender: render });
-    else renderSearch(searchSlot, { rerender: render }); // re-mount controls into fresh toolbar
-    currentGroups = st.searchFilter(currentGroups);
-  }
+  if (!ui.searchFilter) ui.searchFilter = renderSearch(searchSlot, { rerender: render });
+  else renderSearch(searchSlot, { rerender: render }); // re-mount controls into the fresh toolbar
+  currentGroups = ui.searchFilter(currentGroups);
 
   // First-run guidance: an empty database has no users to pick as owner/assignee.
   const hint = (!state.users.length && !state.items.length)
@@ -160,22 +178,22 @@ function render() {
         'Welcome. Start by adding people under ', el('a', { href: '#/settings' }, 'Settings'), ', then use New Ongoing or New Project to create your first items.')
     : null;
 
-  if (st.view === 'table') {
+  if (ui.view === 'table') {
     const wrap = el('div', { class: `table-wrap ${narrow ? 'constrained' : ''}` });
     main.replaceChildren(...[hint, wrap].filter(Boolean));
-    renderTable(wrap, { groups: currentGroups, mode: 'full', expanded: st.expanded, actions });
+    renderTable(wrap, { groups: currentGroups, mode: 'full', expanded: ui.expanded, actions });
   } else {
     const wrap = el('div', { class: 'table-wrap' });
     const panel = el('div', { class: 'panel', id: 'panel' });
     main.replaceChildren(el('div', { class: 'split' }, wrap, panel));
     const draw = (handle) => {
-      const ctx = { rerender: render, onChanged: reload, page };
-      if (st.view === 'timeline') renderTimeline(panel, handle, ctx);
+      const ctx = { rerender: render, onChanged: reload, preset };
+      if (ui.view === 'timeline') renderTimeline(panel, handle, ctx);
       else renderMatrix(panel, handle, ctx);
     };
-    renderTable(wrap, { groups: currentGroups, mode: 'title-only', expanded: st.expanded, actions, onRendered: draw });
+    renderTable(wrap, { groups: currentGroups, mode: 'title-only', expanded: ui.expanded, actions, onRendered: draw });
   }
 }
 
-window.addEventListener('hashchange', () => { discardNew(); render(); });
+window.addEventListener('hashchange', () => { discardNew(); setMenu(false); render(); });
 reload();

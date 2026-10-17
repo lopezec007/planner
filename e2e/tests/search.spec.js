@@ -186,15 +186,25 @@ test('end date before/after filters', async ({ page }) => {
   await expect(page.locator('[data-search-key="endAfter"]')).toHaveValue('');
 });
 
-test('criteria survive navigating away and back; other pages are unaffected', async ({ page }) => {
+test('criteria persist across presets and stack on top of them', async ({ page }) => {
   await page.locator('#search-text').fill('gutters');
   await expect(tasks(page)).toHaveCount(1);
-  await page.goto('/#/');
-  await expect(page.locator('.search-slot')).toHaveCount(0);
-  expect(await tasks(page).count()).toBeGreaterThan(1);
-  await page.goto('/#/everything');
+  // Switch to the Active preset: the search still applies there.
+  await page.locator('.presets button[data-preset=active]').click();
+  await expect(page.locator('.presets button.active')).toHaveText('Active');
   await expect(page.locator('#search-text')).toHaveValue('gutters');
   await expect(tasks(page)).toHaveCount(1);
+  await expect(task(page, 'Clean gutters')).toBeVisible();
+  // Back to All; clearing restores everything.
+  await page.goto('/#/all');
+  await expect(page.locator('#search-text')).toHaveValue('gutters');
   await page.locator('#btn-search-clear').click();
   await expect(parents(page)).toHaveCount(7);
+  // A status filter on the Active preset narrows within it.
+  await page.goto('/#/active');
+  await openFilters(page);
+  await page.locator('[data-search-key="status:backlog"]').click();
+  await expect(task(page, 'Paint walls')).toBeVisible(); // backlog task shown under its in-progress project
+  await expect(task(page, 'Service lawnmower')).toHaveCount(0); // not on Active (under an Ongoing)
+  await page.locator('#btn-search-clear').click();
 });

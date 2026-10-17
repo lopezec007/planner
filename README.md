@@ -22,7 +22,12 @@ the single SQLite file. The directory containing it must already exist.
 
 1. Open **Settings** and add the people who will own or be assigned work. Each gets a colour (click the swatch to change it) that highlights
    the Owner and Assignee columns everywhere.
-2. On **Active**, click **New Ongoing** or **New Project** to add a blank row;
+2. The single planner page has predefined filters along the top: **Active**
+   (To-Do and In-Progress work plus anything closed in the last 14 days),
+   **Backlog**, **Ideas** and **All**. The search box and Filters apply on top
+   of whichever is selected. The ☰ menu at the far left switches filters and
+   opens Settings.
+   Click **New Ongoing** or **New Project** to add a blank row;
    fill in the title (required) and anything else, then press Enter or the ✓
    button (✕ or Escape discards). Use the **+** on an Ongoing or Project row
    to add a task beneath it.
@@ -54,16 +59,14 @@ the single SQLite file. The directory containing it must already exist.
    Ongoing, Project and Task rows, the end-date highlight colours and
    windows, and a colour for each urgency and importance value (two ramps,
    with presets).
-7. **Backlog** and **Ideas** list items in those statuses; **Everything**
-   lists all live items with search and filters, which also apply to its
-   Timeline and Matrix views.
+7. Table, Timeline and Matrix are available for every filter, and the search
+   and filters apply to all three.
 8. Deleting hides an item (and its tasks) from the UI; the rows stay in the
    database and keys are never reused. Each item's status history is kept and
    available at `/api/items/{id}/history`.
 
 "Today" and all date highlighting use the browser's timezone, not the
-server's. The Active page shows To-Do and In-Progress work plus anything closed
-in the last 14 days; a project's status decides where its tasks appear.
+server's. A project's status decides under which filter its tasks appear.
 
 ## Deploying on Debian
 
@@ -169,14 +172,14 @@ Layout:
     static/               Frontend: vanilla ES modules, no build step
       js/app.js           hash router, toolbar, page rendering
       js/state.js         client cache + local-timezone date helpers
-      js/filters.js       which items each page shows (supersede rule lives here)
+      js/filters.js       the predefined filters (Active/Backlog/Ideas/All; supersede rule lives here)
       js/table.js         hierarchical table renderer, drag reordering, expanded rows
       js/cells.js         inline-editable cells, new-row draft, dependency panel
       js/timeline.js      Timeline (Gantt) view
       js/matrix.js        Matrix (scatter) view
       js/settings.js      Settings page (week start, row colours)
       js/users.js         Users section of Settings
-      js/search.js        Everything-page search and filter
+      js/search.js        search box and filter popover
       css/app.css         theme tokens + table; one css file per feature module
     scripts/seed.sh       sample data for a running instance
     deploy/               systemd unit, env example, install/uninstall scripts

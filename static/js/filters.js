@@ -1,4 +1,5 @@
-// Page visibility rules. Each builds a list of groups:
+// Predefined filters ("presets") for the single planner page. Each builds a
+// list of groups:
 //   [{ parent: Item, tasks: [Item, ...] }, ...]
 // in display (sort) order. The "project status supersedes children" rule is
 // implemented here: a visible project always brings all its tasks, and tasks
@@ -32,7 +33,7 @@ function build({ showParent, showTaskUnderOngoing, showProjectEvenIfEmpty }) {
   return groups;
 }
 
-export const PAGES = {
+export const PRESETS = {
   active: {
     title: 'Active',
     views: ['table', 'timeline', 'matrix'],
@@ -63,8 +64,8 @@ export const PAGES = {
       showTaskUnderOngoing: (t) => t.status === 'idea',
     }),
   },
-  everything: {
-    title: 'Everything',
+  all: {
+    title: 'All',
     views: ['table', 'timeline', 'matrix'],
     newStatus: 'todo',
     allowNewOngoing: true,

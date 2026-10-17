@@ -18,13 +18,10 @@
 </head>
 <body>
   <header class="topbar">
-    <nav class="nav" id="nav">
-      <a href="#/" data-page="active">Active</a>
-      <a href="#/backlog" data-page="backlog">Backlog</a>
-      <a href="#/ideas" data-page="ideas">Ideas</a>
-      <a href="#/everything" data-page="everything">Everything</a>
-      <a href="#/settings" data-page="settings">Settings</a>
-    </nav>
+    <div class="menu-wrap">
+      <button type="button" class="menu-btn" id="menu-btn" aria-label="Menu" aria-haspopup="true" aria-expanded="false" title="Menu">&#9776;</button>
+      <nav class="appmenu" id="menu" hidden></nav>
+    </div>
     <div class="toolbar" id="toolbar"></div>
   </header>
   <main id="main"></main>

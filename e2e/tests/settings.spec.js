@@ -12,7 +12,14 @@ test('settings page hosts the users list and the old #/users route still works',
   await expect(page.locator('#settings-users .chip', { hasText: 'Evan' })).toBeVisible();
   await page.goto('/#/users');
   await expect(page.locator('h1')).toHaveText('Settings');
-  await expect(page.locator('#nav a.active')).toHaveText('Settings');
+  // The hamburger menu marks the current page and offers the presets.
+  await page.locator('#menu-btn').click();
+  await expect(page.locator('#menu a.active')).toHaveText('Settings');
+  await expect(page.locator('#menu a[data-preset]')).toHaveCount(4);
+  await page.locator('#menu a[data-preset=backlog]').click();
+  await expect(page.locator('#menu')).toBeHidden();
+  await expect(page.locator('.presets button.active')).toHaveText('Backlog');
+  await expect(page.locator('#nav')).toHaveCount(0); // the old tab bar is gone
 });
 
 test('week start defaults to Saturday and can be changed', async ({ page }) => {

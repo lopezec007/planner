@@ -96,7 +96,12 @@ Items can be deleted from the UI.  A deleted item remains in the database but be
 #### General
 The UI should respond to the user's system theme (light/dark).  There is no manual theme override.
 
-#### Homepage
+#### Navigation
+There is a single planner page.  The "Active", "Backlog", "Ideas" and "All" views described below are predefined
+filters selected along the top of that page; the search and filter controls apply on top of the selected one.  A
+hamburger (☰) menu at the far left of the title bar switches between them and opens Settings.
+
+#### Active (default filter)
 This should display:
 - All "Ongoing" items, regardless of whether they have any children
 - All to-do and in-progress items
@@ -161,13 +166,13 @@ Items that are "blocked" should have the whole row greyed out via a mask (so oth
 No highlighting of any kind is applied to "Done" or "Cancelled" items.
 
 #### Backlog
-This should display all items of status "Backlog" with the same columns and behaviour as the default homepage view.
+This filter shows all items of status "Backlog" with the same columns and behaviour as the Active filter.
 A backlog project is shown with all of its tasks.  A backlog task under an "Ongoing" is shown beneath its parent.
 
 #### Ideas
-Same as backlog page but for ideas.
+Same as the Backlog filter but for ideas.
 
-#### Everything
-This should display every item that has not been deleted, with the same columns and behaviour as the default
-homepage view, including the "Plan" and "Matrix" views.  It should additionally offer search and filter
-functionality, which also applies to those views.
+#### All
+This filter shows every item that has not been deleted.  The search and filter controls (free text over key, title
+and description; type, status, owner, assignee, blocked and end-date filters) are available with every predefined
+filter and also apply to the "Plan" (Timeline) and "Matrix" views.
