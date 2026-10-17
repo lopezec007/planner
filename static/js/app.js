@@ -11,6 +11,7 @@ import { renderMatrix } from './matrix.js';
 import { renderUsers } from './users.js';
 import { renderSearch } from './search.js';
 import { el, toast } from './util.js';
+import { beginNew, beginEdit, cancelEdit } from './edit.js';
 
 const main = document.getElementById('main');
 const toolbar = document.getElementById('toolbar');
@@ -44,25 +45,22 @@ async function reload() {
 
 // ---------------------------------------------------------------- actions
 
+// Creating and editing happen in the table (see edit.js): these actions put
+// the table into new/edit mode and re-render; the edit form saves via the
+// API and then calls onChanged() to reload.
 const actions = {
-  async onNew(type, page) {
+  onNew(type, page) {
     const def = PAGES[page];
-    const title = prompt(`Title for new ${type}:`);
-    if (!title) return;
-    const body = { type, title };
-    if (type !== 'ongoing') body.status = def.newStatus;
-    try { await api.createItem(body); await reload(); } catch (e) { toast(e.message); }
+    if (beginNew({ type, status: def.newStatus })) render();
   },
-  async onAddTask(parent) {
-    const title = prompt(`Title for new task under ${parent.key}:`);
-    if (!title) return;
+  onAddTask(parent) {
     const page = route();
-    const body = { type: 'task', title, parent_id: parent.id, status: PAGES[page]?.newStatus || 'todo' };
-    try { await api.createItem(body); await reload(); } catch (e) { toast(e.message); }
+    if (beginNew({ type: 'task', parentId: parent.id, status: PAGES[page]?.newStatus || 'todo' })) render();
   },
   onEdit(item) {
-    toast(`Editing ${item.key} is not implemented yet.`);
+    if (beginEdit(item)) render();
   },
+  onChanged: reload,
   async onDelete(item) {
     const extra = item.type === 'task' ? '' : ' and all of its tasks';
     if (!confirm(`Delete ${item.key} "${item.title}"${extra}?`)) return;
@@ -147,5 +145,5 @@ document.addEventListener('click', (e) => {
   // close the New menu on outside click
   if (!e.target.closest('.menu-wrap')) document.querySelectorAll('.menu').forEach((m) => { m.hidden = true; });
 });
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => { cancelEdit(); render(); });
 reload();

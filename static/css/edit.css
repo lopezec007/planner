@@ -1,1 +1,83 @@
-/* styles for edit (see js/edit.js) */
+/* styles for in-table editing and drag-and-drop reordering (see js/edit.js, js/table.js) */
+
+/* ---------- drag handle and drop indicators ---------- */
+.row .key { display: flex; align-items: center; gap: 4px; }
+.drag-handle {
+  cursor: grab;
+  color: var(--fg-muted);
+  opacity: 0.45;
+  user-select: none;
+  -webkit-user-select: none;
+  font-size: 13px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+.row:hover .drag-handle { opacity: 1; }
+.drag-handle:active { cursor: grabbing; }
+.row.dragging { opacity: 0.4; }
+.table.drag-active .row:not(.header):hover { background: inherit; }
+.row.drop-before { box-shadow: inset 0 3px 0 0 var(--accent); }
+.row.drop-after { box-shadow: inset 0 -3px 0 0 var(--accent); }
+
+/* ---------- actions in the title-only table (Plan / Matrix) ----------
+   No actions column there, so the buttons sit at the right of the title cell
+   and fade in on hover or keyboard focus. */
+.table.title-only .row:not(.editing) .title { display: flex; align-items: center; gap: 6px; }
+.table.title-only .title .title-text { flex: 1 1 auto; min-width: 0; }
+.table.title-only .title .actions { flex: 0 0 auto; padding: 0; opacity: 0; transition: opacity 0.1s; }
+.table.title-only .row:hover .title .actions,
+.table.title-only .row:focus-within .title .actions { opacity: 1; }
+
+/* ---------- edit mode rows ---------- */
+.row.editing,
+.row.edit-detail {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg)) !important;
+  font-weight: normal;
+}
+.row.editing { align-items: start; }
+.row.editing > * { overflow: visible; white-space: normal; }
+.row.editing .new-key { color: var(--fg-muted); font-style: italic; }
+.row.editing input:not([type="checkbox"]),
+.row.editing select,
+.edit-detail input:not([type="checkbox"]),
+.edit-detail select,
+.edit-detail textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 13px;
+}
+.row.editing input[type="date"],
+.edit-detail input[type="date"] { padding: 2px 4px; font-size: 12px; }
+.row.editing .num input { text-align: center; padding: 3px 2px; -moz-appearance: textfield; appearance: textfield; }
+.row.editing .num input::-webkit-outer-spin-button,
+.row.editing .num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.row.editing .date-edit { display: flex; flex-direction: column; gap: 2px; }
+.firm-check {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--fg-muted); white-space: nowrap; cursor: pointer;
+}
+.firm-check input { margin: 0; }
+.row.editing .actions { gap: 4px; }
+.row.editing .actions button,
+.edit-detail .actions button { padding: 3px 8px; line-height: 1.2; }
+
+/* The detail row: description editor plus any fields without a cell. */
+.row.edit-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start; /* .row centers its items; in a column that would centre horizontally */
+  gap: 8px;
+  padding-top: 4px;
+}
+.edit-detail textarea { width: 100%; }
+.edit-detail .edit-fields { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-end; }
+.edit-detail .edit-fields:empty { display: none; }
+.edit-field { display: flex; flex-direction: column; gap: 2px; min-width: 90px; }
+.edit-field .edit-label { font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.02em; }
+.edit-field select { width: auto; max-width: 320px; }
+.edit-field input[type="checkbox"] { width: auto; align-self: flex-start; margin: 6px 0; }
+.edit-field input[type="date"] { width: auto; }
+.edit-field input[type="number"] { width: 60px; }
+.edit-detail textarea { max-width: 80ch; min-height: 72px; resize: vertical; font-family: var(--mono); font-size: 12.5px; }
+.edit-detail .actions { display: flex; gap: 6px; }
