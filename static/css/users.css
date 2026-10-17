@@ -1,1 +1,47 @@
 /* styles for users (see js/users.js) */
+.users-page { max-width: 720px; }
+.users-head h2 { margin: 4px 0 2px; font-size: 18px; }
+.users-hint { margin: 0 0 14px; color: var(--fg-muted); }
+
+.user-add { display: flex; gap: 8px; margin-bottom: 14px; }
+.user-add input { flex: 1 1 auto; max-width: 320px; }
+
+.user-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.user-row {
+  display: grid;
+  grid-template-columns: 160px minmax(160px, 1fr) 150px 60px;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-h);
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+}
+.user-row:first-child { border-top: none; }
+.user-row:not(.header):hover { background: var(--bg-hover); }
+.user-row.header {
+  background: var(--bg-alt);
+  color: var(--fg-muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  min-height: 26px;
+}
+.user-preview { overflow: hidden; white-space: nowrap; }
+.user-name { width: 100%; background: transparent; border-color: transparent; }
+.user-name:hover { border-color: var(--border); }
+.user-name:focus { background: var(--bg); border-color: var(--accent); outline: none; }
+
+.user-color-cell { display: flex; align-items: center; gap: 8px; }
+.user-color {
+  width: 36px;
+  height: 26px;
+  padding: 1px 2px;
+  cursor: pointer;
+}
+.user-hex { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); }
+.user-actions { display: flex; justify-content: flex-end; }
