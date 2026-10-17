@@ -111,9 +111,13 @@ function render() {
 
   // ---- toolbar ----
   toolbar.replaceChildren();
-  if (typeAllowed('ongoing')) {
-    toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-ongoing', onClick: () => actions.onNew('ongoing') }, 'New Ongoing'));
-  }
+  // New Ongoing is greyed out (not hidden) while the type filter would hide a new one.
+  const ongoingOk = typeAllowed('ongoing');
+  toolbar.append(el('button', {
+    class: 'primary', type: 'button', id: 'btn-new-ongoing', disabled: ongoingOk ? null : true,
+    title: ongoingOk ? null : 'The current type filter hides Ongoing items; clear it to add one',
+    onClick: () => actions.onNew('ongoing'),
+  }, 'New Ongoing'));
   toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', onClick: () => actions.onNew('project') }, 'New Project'));
 
   toolbar.append(

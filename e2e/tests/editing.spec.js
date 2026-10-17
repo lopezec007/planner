@@ -62,9 +62,9 @@ test('New project: a blank row with the title focused; Enter saves with the page
   expect(it.owner_id).toBe(await userId(request, 'Evan'));
 });
 
-test('New ongoing from the toolbar; Backlog offers no Ongoing and defaults to backlog; discard works', async ({ page, request }) => {
+test('New ongoing from the toolbar; Backlog greys out New Ongoing and defaults to backlog; discard works', async ({ page, request }) => {
   await page.goto('/#/backlog');
-  await expect(page.locator('#btn-new-ongoing')).toHaveCount(0);
+  await expect(page.locator('#btn-new-ongoing')).toBeDisabled(); // greyed out, not hidden
   await page.locator('#btn-new-project').click();
   await expect(newRow(page).locator('select[name=status]')).toHaveValue('backlog');
   await page.locator('button[title=Discard]').click();
