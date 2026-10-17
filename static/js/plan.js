@@ -166,8 +166,10 @@ export function renderPlan(panel, handle, ctx) {
     canvas.replaceChildren();
     const canvasTop = canvas.getBoundingClientRect().top;
     const tableRect = table?.getBoundingClientRect();
-    const tier1 = headers[0] ? headers[0].getBoundingClientRect().bottom - canvasTop : 26;
+    // The table has a single header row (made taller in title-only mode);
+    // the two axis tiers split it in half.
     const axisH = headers.length ? headers[headers.length - 1].getBoundingClientRect().bottom - canvasTop : 52;
+    const tier1 = headers.length >= 2 ? headers[0].getBoundingClientRect().bottom - canvasTop : axisH / 2;
     const bodyTop = axisH;
     let height = tableRect ? tableRect.bottom - 1 - canvasTop : axisH;
     const W = Math.ceil(rangeDays * view.ppd);

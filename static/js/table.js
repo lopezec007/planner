@@ -18,9 +18,10 @@
 // not included in the handle's rows.
 //
 // Reordering: every row has a drag handle in its key cell. Top-level rows can
-// be dropped among top-level rows; tasks among the tasks of the same parent.
-// The full sibling list (from state, including siblings hidden by the page's
-// filter) is sent to api.reorder so hidden siblings keep their positions.
+// be dropped among top-level rows; tasks among any parent's tasks or onto a
+// parent row (which reparents them). The full sibling list (from state,
+// including siblings hidden by the page's filter) is sent to api.reorder so
+// hidden siblings keep their positions.
 
 import { state, isClosed, daysFromToday, STATUS_LABEL } from './state.js';
 import { renderMarkdown } from './markdown.js';
@@ -96,17 +97,19 @@ function actionButtons(item, actions) {
   return cell;
 }
 
-function headerRows(mode) {
-  const parent = el('div', { class: 'row header parent' },
-    el('div'), el('div', {}, 'Key'), el('div', {}, 'Ongoing / Project'));
-  const task = el('div', { class: 'row header task' },
-    el('div'), el('div'), el('div', {}, 'Key'), el('div', {}, 'Task'));
+function headerRow(mode) {
+  // One header row. Key and title need no label; task rows are indented
+  // beneath their parent, which makes the hierarchy obvious.
+  const row = el('div', { class: 'row header' }, el('div'), el('div'), el('div'));
   if (mode === 'full') {
-    parent.append(el('div', {}, 'Owner'), el('div', {}, 'Assignee'), el('div', {}, 'Start'), el('div', {}, 'End'), el('div'));
-    task.append(el('div', {}, 'Status'), el('div', {}, 'Owner'), el('div', {}, 'Assignee'), el('div', {}, 'Start'),
-      el('div', {}, 'End'), el('div', { class: 'num', title: 'Urgency' }, 'Urg'), el('div', { class: 'num', title: 'Importance' }, 'Imp'), el('div'));
+    row.append(
+      el('div', {}, 'Status'), el('div', {}, 'Owner'), el('div', {}, 'Assignee'),
+      el('div', {}, 'Start'), el('div', {}, 'End'),
+      el('div', { class: 'num', title: 'Urgency' }, 'Urg'), el('div', { class: 'num', title: 'Importance' }, 'Imp'),
+      el('div', { class: 'blocked-cell' }, 'Blocked'), el('div'),
+    );
   }
-  return [parent, task];
+  return row;
 }
 
 function rowClasses(item, kind, expanded) {
@@ -133,42 +136,37 @@ function titleCell(item, mode, ctx) {
   return cell;
 }
 
-function parentRow(item, mode, expanded, ctx) {
-  const closed = isClosed(item.status);
-  const row = el('div', { class: rowClasses(item, 'parent', expanded), dataset: { id: item.id, kind: 'parent', type: item.type } },
-    toggleCell(item, expanded, ctx.onToggle),
-    keyCell(item),
-    titleCell(item, mode, ctx),
-  );
-  if (mode === 'full') {
-    row.append(
-      el('div', {}, userChip(item.owner_id, false)),
-      el('div', {}, userChip(item.assignee_id, item.assignee_shared)),
-      dateCell(item.start_date, item.start_firm, ''),
-      dateCell(item.end_date, item.end_firm, closed ? '' : endDateClass(item.end_date)),
-      actionButtons(item, ctx.actions),
-    );
-  }
-  return row;
+function statusCell(item) {
+  if (!item.status) return el('div');
+  return el('div', {}, el('span', { class: `status ${item.status}` }, STATUS_LABEL[item.status] || item.status));
 }
 
-function taskRow(item, mode, expanded, ctx) {
+function blockedCell(item) {
+  if (item.type !== 'task') return el('div', { class: 'blocked-cell' });
+  return el('div', { class: 'blocked-cell' },
+    el('input', { type: 'checkbox', checked: item.blocked ? true : null, tabindex: '-1', 'aria-label': 'Blocked', title: item.blocked ? 'Blocked' : 'Not blocked' }));
+}
+
+/** One row for either kind; parents simply leave the task-only cells empty. */
+function itemRow(item, kind, mode, expanded, ctx) {
   const closed = isClosed(item.status);
-  const row = el('div', { class: rowClasses(item, 'task', expanded), dataset: { id: item.id, kind: 'task', type: 'task', parent: item.parent_id } },
-    el('div', { class: 'indent' }),
+  const dataset = { id: item.id, kind, type: item.type };
+  if (kind === 'task') dataset.parent = item.parent_id;
+  const row = el('div', { class: rowClasses(item, kind, expanded), dataset },
     toggleCell(item, expanded, ctx.onToggle),
     keyCell(item),
     titleCell(item, mode, ctx),
   );
   if (mode === 'full') {
     row.append(
-      el('div', {}, el('span', { class: `status ${item.status}` }, STATUS_LABEL[item.status] || item.status)),
+      statusCell(item),
       el('div', {}, userChip(item.owner_id, false)),
       el('div', {}, userChip(item.assignee_id, item.assignee_shared)),
       dateCell(item.start_date, item.start_firm, ''),
       dateCell(item.end_date, item.end_firm, closed ? '' : endDateClass(item.end_date)),
       numCell(item.urgency, !closed),
       numCell(item.importance, !closed),
+      blockedCell(item),
       actionButtons(item, ctx.actions),
     );
   }
@@ -178,7 +176,9 @@ function taskRow(item, mode, expanded, ctx) {
 function descriptionRow(item, kind) {
   const md = el('div', { class: 'md' });
   md.innerHTML = renderMarkdown(item.description);
-  return el('div', { class: `row description ${kind}`, dataset: { descFor: item.id } }, md);
+  // Same grid as the item row; the content occupies the title column.
+  return el('div', { class: `row description ${kind}`, dataset: { descFor: item.id } },
+    el('div'), el('div'), el('div', { class: 'title' }, md));
 }
 
 export function renderTable(container, opts) {
@@ -204,7 +204,7 @@ export function renderTable(container, opts) {
   if (editing.mode === 'new' && editing.draft.type === 'task' && !groups.some((g) => g.parent.id === editing.draft.parent_id)) cancelEdit();
 
   const table = el('div', { class: `table ${mode === 'title-only' ? 'title-only' : ''}` });
-  table.append(...headerRows(mode));
+  table.append(headerRow(mode));
 
   if (!groups.length && editing.mode !== 'new') {
     table.append(el('div', { class: 'empty' }, 'Nothing to show.'));
@@ -218,7 +218,7 @@ export function renderTable(container, opts) {
       return;
     }
     const isExpanded = expanded.has(item.id);
-    const row = kind === 'parent' ? parentRow(item, mode, isExpanded, ctx) : taskRow(item, mode, isExpanded, ctx);
+    const row = itemRow(item, kind, mode, isExpanded, ctx);
     table.append(row);
     handle.rows.push({ item, el: row, kind });
     if (isExpanded) table.append(descriptionRow(item, kind));
@@ -240,10 +240,15 @@ export function renderTable(container, opts) {
 }
 
 // ---------------------------------------------------------------- drag and drop
+//
+// Top-level rows (Ongoing/Project) can be dropped among top-level rows. Tasks
+// can be dropped before/after any task (in any parent) or onto a parent row,
+// which moves them to the start of that parent's tasks; dropping into a
+// different parent reparents the task first, then orders it.
 
-/** All live siblings of item (from state, in current sort order). */
-function siblingIds(item) {
-  return state.items.filter((it) => (it.parent_id ?? null) === (item.parent_id ?? null)).map((it) => it.id);
+/** Live children of a parent (null = top level), in current sort order. */
+function childIds(parentId) {
+  return state.items.filter((it) => (it.parent_id ?? null) === parentId).map((it) => it.id);
 }
 
 /** The last element of a parent row's group (its tasks and description rows). */
@@ -253,32 +258,34 @@ function groupEnd(parentRowEl) {
   return last;
 }
 
-/** Resolve the element under the pointer to a valid drop target row, or null. */
+/** Resolve the element under the pointer to a drop target: { el, mode } with
+ *  mode 'sibling' (before/after el) or 'into' (el is a parent row), or null. */
 function dropTarget(table, drag, target) {
   const rowEl = target.closest?.('.row');
   if (!rowEl || !table.contains(rowEl) || rowEl.classList.contains('header')) return null;
   let candidate = rowEl;
+  if (candidate.classList.contains('description') && candidate.dataset.descFor) {
+    candidate = table.querySelector(`.row[data-id="${candidate.dataset.descFor}"]`);
+  }
+  if (!candidate || candidate.dataset.editing || !candidate.dataset.id) return null;
   if (drag.kind === 'parent') {
     // Anything inside a group resolves to the group's parent row.
     while (candidate && !(candidate.classList.contains('parent') && candidate.dataset.id)) candidate = candidate.previousElementSibling;
-  } else {
-    if (candidate.classList.contains('description') && candidate.dataset.descFor) {
-      candidate = table.querySelector(`.row.task[data-id="${candidate.dataset.descFor}"]`);
-    }
-    if (!candidate || !candidate.classList.contains('task') || !candidate.dataset.id) return null;
-    if (candidate.dataset.parent !== drag.parent) return null;
+    if (!candidate || Number(candidate.dataset.id) === drag.id) return null;
+    return { el: candidate, mode: 'sibling' };
   }
-  if (!candidate || candidate.dataset.editing || Number(candidate.dataset.id) === drag.id) return null;
-  return candidate;
+  if (candidate.classList.contains('parent')) return { el: candidate, mode: 'into' };
+  if (Number(candidate.dataset.id) === drag.id) return null;
+  return { el: candidate, mode: 'sibling' };
 }
 
 function clearDropMarks(table) {
-  for (const n of table.querySelectorAll('.drop-before, .drop-after')) n.classList.remove('drop-before', 'drop-after');
+  for (const n of table.querySelectorAll('.drop-before, .drop-after, .drop-into')) n.classList.remove('drop-before', 'drop-after', 'drop-into');
 }
 
 function installDragAndDrop(table, editCtx) {
   let drag = null; // { id, kind, parent }
-  let over = null; // { el, after }
+  let over = null; // { el, mode, after }
 
   table.addEventListener('dragstart', (e) => {
     const handleEl = e.target.closest?.('.drag-handle');
@@ -299,10 +306,15 @@ function installDragAndDrop(table, editCtx) {
     if (!t) { over = null; return; }
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    const rect = t.getBoundingClientRect();
+    if (t.mode === 'into') {
+      over = { el: t.el, mode: 'into', after: false };
+      t.el.classList.add('drop-into');
+      return;
+    }
+    const rect = t.el.getBoundingClientRect();
     const after = e.clientY > rect.top + rect.height / 2;
-    over = { el: t, after };
-    const mark = drag.kind === 'parent' && after ? groupEnd(t) : t;
+    over = { el: t.el, mode: 'sibling', after };
+    const mark = drag.kind === 'parent' && after ? groupEnd(t.el) : t.el;
     mark.classList.add(after ? 'drop-after' : 'drop-before');
   });
 
@@ -330,12 +342,27 @@ function installDragAndDrop(table, editCtx) {
     const item = state.itemsById.get(d.id);
     const targetId = Number(target.el.dataset.id);
     if (!item || targetId === d.id) return;
-    const ids = siblingIds(item).filter((id) => id !== d.id);
-    let idx = ids.indexOf(targetId);
-    if (idx < 0) return;
-    if (target.after) idx += 1;
+
+    // Where does it land, and under which parent?
+    let newParent, ids, idx;
+    if (target.mode === 'into') {
+      newParent = targetId;
+      ids = childIds(newParent).filter((id) => id !== d.id);
+      idx = 0;
+    } else {
+      const targetItem = state.itemsById.get(targetId);
+      if (!targetItem) return;
+      newParent = targetItem.parent_id ?? null;
+      ids = childIds(newParent).filter((id) => id !== d.id);
+      idx = ids.indexOf(targetId);
+      if (idx < 0) return;
+      if (target.after) idx += 1;
+    }
     ids.splice(idx, 0, d.id);
     try {
+      if (d.kind === 'task' && (item.parent_id ?? null) !== newParent) {
+        await api.updateItem(d.id, { parent_id: newParent });
+      }
       await api.reorder(ids);
       await editCtx.onChanged();
     } catch (err) {

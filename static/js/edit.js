@@ -16,7 +16,7 @@
 //     ctx.onChanged()  reload data after a successful save
 
 import { api } from './api.js';
-import { state, STATUSES, STATUS_LABEL, isParent } from './state.js';
+import { state, STATUSES, STATUS_LABEL } from './state.js';
 import { el, toast } from './util.js';
 
 export const editing = { mode: null, id: null, draft: null };
@@ -67,15 +67,6 @@ function userSelect(name, current, extra) {
   return sel;
 }
 
-function parentSelect(current) {
-  const sel = el('select', { name: 'parent', 'aria-label': 'parent' });
-  for (const it of state.items) {
-    if (!isParent(it)) continue;
-    sel.append(option(String(it.id), `${it.key} ${it.title}`, current === it.id));
-  }
-  return sel;
-}
-
 function buildEditors(draft) {
   const type = draft.type;
   const ed = {
@@ -85,6 +76,7 @@ function buildEditors(draft) {
     assignee: userSelect('assignee', draft.assignee_id, { shared: true, sharedSelected: !!draft.assignee_shared }),
   };
   ed.description.value = draft.description || '';
+  ed.parentId = draft.parent_id ?? null;
   if (type !== 'ongoing') {
     ed.status = el('select', { name: 'status', 'aria-label': 'status' });
     for (const s of STATUSES) ed.status.append(option(s, STATUS_LABEL[s], draft.status === s));
@@ -94,7 +86,6 @@ function buildEditors(draft) {
     ed.endFirm = el('input', { type: 'checkbox', name: 'end_firm', 'aria-label': 'end firm', checked: !!draft.end_firm });
   }
   if (type === 'task') {
-    ed.parent = parentSelect(draft.parent_id);
     ed.urgency = el('input', { type: 'number', name: 'urgency', 'aria-label': 'urgency', min: 0, max: 10, value: draft.urgency ?? '' });
     ed.importance = el('input', { type: 'number', name: 'importance', 'aria-label': 'importance', min: 0, max: 10, value: draft.importance ?? '' });
     ed.blocked = el('input', { type: 'checkbox', name: 'blocked', 'aria-label': 'blocked', checked: !!draft.blocked });
@@ -103,6 +94,8 @@ function buildEditors(draft) {
 }
 
 // Read the editors into a plain item-like object (nulls for empties).
+const draft_parent = (ed) => ed.parentId ?? null;
+
 function readEditors(ed, type) {
   const num = (inp) => (inp.value === '' ? null : Number(inp.value));
   const v = {
@@ -120,7 +113,7 @@ function readEditors(ed, type) {
     v.end_firm = v.end_date ? ed.endFirm.checked : false;
   }
   if (type === 'task') {
-    v.parent_id = ed.parent.value ? Number(ed.parent.value) : null;
+    v.parent_id = draft_parent(ed);
     v.urgency = num(ed.urgency);
     v.importance = num(ed.importance);
     v.blocked = ed.blocked.checked;
@@ -167,7 +160,6 @@ function patchBody(v, orig) {
     if (v.end_firm !== !!orig.end_firm) body.end_firm = v.end_firm;
   }
   if (orig.type === 'task') {
-    if (v.parent_id != null && v.parent_id !== orig.parent_id) body.parent_id = v.parent_id;
     if (v.urgency != null) diff('urgency');
     if (v.importance != null) diff('importance');
     if (v.blocked !== !!orig.blocked) body.blocked = v.blocked;
@@ -186,8 +178,11 @@ function firmLabel(checkbox) {
 }
 
 /**
- * Build the edit row (grid-aligned) and the detail row beneath it (description
- * textarea plus any fields that have no cell in the grid).
+ * Build the edit row (grid-aligned) and the detail row beneath it. In the full
+ * table every field has a cell of its own and the detail row holds only the
+ * description editor, placed in the title column so it sits exactly under the
+ * title. In the title-only table (Plan / Matrix) all other fields move to the
+ * detail row as well.
  */
 export function renderEditRows(draft, kind, tableMode, ctx) {
   const type = draft.type;
@@ -199,7 +194,6 @@ export function renderEditRows(draft, kind, tableMode, ctx) {
     class: `row ${kind} editing ${isNew ? 'new' : ''}`,
     dataset: { id: draft.id ?? '', kind, type, editing: isNew ? 'new' : 'edit' },
   });
-  if (kind === 'task') row.append(el('div', { class: 'indent' }));
   row.append(
     el('div', { class: 'toggle' }),
     el('div', { class: 'key' }, isNew ? el('span', { class: 'new-key' }, type === 'ongoing' ? 'O-?' : type === 'project' ? 'P-?' : 'T-?') : draft.key),
@@ -209,8 +203,8 @@ export function renderEditRows(draft, kind, tableMode, ctx) {
   const detailFields = el('div', { class: 'edit-fields' });
   const full = tableMode === 'full';
   if (full) {
-    if (kind === 'task') row.append(el('div', {}, ed.status));
     row.append(
+      el('div', {}, type === 'ongoing' ? '' : ed.status),
       el('div', {}, ed.owner),
       el('div', {}, ed.assignee),
     );
@@ -222,13 +216,13 @@ export function renderEditRows(draft, kind, tableMode, ctx) {
         el('div', { class: 'date-edit' }, ed.end, firmLabel(ed.endFirm)),
       );
     }
-    if (kind === 'task') row.append(el('div', { class: 'num' }, ed.urgency), el('div', { class: 'num' }, ed.importance));
-    // Fields with no cell of their own live in the detail row.
-    if (type === 'project') detailFields.append(field('Status', ed.status));
-    if (type === 'task') detailFields.append(field('Parent', ed.parent), field('Blocked', ed.blocked));
+    if (type === 'task') {
+      row.append(el('div', { class: 'num' }, ed.urgency), el('div', { class: 'num' }, ed.importance), el('div', { class: 'blocked-cell' }, ed.blocked));
+    } else {
+      row.append(el('div'), el('div'), el('div'));
+    }
   } else {
     // Title-only table (Plan / Matrix): everything but the title goes below.
-    if (type === 'task') detailFields.append(field('Parent', ed.parent));
     if (type !== 'ongoing') detailFields.append(field('Status', ed.status));
     detailFields.append(field('Owner', ed.owner), field('Assignee', ed.assignee));
     if (type !== 'ongoing') {
@@ -248,11 +242,13 @@ export function renderEditRows(draft, kind, tableMode, ctx) {
   const actionsCell = el('div', { class: 'actions' }, saveBtn, cancelBtn);
   if (full) row.append(actionsCell);
 
+  // Detail row: same grid, content in the title column.
+  const detailContent = el('div', { class: 'title edit-detail-content' }, detailFields, ed.description);
+  if (!full) detailContent.append(actionsCell);
   const detail = el('div', {
     class: `row description ${kind} edit-detail`,
     dataset: { descFor: draft.id ?? '', editing: isNew ? 'new' : 'edit' },
-  }, detailFields, ed.description);
-  if (!full) detail.append(actionsCell);
+  }, el('div'), el('div'), detailContent);
 
   const setBusy = (b) => {
     busy = b;

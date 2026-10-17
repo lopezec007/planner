@@ -62,14 +62,9 @@
 .row.editing .actions button,
 .edit-detail .actions button { padding: 3px 8px; line-height: 1.2; }
 
-/* The detail row: description editor plus any fields without a cell. */
-.row.edit-detail {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start; /* .row centers its items; in a column that would centre horizontally */
-  gap: 8px;
-  padding-top: 4px;
-}
+/* The detail row shares the grid; its content sits in the title column. */
+.row.edit-detail { align-items: start; }
+.edit-detail-content { display: flex; flex-direction: column; gap: 8px; overflow: visible; white-space: normal; }
 .edit-detail textarea { width: 100%; }
 .edit-detail .edit-fields { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-end; }
 .edit-detail .edit-fields:empty { display: none; }
@@ -79,5 +74,7 @@
 .edit-field input[type="checkbox"] { width: auto; align-self: flex-start; margin: 6px 0; }
 .edit-field input[type="date"] { width: auto; }
 .edit-field input[type="number"] { width: 60px; }
-.edit-detail textarea { max-width: 80ch; min-height: 72px; resize: vertical; font-family: var(--mono); font-size: 12.5px; }
+.edit-detail textarea { min-height: 72px; resize: vertical; font-family: var(--mono); font-size: 12.5px; }
 .edit-detail .actions { display: flex; gap: 6px; }
+.row.editing .blocked-cell input { pointer-events: auto; }
+.row.drop-into { box-shadow: inset 0 0 0 2px var(--accent); }

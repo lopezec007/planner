@@ -23,13 +23,12 @@ const detailRow = (page) => page.locator('.row.edit-detail');
 
 test('New project: blank row with description expanded, saves with page status', async ({ page, request }) => {
   await page.goto('/');
-  await page.locator('#btn-new').click();
-  await page.locator('.menu button', { hasText: 'Project' }).click();
+  await page.locator('#btn-new-project').click();
   await expect(newRow(page)).toBeVisible();
   await expect(detailRow(page).locator('textarea')).toBeVisible(); // description pre-expanded
   await expect(newRow(page).locator('input[name=title]')).toBeFocused();
   // Status defaults to the page's new status (todo on Home).
-  await expect(detailRow(page).locator('select[name=status]')).toHaveValue('todo');
+  await expect(newRow(page).locator('select[name=status]')).toHaveValue('todo');
 
   await newRow(page).locator('input[name=title]').fill('E2E Project');
   await detailRow(page).locator('textarea').fill('Created **in** e2e');
@@ -50,16 +49,14 @@ test('New project: blank row with description expanded, saves with page status',
 
 test('New ongoing from the toolbar; backlog page offers no Ongoing', async ({ page, request }) => {
   await page.goto('/#/backlog');
-  await page.locator('#btn-new').click();
-  await expect(page.locator('.menu button', { hasText: 'Ongoing' })).toHaveCount(0);
-  await page.locator('.menu button', { hasText: 'Project' }).click();
-  await expect(detailRow(page).locator('select[name=status]')).toHaveValue('backlog');
+  await expect(page.locator('#btn-new-ongoing')).toHaveCount(0);
+  await page.locator('#btn-new-project').click();
+  await expect(newRow(page).locator('select[name=status]')).toHaveValue('backlog');
   await page.locator('button[title=Cancel]').click();
   await expect(newRow(page)).toHaveCount(0);
 
   await page.goto('/');
-  await page.locator('#btn-new').click();
-  await page.locator('.menu button', { hasText: 'Ongoing' }).click();
+  await page.locator('#btn-new-ongoing').click();
   await expect(newRow(page)).toBeVisible();
   await expect(newRow(page).locator('select[name=status]')).toHaveCount(0); // ongoing has no status
   await newRow(page).locator('input[name=title]').fill('E2E Ongoing');
@@ -76,14 +73,12 @@ test('New ongoing from the toolbar; backlog page offers no Ongoing', async ({ pa
 test('New row: cancel removes it; empty title shows a validation toast and stays in edit mode', async ({ page, request }) => {
   await page.goto('/');
   const before = (await items(request)).length;
-  await page.locator('#btn-new').click();
-  await page.locator('.menu button', { hasText: 'Project' }).click();
+  await page.locator('#btn-new-project').click();
   await newRow(page).locator('input[name=title]').fill('Never saved');
   await newRow(page).locator('input[name=title]').press('Escape');
   await expect(newRow(page)).toHaveCount(0);
 
-  await page.locator('#btn-new').click();
-  await page.locator('.menu button', { hasText: 'Project' }).click();
+  await page.locator('#btn-new-project').click();
   await page.locator('button[title=Save]').click();
   await expect(page.locator('#toast')).toBeVisible();
   await expect(page.locator('#toast')).toContainText('title is required');
@@ -126,7 +121,7 @@ test('Edit a task: every field type, including Shared assignee and firm dates', 
   await page.goto('/');
   const row = page.locator('.row.task', { hasText: 'E2E Task A' });
   // Cells are not editable outside edit mode.
-  await expect(row.locator('input, select, textarea')).toHaveCount(0);
+  await expect(row.locator('input:not([type=checkbox]), select, textarea, input[type=checkbox]:not([tabindex="-1"])')).toHaveCount(0);
   await row.locator('button[title=Edit]').click();
   const er = editRow(page);
   await expect(er).toBeVisible();
@@ -143,7 +138,7 @@ test('Edit a task: every field type, including Shared assignee and firm dates', 
   await er.locator('input[name=end_date]').fill(ymd(2));
   await er.locator('input[name=urgency]').fill('9');
   await er.locator('input[name=importance]').fill('2');
-  await detailRow(page).locator('input[name=blocked]').check();
+  await er.locator('input[name=blocked]').check();
   await page.locator('button[title=Save]').click();
   await expect(editRow(page)).toHaveCount(0);
 
@@ -177,11 +172,16 @@ test('Edit a task: clear a date, clear owner, assign a user, unblock, reparent',
   await er.locator('input[name=start_date]').fill('');
   await er.locator('select[name=owner]').selectOption('');
   await er.locator('select[name=assignee]').selectOption({ label: 'Alex' });
-  await detailRow(page).locator('input[name=blocked]').uncheck();
-  const ongoing = await byTitle(request, 'E2E Ongoing');
-  await detailRow(page).locator('select[name=parent]').selectOption(String(ongoing.id));
+  await er.locator('input[name=blocked]').uncheck();
+  await expect(detailRow(page).locator('select[name=parent]')).toHaveCount(0); // no Parent field: reparent by drag
   await page.locator('button[title=Save]').click();
   await expect(editRow(page)).toHaveCount(0);
+
+  // Reparent by dropping the task onto the E2E Ongoing parent row.
+  const ongoing = await byTitle(request, 'E2E Ongoing');
+  await page.locator('.row.task', { hasText: 'E2E Task A2' }).locator('.drag-handle')
+    .dragTo(page.locator('.row.parent', { hasText: 'E2E Ongoing' }), { targetPosition: { x: 200, y: 10 } });
+  await expect(page.locator('.row.task', { hasText: 'E2E Task A2' })).toHaveAttribute('data-parent', String(ongoing.id));
 
   const it = await byTitle(request, 'E2E Task A2');
   const alex = (await (await request.get('/api/users')).json()).find((u) => u.name === 'Alex');
@@ -206,7 +206,7 @@ test('Edit a project and an ongoing; cancel discards changes', async ({ page, re
   const er = editRow(page);
   await expect(er.locator('input[name=urgency]')).toHaveCount(0);
   await er.locator('input[name=title]').fill('E2E Project (edited)');
-  await detailRow(page).locator('select[name=status]').selectOption('in-progress');
+  await er.locator('select[name=status]').selectOption('in-progress');
   await er.locator('input[name=end_date]').fill('');
   await er.locator('input[name=start_date]').fill(ymd(-3));
   await er.locator('input[name=start_firm]').check();
@@ -248,8 +248,7 @@ test('Only one row may be edited at a time', async ({ page }) => {
   await expect(page.locator('#toast')).toContainText('Save or cancel');
   await expect(editRow(page)).toHaveCount(1);
   await expect(editRow(page).locator('input[name=title]')).toHaveValue('E2E Task B');
-  await page.locator('#btn-new').click();
-  await page.locator('.menu button', { hasText: 'Project' }).click();
+  await page.locator('#btn-new-project').click();
   await expect(newRow(page)).toHaveCount(0);
   await page.locator('button[title=Cancel]').click();
   await expect(editRow(page)).toHaveCount(0);
@@ -288,12 +287,20 @@ test('Reorder tasks within a parent and top-level rows by drag-and-drop; order p
   await page.reload();
   await expect(page.locator('.row.task', { hasText: /E2E Task [BC]/ }).first()).toContainText('E2E Task C');
 
-  // A task cannot be dropped among another parent's tasks.
+  // Dropping a task above another parent's task moves it there, in that position.
+  const maint = await byTitle(request, 'Maintenance');
   await page.locator('.row.task', { hasText: 'E2E Task B' }).locator('.drag-handle')
     .dragTo(page.locator('.row.task', { hasText: 'Clean gutters' }), { targetPosition: { x: 200, y: 4 } });
-  await page.waitForTimeout(200);
-  expect(await taskOrder()).toEqual(['E2E Task C', 'E2E Task B']);
-  expect((await byTitle(request, 'E2E Task B')).parent_id).toBe(p.id);
+  await expect(page.locator('.row.task', { hasText: 'E2E Task B' })).toHaveAttribute('data-parent', String(maint.id));
+  expect((await byTitle(request, 'E2E Task B')).parent_id).toBe(maint.id);
+  const maintOrder = (await items(request)).filter((i) => i.parent_id === maint.id).map((i) => i.title);
+  expect(maintOrder.indexOf('E2E Task B')).toBe(maintOrder.indexOf('Clean gutters') - 1);
+  expect(await taskOrder()).toEqual(['E2E Task C']);
+  // Dropping onto a parent row moves the task to the start of that parent's tasks.
+  await page.locator('.row.task', { hasText: 'E2E Task B' }).locator('.drag-handle')
+    .dragTo(page.locator('.row.parent', { hasText: 'E2E Project (edited)' }), { targetPosition: { x: 200, y: 10 } });
+  await expect(page.locator('.row.task', { hasText: 'E2E Task B' })).toHaveAttribute('data-parent', String(p.id));
+  expect(await taskOrder()).toEqual(['E2E Task B', 'E2E Task C']);
 
   // Top-level: drag E2E Ongoing above E2E Project (edited).
   const topOrder = async () => (await items(request)).filter((i) => i.parent_id == null).map((i) => i.title);

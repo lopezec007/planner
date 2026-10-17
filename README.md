@@ -20,14 +20,17 @@ the single SQLite file. The directory containing it must already exist.
 1. Open the **Users** page and add the people who will own or be assigned
    work. Each gets a colour (click the swatch to change it) that highlights
    the Owner and Assignee columns everywhere.
-2. On **Home**, click **New** to add an Ongoing bucket or a Project as a blank
-   row; fill in the title (required) and anything else, then press Enter or
-   the ✓ button. Use the **+** on an Ongoing or Project row to add a task
-   beneath it.
+2. On **Home**, click **New Ongoing** or **New Project** to add a blank row;
+   fill in the title (required) and anything else, then press Enter or the ✓
+   button. Use the **+** on an Ongoing or Project row to add a task beneath it.
 3. Rows are read-only until you click ✎ on that row. Escape cancels, Enter
    saves (Ctrl+Enter inside the description). Only one row edits at a time.
+   The description sits directly under the title, both when reading and when
+   editing.
 4. Drag the ⠿ handle to reorder: Ongoing/Project rows among themselves, tasks
-   within their parent. Reparent a task through its Parent field in edit mode.
+   among any tasks. Dropping a task among another parent's tasks, or onto a
+   parent row, moves it to that parent. The **Narrow** toggle caps the table
+   width on very wide screens.
 5. **Plan** shows a Gantt timeline beside the titles (zoom with the +/−
    buttons or Ctrl+wheel, drag or scroll to pan, Today recentres). **Matrix**
    plots tasks by urgency and importance; hover a point for its description.

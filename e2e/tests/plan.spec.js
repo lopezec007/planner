@@ -19,7 +19,7 @@ async function barFor(page, title) {
 test('plan view hides non-title columns and draws bars only for dated items', async ({ page }) => {
   const errors = await openPlan(page);
   await expect(page.locator('.table.title-only')).toHaveCount(1);
-  await expect(page.locator('.row.header.task div', { hasText: 'Status' })).toHaveCount(0);
+  await expect(page.locator('.row.header div', { hasText: 'Status' })).toHaveCount(0);
 
   // Project with both dates: one bar. Ongoing (no dates) and a dateless task: none.
   await expect(await barFor(page, 'Kitchen remodel')).toHaveCount(1);
@@ -58,8 +58,8 @@ test('bars line up vertically with their table rows, including when descriptions
   await check('Kitchen remodel');
   await check('Build raised beds');
 
-  // The axis is level with the two table header rows.
-  const headerBottom = (await page.locator('.row.header.task').boundingBox());
+  // The axis is level with the table header row.
+  const headerBottom = (await page.locator('.row.header').boundingBox());
   const axis = await page.locator('.plan-axis').boundingBox();
   expect(Math.abs((axis.y + axis.height) - (headerBottom.y + headerBottom.height))).toBeLessThan(2);
 });

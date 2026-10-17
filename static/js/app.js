@@ -18,6 +18,9 @@ const toolbar = document.getElementById('toolbar');
 
 // Per-page UI state that survives re-renders.
 const pageState = {};
+// Table-view width constraint for very wide windows (shared by all pages).
+let narrow = false;
+try { narrow = localStorage.getItem('planner.narrow') === '1'; } catch {}
 function ps(page) {
   if (!pageState[page]) {
     let view = 'table';
@@ -87,12 +90,10 @@ function render() {
 
   // ---- toolbar ----
   toolbar.replaceChildren();
-  const newBtn = el('button', { class: 'primary', type: 'button', id: 'btn-new' }, 'New ▾');
-  const newMenu = el('div', { class: 'menu', hidden: true });
-  if (def.allowNewOngoing) newMenu.append(el('button', { type: 'button', onClick: () => { newMenu.hidden = true; actions.onNew('ongoing', page); } }, 'Ongoing'));
-  newMenu.append(el('button', { type: 'button', onClick: () => { newMenu.hidden = true; actions.onNew('project', page); } }, 'Project'));
-  newBtn.addEventListener('click', () => { newMenu.hidden = !newMenu.hidden; });
-  toolbar.append(el('div', { class: 'menu-wrap' }, newBtn, newMenu));
+  if (def.allowNewOngoing) {
+    toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-ongoing', onClick: () => actions.onNew('ongoing', page) }, 'New Ongoing'));
+  }
+  toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', onClick: () => actions.onNew('project', page) }, 'New Project'));
 
   toolbar.append(
     el('button', { type: 'button', id: 'btn-expand-all', onClick: () => { for (const id of describedIds(currentGroups)) st.expanded.add(id); render(); } }, 'Expand all'),
@@ -102,6 +103,14 @@ function render() {
   const searchSlot = el('div', { class: 'search-slot' });
   if (page === 'everything') toolbar.append(searchSlot);
   toolbar.append(el('div', { class: 'spacer' }));
+
+  if (st.view === 'table') {
+    toolbar.append(el('button', {
+      type: 'button', id: 'btn-narrow', class: narrow ? 'active' : '', title: 'Constrain the table width on wide screens',
+      'aria-pressed': narrow ? 'true' : 'false',
+      onClick: () => { narrow = !narrow; try { localStorage.setItem('planner.narrow', narrow ? '1' : '0'); } catch {} render(); },
+    }, 'Narrow'));
+  }
 
   if (def.views.length > 1) {
     const group = el('div', { class: 'group', role: 'group', 'aria-label': 'View' });
@@ -131,7 +140,7 @@ function render() {
     : null;
 
   if (st.view === 'table') {
-    const wrap = el('div', { class: 'table-wrap' });
+    const wrap = el('div', { class: `table-wrap ${narrow ? 'constrained' : ''}` });
     main.replaceChildren(...[hint, wrap].filter(Boolean));
     renderTable(wrap, { groups: currentGroups, mode: 'full', expanded: st.expanded, actions });
   } else {
@@ -147,9 +156,5 @@ function render() {
   }
 }
 
-document.addEventListener('click', (e) => {
-  // close the New menu on outside click
-  if (!e.target.closest('.menu-wrap')) document.querySelectorAll('.menu').forEach((m) => { m.hidden = true; });
-});
 window.addEventListener('hashchange', () => { cancelEdit(); render(); });
 reload();
