@@ -4,15 +4,16 @@ async function openPlan(page) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
-  await expect(page.locator('.row.parent:not(.header)').first()).toBeVisible();
+  await expect(page.locator('.row[data-id].parent').first()).toBeVisible();
   await page.locator('.toolbar button[data-view="timeline"]').click();
   await expect(page.locator('#panel .timeline-canvas')).toBeVisible();
   return errors;
 }
 
-/** Locator for the bar belonging to the row whose title matches. */
+/** Locator for the bar belonging to the row whose title matches. Only rows
+ *  with a data-id are item rows; detail rows may quote other items' titles. */
 async function barFor(page, title) {
-  const id = await page.locator('.row:not(.header)', { hasText: title }).first().getAttribute('data-id');
+  const id = await page.locator('.row[data-id]', { hasText: title }).first().getAttribute('data-id');
   return page.locator(`.timeline-bar[data-id="${id}"]`);
 }
 
@@ -40,7 +41,7 @@ test('plan view hides non-title columns and draws bars only for dated items', as
 test('bars line up vertically with their table rows, including when descriptions are expanded', async ({ page }) => {
   await openPlan(page);
   const check = async (title) => {
-    const row = page.locator('.row:not(.header)', { hasText: title }).first();
+    const row = page.locator('.row[data-id]', { hasText: title }).first();
     const bar = await barFor(page, title);
     const rb = await row.boundingBox();
     const bb = await bar.boundingBox();
@@ -147,12 +148,11 @@ test('scroll position survives re-renders and page changes (today stays in view)
   await page.goto('/');
   await page.locator('button[data-view=timeline]').click();
   expect(await todayInView()).toBe(true);
-  // Edit and cancel a row beside the timeline (re-renders the timeline twice).
-  const row = page.locator('.row.task', { hasText: 'Demo old cabinets' });
-  await row.hover();
-  await row.locator('button[title=Edit]').click();
+  // Edit and cancel a title beside the timeline (re-renders the timeline twice).
+  const row = page.locator('.row[data-id].task', { hasText: 'Demo old cabinets' });
+  await row.locator('.title-text').click();
   await page.keyboard.press('Escape');
-  await expect(page.locator('.row[data-editing]')).toHaveCount(0);
+  await expect(row.locator('input[name=title]')).toHaveCount(0);
   expect(await todayInView()).toBe(true);
   // Another page's timeline opens at the same window.
   await page.goto('/#/everything');

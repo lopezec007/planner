@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 async function openMatrix(page, path = '/') {
   await page.goto(path);
-  await expect(page.locator('.row.parent:not(.header)').first()).toBeVisible();
+  await expect(page.locator('.row[data-id].parent').first()).toBeVisible();
   await page.locator('.toolbar button[data-view="matrix"]').click();
   await expect(page.locator('.matrix-plot')).toBeVisible();
 }
@@ -16,7 +16,7 @@ test('matrix view plots one point per visible task and no parents', async ({ pag
   await expect(page.locator('.split .table.title-only')).toBeVisible();
 
   const points = page.locator('.matrix-plot .pt');
-  const taskRows = page.locator('.row.task:not(.header)');
+  const taskRows = page.locator('.row[data-id].task');
   const taskCount = await taskRows.count();
   expect(taskCount).toBeGreaterThan(5);
   await expect(points).toHaveCount(taskCount);
@@ -25,7 +25,7 @@ test('matrix view plots one point per visible task and no parents', async ({ pag
   const pointIds = await points.evaluateAll((els) => els.map((e) => e.dataset.id).sort());
   const rowIds = await taskRows.evaluateAll((els) => els.map((e) => e.dataset.id).sort());
   expect(pointIds).toEqual(rowIds);
-  const parentIds = await page.locator('.row.parent:not(.header)').evaluateAll((els) => els.map((e) => e.dataset.id));
+  const parentIds = await page.locator('.row[data-id].parent').evaluateAll((els) => els.map((e) => e.dataset.id));
   for (const id of parentIds) expect(pointIds).not.toContain(id);
 
   // Axes and ticks.
@@ -269,7 +269,7 @@ test('closed and blocked tasks are visually distinguished; assignee colour appli
 
 test('matrix view on backlog and ideas pages shows only those tasks', async ({ page }) => {
   await openMatrix(page, '/#/backlog');
-  const n = await page.locator('.row.task:not(.header)').count();
+  const n = await page.locator('.row[data-id].task').count();
   await expect(page.locator('.matrix-plot .pt')).toHaveCount(n);
   await expect(page.locator('.matrix-plot .pt[data-key="T-3"]')).toHaveCount(1); // Service lawnmower (backlog)
   await expect(page.locator('.matrix-plot .pt[data-key="T-9"]')).toHaveCount(0);
