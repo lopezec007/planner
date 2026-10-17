@@ -116,11 +116,11 @@ function pointClass(item) {
 function pointColor(item) {
   if (isClosed(item.status)) return null; // no highlighting on closed items
   const u = item.assignee_id != null ? state.usersById.get(item.assignee_id) : null;
-  return u ? u.color : null;
+  if (u) return u.color;
+  return state.settings?.color_unassigned || null; // grey for no assignee (a setting)
 }
 
 function assigneeName(item) {
-  if (item.assignee_shared) return 'Shared';
   if (item.assignee_id == null) return null;
   return state.usersById.get(item.assignee_id)?.name ?? `#${item.assignee_id}`;
 }

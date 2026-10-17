@@ -17,7 +17,7 @@
 
 import { api } from './api.js';
 import { state, STATUSES, STATUS_LABEL } from './state.js';
-import { el, toast } from './util.js';
+import { el, toast, contrastText } from './util.js';
 
 export const editing = { mode: null, id: null, draft: null };
 
@@ -37,7 +37,7 @@ export function beginNew({ type, parentId = null, status = 'todo' }) {
   editing.id = null;
   editing.draft = {
     id: null, type, key: '', parent_id: parentId, title: '', description: '',
-    owner_id: null, assignee_id: null, assignee_shared: false,
+    owner_id: null, assignee_id: null,
     status: type === 'ongoing' ? null : status,
     start_date: null, start_firm: false, end_date: null, end_firm: false,
     urgency: type === 'task' ? 5 : null, importance: type === 'task' ? 5 : null, blocked: false,
@@ -59,12 +59,52 @@ function option(value, label, selected) {
   return el('option', { value, selected: selected ? true : null }, label);
 }
 
-function userSelect(name, current, extra) {
-  const sel = el('select', { name, 'aria-label': name });
-  sel.append(option('', '—', current == null && !extra?.sharedSelected));
-  if (extra?.shared) sel.append(option('shared', 'Shared', extra.sharedSelected));
-  for (const u of state.users) sel.append(option(String(u.id), u.name, current === u.id));
-  return sel;
+const CHIP_MAX_USERS = 3;
+
+// Owner / assignee picker. With a handful of users it is a row of clickable
+// chips (click again to clear); with more it falls back to a <select>. Both
+// expose `.value` ('' or a user id string) so the readers need not care.
+function userPicker(name, current) {
+  if (state.users.length > CHIP_MAX_USERS) {
+    const sel = el('select', { name, 'aria-label': name });
+    sel.append(option('', '—', current == null));
+    for (const u of state.users) sel.append(option(String(u.id), u.name, current === u.id));
+    return sel;
+  }
+  const wrap = el('div', { class: 'user-pick', role: 'group', 'aria-label': name, dataset: { name, value: current == null ? '' : String(current) } });
+  Object.defineProperty(wrap, 'value', { get: () => wrap.dataset.value });
+  const refresh = () => {
+    for (const b of wrap.children) b.setAttribute('aria-pressed', b.dataset.user === wrap.dataset.value ? 'true' : 'false');
+  };
+  for (const u of state.users) {
+    const b = el('button', {
+      type: 'button', class: 'chip', title: u.name, dataset: { user: String(u.id) },
+      style: { background: u.color, color: contrastText(u.color) },
+    }, u.name);
+    b.addEventListener('click', () => {
+      wrap.dataset.value = wrap.dataset.value === String(u.id) ? '' : String(u.id);
+      refresh();
+    });
+    wrap.append(b);
+  }
+  refresh();
+  return wrap;
+}
+
+// Urgency / importance inputs: a single key sets the value outright.
+// Digits 1-9 set that value, 0 sets 10 and ` (the key left of 1) sets 0.
+function levelKeys(inp) {
+  inp.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    let v = null;
+    if (e.key === '`') v = 0;
+    else if (e.key === '0') v = 10;
+    else if (/^[1-9]$/.test(e.key)) v = Number(e.key);
+    if (v == null) return;
+    e.preventDefault();
+    inp.value = String(v);
+  });
+  return inp;
 }
 
 function buildEditors(draft) {
@@ -72,8 +112,8 @@ function buildEditors(draft) {
   const ed = {
     title: el('input', { type: 'text', name: 'title', 'aria-label': 'title', placeholder: 'Title (required)', maxlength: 255, value: draft.title || '' }),
     description: el('textarea', { name: 'description', 'aria-label': 'description', rows: 4, placeholder: 'Description (markdown)' }),
-    owner: userSelect('owner', draft.owner_id),
-    assignee: userSelect('assignee', draft.assignee_id, { shared: true, sharedSelected: !!draft.assignee_shared }),
+    owner: userPicker('owner', draft.owner_id),
+    assignee: userPicker('assignee', draft.assignee_id),
   };
   ed.description.value = draft.description || '';
   ed.parentId = draft.parent_id ?? null;
@@ -86,8 +126,8 @@ function buildEditors(draft) {
     ed.endFirm = el('input', { type: 'checkbox', name: 'end_firm', 'aria-label': 'end firm', checked: !!draft.end_firm });
   }
   if (type === 'task') {
-    ed.urgency = el('input', { type: 'number', name: 'urgency', 'aria-label': 'urgency', min: 0, max: 10, value: draft.urgency ?? '' });
-    ed.importance = el('input', { type: 'number', name: 'importance', 'aria-label': 'importance', min: 0, max: 10, value: draft.importance ?? '' });
+    ed.urgency = levelKeys(el('input', { type: 'number', name: 'urgency', 'aria-label': 'urgency', min: 0, max: 10, value: draft.urgency ?? '' }));
+    ed.importance = levelKeys(el('input', { type: 'number', name: 'importance', 'aria-label': 'importance', min: 0, max: 10, value: draft.importance ?? '' }));
     ed.blocked = el('input', { type: 'checkbox', name: 'blocked', 'aria-label': 'blocked', checked: !!draft.blocked });
   }
   return ed;
@@ -102,8 +142,7 @@ function readEditors(ed, type) {
     title: ed.title.value,
     description: ed.description.value,
     owner_id: ed.owner.value ? Number(ed.owner.value) : null,
-    assignee_shared: ed.assignee.value === 'shared',
-    assignee_id: ed.assignee.value && ed.assignee.value !== 'shared' ? Number(ed.assignee.value) : null,
+    assignee_id: ed.assignee.value ? Number(ed.assignee.value) : null,
   };
   if (type !== 'ongoing') {
     v.status = ed.status.value;
@@ -123,9 +162,7 @@ function readEditors(ed, type) {
 
 // Body for POST /api/items.
 function createBody(v, type) {
-  const body = { type, title: v.title, description: v.description, owner_id: v.owner_id };
-  if (v.assignee_shared) body.assignee_shared = true;
-  else body.assignee_id = v.assignee_id;
+  const body = { type, title: v.title, description: v.description, owner_id: v.owner_id, assignee_id: v.assignee_id };
   if (type !== 'ongoing') {
     body.status = v.status;
     body.start_date = v.start_date; body.start_firm = v.start_firm;
@@ -148,10 +185,7 @@ function patchBody(v, orig) {
   diff('title');
   diff('description');
   diff('owner_id');
-  if (v.assignee_shared !== !!orig.assignee_shared || (v.assignee_id ?? null) !== (orig.assignee_id ?? null)) {
-    if (v.assignee_shared) body.assignee_shared = true;
-    else body.assignee_id = v.assignee_id; // a user id, or null to clear
-  }
+  diff('assignee_id'); // a user id, or null to clear
   if (orig.type !== 'ongoing') {
     diff('status');
     diff('start_date');

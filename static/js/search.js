@@ -26,7 +26,7 @@ function emptyCriteria() {
     types: new Set(),
     statuses: new Set(),
     owner: '',      // '' any | 'none' | user id (string)
-    assignee: '',   // '' any | 'shared' | 'none' | user id (string)
+    assignee: '',   // '' any | 'none' | user id (string)
     blocked: '',    // '' any | 'yes' | 'no'
     endAfter: '',   // YYYY-MM-DD, inclusive
     endBefore: '',  // YYYY-MM-DD, inclusive
@@ -69,9 +69,7 @@ function matches(it) {
     if (c.owner === 'none' ? it.owner_id != null : String(it.owner_id) !== c.owner) return false;
   }
   if (c.assignee) {
-    if (c.assignee === 'shared') { if (!it.assignee_shared) return false; }
-    else if (c.assignee === 'none') { if (it.assignee_shared || it.assignee_id != null) return false; }
-    else if (it.assignee_shared || String(it.assignee_id) !== c.assignee) return false;
+    if (c.assignee === 'none' ? it.assignee_id != null : String(it.assignee_id) !== c.assignee) return false;
   }
   if (c.blocked && (c.blocked === 'yes') !== !!it.blocked) return false;
   if (c.endAfter || c.endBefore) {
@@ -185,7 +183,7 @@ function buildPanel() {
       () => { if (c.statuses.has(s)) c.statuses.delete(s); else c.statuses.add(s); }))),
     el('div', { class: 'search-row' },
       select('owner', 'Owner', c.owner, [['', 'Any'], ['none', 'No owner'], ...userOpts], (v) => { c.owner = v; }),
-      select('assignee', 'Assignee', c.assignee, [['', 'Any'], ['shared', 'Shared'], ['none', 'Unassigned'], ...userOpts], (v) => { c.assignee = v; }),
+      select('assignee', 'Assignee', c.assignee, [['', 'Any'], ['none', 'Unassigned'], ...userOpts], (v) => { c.assignee = v; }),
       select('blocked', 'Blocked', c.blocked, [['', 'Any'], ['yes', 'Blocked'], ['no', 'Not blocked']], (v) => { c.blocked = v; }),
     ),
     el('div', { class: 'search-row' },

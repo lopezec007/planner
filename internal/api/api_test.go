@@ -62,13 +62,13 @@ func TestItemLifecycle(t *testing.T) {
 	}
 	var tk map[string]any
 	c := call(t, srv, "POST", "/api/items", map[string]any{
-		"type": "task", "title": "Fix roof", "parent_id": o["id"], "owner_id": u["id"], "assignee_shared": true,
+		"type": "task", "title": "Fix roof", "parent_id": o["id"], "owner_id": u["id"], "assignee_id": u["id"],
 		"end_date": "2026-11-01", "end_firm": true,
 	}, &tk)
 	if c != 201 {
 		t.Fatalf("create task: %d", c)
 	}
-	if tk["key"] != "T-1" || tk["urgency"].(float64) != 5 || tk["assignee_shared"] != true || tk["end_firm"] != true {
+	if tk["key"] != "T-1" || tk["urgency"].(float64) != 5 || tk["assignee_id"] == nil || tk["end_firm"] != true {
 		t.Fatalf("task: %v", tk)
 	}
 	id := int64(tk["id"].(float64))
@@ -79,7 +79,7 @@ func TestItemLifecycle(t *testing.T) {
 	if c := call(t, srv, "PATCH", path, `{"end_date": null, "status": "done", "assignee_id": `+jsonNum(int64(u["id"].(float64)))+`}`, &up); c != 200 {
 		t.Fatalf("patch: %d", c)
 	}
-	if up["end_date"] != nil || up["end_firm"] != false || up["status"] != "done" || up["closed_at"] == nil || up["assignee_shared"] != false {
+	if up["end_date"] != nil || up["end_firm"] != false || up["status"] != "done" || up["closed_at"] == nil {
 		t.Fatalf("patched: %v", up)
 	}
 	var hist []map[string]any

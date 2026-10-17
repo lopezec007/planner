@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 const weekday = (ymd) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).getDay(); };
 
 test.afterEach(async ({ request }) => {
-  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '' } });
+  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad' } });
 });
 
 test('settings page hosts the users list and the old #/users route still works', async ({ page }) => {
@@ -63,4 +63,15 @@ test('ongoing keys use the N prefix and the matrix renders with no tasks', async
   await page.goto('/#/ideas');
   await page.locator('button[data-view=matrix]').click();
   await expect(page.locator('#panel svg.matrix-plot')).toBeVisible();
+});
+
+test('unassigned items use the no-assignee colour in the matrix, and it is a setting', async ({ page, request }) => {
+  await page.goto('/');
+  await page.locator('button[data-view=matrix]').click();
+  const pt = page.locator('#panel svg g.pt[data-key="T-10"]'); // Electrical rough-in: open, unassigned
+  await expect(pt).toHaveAttribute('style', /--pt: #9aa3ad/);
+  await request.patch('/api/settings', { data: { color_unassigned: '#ff00ff' } });
+  await page.reload();
+  await page.locator('button[data-view=matrix]').click();
+  await expect(page.locator('#panel svg g.pt[data-key="T-10"]')).toHaveAttribute('style', /--pt: #ff00ff/);
 });

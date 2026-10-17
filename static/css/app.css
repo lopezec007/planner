@@ -182,7 +182,6 @@ main { padding: 12px 16px; flex: 1; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.chip.shared { background: var(--bg-hover); color: var(--fg); border: 1px dashed var(--border); }
 .hl-orange { background: var(--orange-bg); color: var(--orange); border-radius: 4px; }
 .hl-red { background: var(--red-bg); color: var(--red); font-weight: 700; border-radius: 4px; }
 .firm { font-size: 10px; margin-left: 3px; color: var(--fg-muted); vertical-align: middle; }

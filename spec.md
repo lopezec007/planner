@@ -60,7 +60,9 @@ All 3 work types should have the following fields:
 - Description: string of unlimited length (within reason) that supports standard markdown rendering.  The markdown
   flavour is at the implementer's discretion.
 - Owner: dropdown of users
-- Assignee: dropdown of users, with one additional option of "Shared".  ("Shared" is not an option for Owner.)
+- Assignee: dropdown of users (may be left unassigned)
+
+When there are 3 or fewer users, Owner and Assignee are edited as clickable chips rather than dropdowns.
 
 Projects and Tasks should additionally have:
 - Start Date: date

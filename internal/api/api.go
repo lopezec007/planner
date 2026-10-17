@@ -4,8 +4,8 @@
 //   - All responses are JSON. Errors are {"error": "message"}.
 //   - PATCH bodies are partial: absent fields are unchanged; an explicit null
 //     clears a nullable field (parent_id excepted: tasks always need one).
-//   - Assignee: send {"assignee_id": 3} for a user, {"assignee_shared": true}
-//     for "Shared", or {"assignee_id": null} to clear.
+//   - Owner/assignee: send {"assignee_id": 3} for a user or
+//     {"assignee_id": null} to clear (likewise owner_id).
 package api
 
 import (
@@ -171,21 +171,20 @@ func (o *Opt[T]) UnmarshalJSON(b []byte) error {
 
 // itemBody is the wire format for create and patch.
 type itemBody struct {
-	Type           *string     `json:"type"`
-	ParentID       Opt[int64]  `json:"parent_id"`
-	Title          *string     `json:"title"`
-	Description    *string     `json:"description"`
-	OwnerID        Opt[int64]  `json:"owner_id"`
-	AssigneeID     Opt[int64]  `json:"assignee_id"`
-	AssigneeShared *bool       `json:"assignee_shared"`
-	Status         *string     `json:"status"`
-	StartDate      Opt[string] `json:"start_date"`
-	StartFirm      *bool       `json:"start_firm"`
-	EndDate        Opt[string] `json:"end_date"`
-	EndFirm        *bool       `json:"end_firm"`
-	Urgency        *int        `json:"urgency"`
-	Importance     *int        `json:"importance"`
-	Blocked        *bool       `json:"blocked"`
+	Type        *string     `json:"type"`
+	ParentID    Opt[int64]  `json:"parent_id"`
+	Title       *string     `json:"title"`
+	Description *string     `json:"description"`
+	OwnerID     Opt[int64]  `json:"owner_id"`
+	AssigneeID  Opt[int64]  `json:"assignee_id"`
+	Status      *string     `json:"status"`
+	StartDate   Opt[string] `json:"start_date"`
+	StartFirm   *bool       `json:"start_firm"`
+	EndDate     Opt[string] `json:"end_date"`
+	EndFirm     *bool       `json:"end_firm"`
+	Urgency     *int        `json:"urgency"`
+	Importance  *int        `json:"importance"`
+	Blocked     *bool       `json:"blocked"`
 }
 
 func (b *itemBody) patch() (store.Patch, error) {
@@ -217,12 +216,6 @@ func (b *itemBody) patch() (store.Patch, error) {
 		} else {
 			p.AssigneeID = b.AssigneeID.Val
 		}
-	}
-	if b.AssigneeShared != nil {
-		if *b.AssigneeShared && p.ClearAssignee {
-			return p, &store.ValidationError{Msg: "assignee_id null and assignee_shared true conflict"}
-		}
-		p.AssigneeShared = b.AssigneeShared
 	}
 	if b.StartDate.Set {
 		if b.StartDate.Val == nil {

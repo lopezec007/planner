@@ -31,8 +31,7 @@ import { editing, isEditingItem, cancelEdit, renderEditRows } from './edit.js';
 
 const FIRM_ICON = '🔒';
 
-export function userChip(id, shared) {
-  if (shared) return el('span', { class: 'chip shared' }, 'Shared');
+export function userChip(id) {
   if (id == null) return '';
   const u = state.usersById.get(id);
   if (!u) return el('span', { class: 'chip' }, `#${id}`);
@@ -160,8 +159,8 @@ function itemRow(item, kind, mode, expanded, ctx) {
   if (mode === 'full') {
     row.append(
       statusCell(item),
-      el('div', {}, userChip(item.owner_id, false)),
-      el('div', {}, userChip(item.assignee_id, item.assignee_shared)),
+      el('div', {}, userChip(item.owner_id)),
+      el('div', {}, userChip(item.assignee_id)),
       dateCell(item.start_date, item.start_firm, ''),
       dateCell(item.end_date, item.end_firm, closed ? '' : endDateClass(item.end_date)),
       numCell(item.urgency, !closed),

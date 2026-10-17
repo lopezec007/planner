@@ -32,7 +32,7 @@ test('New project: blank row with description expanded, saves with page status',
 
   await newRow(page).locator('input[name=title]').fill('E2E Project');
   await detailRow(page).locator('textarea').fill('Created **in** e2e');
-  await newRow(page).locator('select[name=owner]').selectOption({ label: 'Evan' });
+  await newRow(page).locator('.user-pick[data-name=owner] .chip', { hasText: 'Evan' }).click();
   await newRow(page).locator('input[name=end_date]').fill(ymd(30));
   await newRow(page).locator('input[name=title]').press('Enter');
 
@@ -60,14 +60,17 @@ test('New ongoing from the toolbar; backlog page offers no Ongoing', async ({ pa
   await expect(newRow(page)).toBeVisible();
   await expect(newRow(page).locator('select[name=status]')).toHaveCount(0); // ongoing has no status
   await newRow(page).locator('input[name=title]').fill('E2E Ongoing');
-  await newRow(page).locator('select[name=assignee]').selectOption('shared');
+  // Three seeded users: owner/assignee are chip pickers rather than selects.
+  await expect(newRow(page).locator('select[name=assignee]')).toHaveCount(0);
+  await newRow(page).locator('.user-pick[data-name=assignee] .chip', { hasText: 'Sam' }).click();
   await page.locator('button[title=Save]').click();
   const row = page.locator('.row.parent', { hasText: 'E2E Ongoing' });
   await expect(row).toBeVisible();
-  await expect(row.locator('.chip.shared')).toHaveText('Shared');
+  await expect(row.locator('.chip', { hasText: 'Sam' })).toBeVisible();
   const it = await byTitle(request, 'E2E Ongoing');
+  const sam = (await (await request.get('/api/users')).json()).find((u) => u.name === 'Sam');
   expect(it.type).toBe('ongoing');
-  expect(it.assignee_shared).toBe(true);
+  expect(it.assignee_id).toBe(sam.id);
 });
 
 test('New row: cancel removes it; empty title shows a validation toast and stays in edit mode', async ({ page, request }) => {
@@ -117,7 +120,7 @@ test('Add task puts a blank task row under the parent and saves it there', async
   expect(a.status).toBe('todo');
 });
 
-test('Edit a task: every field type, including Shared assignee and firm dates', async ({ page, request }) => {
+test('Edit a task: every field type, including chip pickers, level keys and firm dates', async ({ page, request }) => {
   await page.goto('/');
   const row = page.locator('.row.task', { hasText: 'E2E Task A' });
   // Cells are not editable outside edit mode.
@@ -131,20 +134,26 @@ test('Edit a task: every field type, including Shared assignee and firm dates', 
   await er.locator('input[name=title]').fill('E2E Task A2');
   await detailRow(page).locator('textarea').fill('Edited description');
   await er.locator('select[name=status]').selectOption('in-progress');
-  await er.locator('select[name=owner]').selectOption({ label: 'Sam' });
-  await er.locator('select[name=assignee]').selectOption('shared');
+  await er.locator('.user-pick[data-name=owner] .chip', { hasText: 'Sam' }).click();
+  await er.locator('.user-pick[data-name=assignee] .chip', { hasText: 'Evan' }).click();
   await er.locator('input[name=start_date]').fill(ymd(-1));
   await er.locator('input[name=start_firm]').check();
   await er.locator('input[name=end_date]').fill(ymd(2));
-  await er.locator('input[name=urgency]').fill('9');
-  await er.locator('input[name=importance]').fill('2');
+  // Single-key entry overwrites the value: 9 -> 9, then ` -> 0, then 0 -> 10, then 2 -> 2.
+  await er.locator('input[name=urgency]').press('9');
+  await expect(er.locator('input[name=urgency]')).toHaveValue('9');
+  await er.locator('input[name=importance]').press('`');
+  await expect(er.locator('input[name=importance]')).toHaveValue('0');
+  await er.locator('input[name=importance]').press('0');
+  await expect(er.locator('input[name=importance]')).toHaveValue('10');
+  await er.locator('input[name=importance]').press('2');
   await er.locator('input[name=blocked]').check();
   await page.locator('button[title=Save]').click();
   await expect(editRow(page)).toHaveCount(0);
 
   const updated = page.locator('.row.task', { hasText: 'E2E Task A2' });
   await expect(updated).toHaveClass(/blocked/);
-  await expect(updated.locator('.chip.shared')).toHaveText('Shared');
+  await expect(updated.locator('.chip', { hasText: 'Evan' })).toBeVisible();
   await expect(updated.locator('.firm')).toHaveCount(1);
   await updated.locator('.toggle button').click();
   await expect(page.locator('.row.description', { hasText: 'Edited description' })).toBeVisible();
@@ -153,8 +162,7 @@ test('Edit a task: every field type, including Shared assignee and firm dates', 
   const sam = (await (await request.get('/api/users')).json()).find((u) => u.name === 'Sam');
   expect(it.status).toBe('in-progress');
   expect(it.owner_id).toBe(sam.id);
-  expect(it.assignee_shared).toBe(true);
-  expect(it.assignee_id).toBeNull();
+  expect(it.assignee_id).toBe((await (await request.get('/api/users')).json()).find((u) => u.name === 'Evan').id);
   expect(it.start_date).toBe(ymd(-1));
   expect(it.start_firm).toBe(true);
   expect(it.end_date).toBe(ymd(2));
@@ -170,8 +178,8 @@ test('Edit a task: clear a date, clear owner, assign a user, unblock, reparent',
   await row.locator('button[title=Edit]').click();
   const er = editRow(page);
   await er.locator('input[name=start_date]').fill('');
-  await er.locator('select[name=owner]').selectOption('');
-  await er.locator('select[name=assignee]').selectOption({ label: 'Alex' });
+  await er.locator('.user-pick[data-name=owner] .chip[aria-pressed=true]').click(); // click again clears
+  await er.locator('.user-pick[data-name=assignee] .chip', { hasText: 'Alex' }).click();
   await er.locator('input[name=blocked]').uncheck();
   await expect(detailRow(page).locator('select[name=parent]')).toHaveCount(0); // no Parent field: reparent by drag
   await page.locator('button[title=Save]').click();
@@ -190,7 +198,6 @@ test('Edit a task: clear a date, clear owner, assign a user, unblock, reparent',
   expect(it.end_date).toBe(ymd(2)); // untouched
   expect(it.owner_id).toBeNull();
   expect(it.assignee_id).toBe(alex.id);
-  expect(it.assignee_shared).toBe(false);
   expect(it.blocked).toBe(false);
   expect(it.parent_id).toBe(ongoing.id);
   // Now shown under E2E Ongoing.
@@ -316,6 +323,21 @@ test('Reorder tasks within a parent and top-level rows by drag-and-drop; order p
   expect(order.indexOf('File taxes')).toBeLessThan(order.indexOf('E2E Ongoing'));
   await page.reload();
   await expect(page.locator('.row.parent', { hasText: /E2E (Ongoing|Project)/ }).first()).toContainText('E2E Ongoing');
+});
+
+test('With more than three users the pickers become dropdowns', async ({ page, request }) => {
+  const res = await request.post('/api/users', { data: { name: 'E2E Fourth' } });
+  const u = await res.json();
+  try {
+    await page.goto('/');
+    await page.locator('.row.task', { hasText: 'Clean gutters' }).locator('button[title=Edit]').click();
+    await expect(editRow(page).locator('select[name=owner]')).toBeVisible();
+    await expect(editRow(page).locator('select[name=assignee] option')).toHaveCount(5); // blank + 4 users
+    await expect(editRow(page).locator('.user-pick')).toHaveCount(0);
+    await page.locator('button[title=Cancel]').click();
+  } finally {
+    await request.delete(`/api/users/${u.id}`);
+  }
 });
 
 test('Delete a task and a parent (with its tasks)', async ({ page, request }) => {

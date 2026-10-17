@@ -224,7 +224,7 @@ export function renderTimeline(panel, handle, ctx) {
         style: {
           left: `${x0}px`, width: `${x1 - x0}px`,
           top: `${top + (h - barH) / 2}px`, height: `${barH}px`,
-          background: user ? user.color : 'var(--accent)',
+          background: user ? user.color : (state.settings?.color_unassigned || 'var(--accent)'),
           maskImage: mask, webkitMaskImage: mask,
         },
       });

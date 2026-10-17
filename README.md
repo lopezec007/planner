@@ -24,6 +24,9 @@ the single SQLite file. The directory containing it must already exist.
    button. Use the **+** on an Ongoing or Project row to add a task beneath it.
 3. Rows are read-only until you click ✎ on that row. Escape cancels, Enter
    saves (Ctrl+Enter inside the description). Only one row edits at a time.
+   With three or fewer users, Owner and Assignee are clickable chips (click
+   again to clear). In the urgency and importance fields a single key sets
+   the value: 1 to 9, 0 for 10 and ` for 0.
    The description sits directly under the title, both when reading and when
    editing.
 4. Drag the ⠿ handle to reorder: Ongoing/Project rows among themselves, tasks
@@ -183,6 +186,6 @@ API summary (all JSON):
     GET    /api/settings              PATCH /api/settings {key: value}  (week_start, color_*)
 
 Item JSON fields: id, type (ongoing|project|task), key, num, parent_id, title,
-description, owner_id, assignee_id, assignee_shared, status, start_date,
+description, owner_id, assignee_id, status, start_date,
 start_firm, end_date, end_firm, urgency, importance, blocked, sort_order,
 created_at, updated_at, closed_at (set while status is done/cancelled).

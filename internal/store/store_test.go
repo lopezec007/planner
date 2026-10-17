@@ -84,24 +84,33 @@ func TestDefaultsAndValidation(t *testing.T) {
 	}
 }
 
-func TestAssigneeSharedExclusive(t *testing.T) {
+func TestAssigneeSetAndClear(t *testing.T) {
 	s := openTest(t)
 	u, _ := s.CreateUser("Evan", "")
 	p := mustCreate(t, s, TypeProject, Patch{Title: str("P"), AssigneeID: i64(u.ID)})
-	if p.AssigneeID == nil || p.AssigneeShared {
+	if p.AssigneeID == nil || *p.AssigneeID != u.ID {
 		t.Fatal("assignee should be user")
 	}
-	p, err := s.UpdateItem(p.ID, Patch{AssigneeShared: b(true)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.AssigneeID != nil || !p.AssigneeShared {
-		t.Fatal("assignee should be shared")
-	}
 	p, _ = s.UpdateItem(p.ID, Patch{ClearAssignee: true})
-	if p.AssigneeID != nil || p.AssigneeShared {
+	if p.AssigneeID != nil {
 		t.Fatal("assignee should be cleared")
 	}
+}
+
+func TestLegacySharedColumnDropped(t *testing.T) {
+	s := openTest(t)
+	if _, err := s.db.Exec(`ALTER TABLE items ADD COLUMN assignee_shared INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name = 'assignee_shared'`).Scan(&n)
+	if n != 0 {
+		t.Fatal("assignee_shared column should have been dropped")
+	}
+	mustCreate(t, s, TypeOngoing, Patch{Title: str("still works")})
 }
 
 func TestStatusHistoryAndClosedAt(t *testing.T) {

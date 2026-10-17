@@ -10,7 +10,7 @@ import { renderUsers } from './users.js';
 import { el, toast } from './util.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const DEFAULT_COLORS = { color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '' };
+const DEFAULT_COLORS = { color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad' };
 
 async function save(patch, ctx) {
   try {
@@ -59,7 +59,8 @@ export function renderSettings(main, ctx) {
       el('p', { class: 'settings-help' }, 'Rows are tinted with these colours in both light and dark themes.'),
       colorRow('color_ongoing', 'Ongoing rows', '', ctx),
       colorRow('color_project', 'Project rows', '', ctx),
-      colorRow('color_task', 'Task rows', 'No tint by default.', ctx)),
+      colorRow('color_task', 'Task rows', 'No tint by default.', ctx),
+      colorRow('color_unassigned', 'No assignee', 'Matrix points and Timeline bars of items with no assignee.', ctx)),
     section('Users', usersBox),
   );
   renderUsers(usersBox, ctx);

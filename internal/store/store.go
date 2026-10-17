@@ -63,32 +63,29 @@ type User struct {
 	CreatedAt string `json:"created_at"`
 }
 
-// Item is a row of the items table as exposed by the API.
-//
-// Assignee is either a user (AssigneeID set), "Shared" (AssigneeShared true),
-// or unset (both zero). The two never both hold.
+// Item is a row of the items table as exposed by the API. Owner and
+// Assignee are optional user references.
 type Item struct {
-	ID             int64   `json:"id"`
-	Type           string  `json:"type"`
-	Key            string  `json:"key"`
-	Num            int64   `json:"num"`
-	ParentID       *int64  `json:"parent_id"`
-	Title          string  `json:"title"`
-	Description    string  `json:"description"`
-	OwnerID        *int64  `json:"owner_id"`
-	AssigneeID     *int64  `json:"assignee_id"`
-	AssigneeShared bool    `json:"assignee_shared"`
-	Status         *string `json:"status"`
-	StartDate      *string `json:"start_date"`
-	StartFirm      bool    `json:"start_firm"`
-	EndDate        *string `json:"end_date"`
-	EndFirm        bool    `json:"end_firm"`
-	Urgency        *int    `json:"urgency"`
-	Importance     *int    `json:"importance"`
-	Blocked        bool    `json:"blocked"`
-	SortOrder      int64   `json:"sort_order"`
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
+	ID          int64   `json:"id"`
+	Type        string  `json:"type"`
+	Key         string  `json:"key"`
+	Num         int64   `json:"num"`
+	ParentID    *int64  `json:"parent_id"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	OwnerID     *int64  `json:"owner_id"`
+	AssigneeID  *int64  `json:"assignee_id"`
+	Status      *string `json:"status"`
+	StartDate   *string `json:"start_date"`
+	StartFirm   bool    `json:"start_firm"`
+	EndDate     *string `json:"end_date"`
+	EndFirm     bool    `json:"end_firm"`
+	Urgency     *int    `json:"urgency"`
+	Importance  *int    `json:"importance"`
+	Blocked     bool    `json:"blocked"`
+	SortOrder   int64   `json:"sort_order"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 	// ClosedAt is the timestamp the item most recently entered a closed
 	// status (done/cancelled), or nil if its current status is not closed.
 	ClosedAt *string `json:"closed_at"`
@@ -104,24 +101,23 @@ type StatusChange struct {
 // Patch holds optional field updates. A nil pointer means "leave unchanged".
 // For nullable fields, Clear* flags set the field to NULL.
 type Patch struct {
-	ParentID       *int64
-	Title          *string
-	Description    *string
-	OwnerID        *int64
-	ClearOwner     bool
-	AssigneeID     *int64
-	AssigneeShared *bool
-	ClearAssignee  bool
-	Status         *string
-	StartDate      *string
-	ClearStart     bool
-	StartFirm      *bool
-	EndDate        *string
-	ClearEnd       bool
-	EndFirm        *bool
-	Urgency        *int
-	Importance     *int
-	Blocked        *bool
+	ParentID      *int64
+	Title         *string
+	Description   *string
+	OwnerID       *int64
+	ClearOwner    bool
+	AssigneeID    *int64
+	ClearAssignee bool
+	Status        *string
+	StartDate     *string
+	ClearStart    bool
+	StartFirm     *bool
+	EndDate       *string
+	ClearEnd      bool
+	EndFirm       *bool
+	Urgency       *int
+	Importance    *int
+	Blocked       *bool
 }
 
 type Store struct{ db *sql.DB }
@@ -170,7 +166,6 @@ CREATE TABLE IF NOT EXISTS items (
 	description     TEXT NOT NULL DEFAULT '',
 	owner_id        INTEGER REFERENCES users(id),
 	assignee_id     INTEGER REFERENCES users(id),
-	assignee_shared INTEGER NOT NULL DEFAULT 0,
 	status          TEXT CHECK (status IS NULL OR status IN ('idea','backlog','todo','in-progress','done','cancelled')),
 	start_date      TEXT,
 	start_firm      INTEGER NOT NULL DEFAULT 0,
@@ -205,8 +200,21 @@ func (s *Store) migrate() error {
 		return err
 	}
 	// Ongoing keys were originally prefixed "O-"; they are now "N-".
-	_, err := s.db.Exec(`UPDATE items SET key = 'N-' || num WHERE type = 'ongoing' AND key LIKE 'O-%'`)
-	return err
+	if _, err := s.db.Exec(`UPDATE items SET key = 'N-' || num WHERE type = 'ongoing' AND key LIKE 'O-%'`); err != nil {
+		return err
+	}
+	// The "Shared" assignee option was removed; drop its column if present
+	// (items that used it become unassigned).
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name = 'assignee_shared'`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		if _, err := s.db.Exec(`ALTER TABLE items DROP COLUMN assignee_shared`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------- settings
@@ -214,10 +222,11 @@ func (s *Store) migrate() error {
 // SettingDefaults lists every known setting with its default value. Unknown
 // keys are rejected by UpdateSettings.
 var SettingDefaults = map[string]string{
-	"week_start":    "6", // 0 = Sunday ... 6 = Saturday
-	"color_ongoing": "#2a9d8f",
-	"color_project": "#5b6cff",
-	"color_task":    "", // empty = no tint
+	"week_start":       "6", // 0 = Sunday ... 6 = Saturday
+	"color_ongoing":    "#2a9d8f",
+	"color_project":    "#5b6cff",
+	"color_task":       "",        // empty = no tint
+	"color_unassigned": "#9aa3ad", // matrix points / timeline bars with no assignee
 }
 
 // Settings returns all settings with defaults applied.
@@ -249,7 +258,7 @@ func validSetting(k, v string) error {
 		if len(v) != 1 || v[0] < '0' || v[0] > '6' {
 			return verr("week_start must be 0-6")
 		}
-	case "color_ongoing", "color_project", "color_task":
+	case "color_ongoing", "color_project", "color_task", "color_unassigned":
 		if v != "" && !validColor(v) {
 			return verr("%s must be a #rrggbb hex string or empty", k)
 		}
@@ -414,7 +423,7 @@ func (s *Store) DeleteUser(id int64) error {
 // ---------------------------------------------------------------- items
 
 const itemCols = `i.id, i.type, i.key, i.num, i.parent_id, i.title, i.description, i.owner_id,
-	i.assignee_id, i.assignee_shared, i.status, i.start_date, i.start_firm, i.end_date, i.end_firm,
+	i.assignee_id, i.status, i.start_date, i.start_firm, i.end_date, i.end_firm,
 	i.urgency, i.importance, i.blocked, i.sort_order, i.created_at, i.updated_at,
 	CASE WHEN i.status IN ('done','cancelled') THEN
 		(SELECT h.changed_at FROM status_history h WHERE h.item_id = i.id ORDER BY h.id DESC LIMIT 1)
@@ -424,14 +433,13 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanItem(r scanner) (*Item, error) {
 	var it Item
-	var shared, sfirm, efirm, blocked int
+	var sfirm, efirm, blocked int
 	err := r.Scan(&it.ID, &it.Type, &it.Key, &it.Num, &it.ParentID, &it.Title, &it.Description, &it.OwnerID,
-		&it.AssigneeID, &shared, &it.Status, &it.StartDate, &sfirm, &it.EndDate, &efirm,
+		&it.AssigneeID, &it.Status, &it.StartDate, &sfirm, &it.EndDate, &efirm,
 		&it.Urgency, &it.Importance, &blocked, &it.SortOrder, &it.CreatedAt, &it.UpdatedAt, &it.ClosedAt)
 	if err != nil {
 		return nil, err
 	}
-	it.AssigneeShared = shared != 0
 	it.StartFirm = sfirm != 0
 	it.EndFirm = efirm != 0
 	it.Blocked = blocked != 0
@@ -551,11 +559,11 @@ func (s *Store) CreateItem(in NewItem) (*Item, error) {
 
 	ts := now()
 	res, err := tx.Exec(`INSERT INTO items (type, num, key, parent_id, title, description, owner_id, assignee_id,
-		assignee_shared, status, start_date, start_firm, end_date, end_firm, urgency, importance, blocked,
+		status, start_date, start_firm, end_date, end_firm, urgency, importance, blocked,
 		sort_order, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		in.Type, num, key, base.ParentID, base.Title, base.Description, base.OwnerID, base.AssigneeID,
-		base.AssigneeShared, base.Status, base.StartDate, base.StartFirm, base.EndDate, base.EndFirm,
+		base.Status, base.StartDate, base.StartFirm, base.EndDate, base.EndFirm,
 		base.Urgency, base.Importance, base.Blocked, order, ts, ts)
 	if err != nil {
 		return nil, err
@@ -623,23 +631,16 @@ func applyPatch(tx *sql.Tx, it *Item, p Patch) error {
 		it.OwnerID = p.OwnerID
 	}
 	if p.ClearAssignee {
-		it.AssigneeID, it.AssigneeShared = nil, false
-	} else {
-		if p.AssigneeShared != nil && *p.AssigneeShared {
-			it.AssigneeID, it.AssigneeShared = nil, true
+		it.AssigneeID = nil
+	} else if p.AssigneeID != nil {
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE id = ?`, *p.AssigneeID).Scan(&n); err != nil {
+			return err
 		}
-		if p.AssigneeID != nil {
-			var n int
-			if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE id = ?`, *p.AssigneeID).Scan(&n); err != nil {
-				return err
-			}
-			if n == 0 {
-				return verr("assignee %d does not exist", *p.AssigneeID)
-			}
-			it.AssigneeID, it.AssigneeShared = p.AssigneeID, false
-		} else if p.AssigneeShared != nil && !*p.AssigneeShared && it.AssigneeID == nil {
-			it.AssigneeShared = false
+		if n == 0 {
+			return verr("assignee %d does not exist", *p.AssigneeID)
 		}
+		it.AssigneeID = p.AssigneeID
 	}
 	if p.Status != nil {
 		if isOngoing {
@@ -729,10 +730,10 @@ func (s *Store) UpdateItem(id int64, p Patch) (*Item, error) {
 		}
 	}
 	ts := now()
-	_, err = tx.Exec(`UPDATE items SET parent_id=?, title=?, description=?, owner_id=?, assignee_id=?, assignee_shared=?,
+	_, err = tx.Exec(`UPDATE items SET parent_id=?, title=?, description=?, owner_id=?, assignee_id=?,
 		status=?, start_date=?, start_firm=?, end_date=?, end_firm=?, urgency=?, importance=?, blocked=?,
 		sort_order=?, updated_at=? WHERE id = ?`,
-		cur.ParentID, cur.Title, cur.Description, cur.OwnerID, cur.AssigneeID, cur.AssigneeShared,
+		cur.ParentID, cur.Title, cur.Description, cur.OwnerID, cur.AssigneeID,
 		cur.Status, cur.StartDate, cur.StartFirm, cur.EndDate, cur.EndFirm, cur.Urgency, cur.Importance, cur.Blocked,
 		order, ts, id)
 	if err != nil {

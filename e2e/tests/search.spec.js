@@ -123,17 +123,10 @@ test('owner, assignee and blocked filters', async ({ page }) => {
   await expect(page.locator('[data-search-key="owner"]')).toHaveValue(/\d+/); // selection survives re-render
   await page.locator('[data-search-key="owner"]').selectOption({ label: 'Any' });
 
-  await page.locator('[data-search-key="assignee"]').selectOption({ label: 'Shared' });
-  await expect(task(page, 'Build raised beds')).toBeVisible();
-  await expect(task(page, 'Replace HVAC filter')).toBeVisible();
-  await expect(task(page, 'Buy seeds')).toHaveCount(0);
-  await expect(parent(page, 'Spring garden')).toBeVisible(); // context for Build raised beds
-  await expect(tasks(page)).toHaveCount(3);
-
   await page.locator('[data-search-key="assignee"]').selectOption({ label: 'Unassigned' });
   await expect(task(page, 'Service lawnmower')).toBeVisible();
   await expect(task(page, 'Buy seeds')).toHaveCount(0);
-  await expect(task(page, 'Replace HVAC filter')).toHaveCount(0);
+  await expect(task(page, 'Replace HVAC filter')).toBeVisible(); // no assignee
   await expect(parent(page, 'Solar panels')).toBeVisible();
 
   await page.locator('[data-search-key="assignee"]').selectOption({ label: 'Alex' });
