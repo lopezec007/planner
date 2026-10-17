@@ -108,6 +108,28 @@
 .timeline-bar.closed.blocked { opacity: 0.3; }
 .timeline-bar:hover { box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 0 2px var(--bg-hover); }
 
+/* ---- dependency connectors (blocker end -> blocked start) ----
+   Same z-index as the bars and appended after them, so they paint above the
+   bars and below the today marker. */
+.timeline-deps {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  overflow: visible;
+  pointer-events: none;
+}
+.timeline-dep {
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  opacity: 0.6;
+}
+.timeline-dep.open { stroke: var(--hl-alert); opacity: 0.85; }
+.timeline-dep-arrow path { fill: var(--fg-muted); }
+.timeline-dep-arrow.open path { fill: var(--hl-alert); }
+
 /* ---- today marker ---- */
 .timeline-today {
   position: absolute;

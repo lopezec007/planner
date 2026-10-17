@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 async function openMatrix(page, path = '/') {
   await page.goto(path);
-  await expect(page.locator('.row.parent:not(.header)').first()).toBeVisible();
+  await expect(page.locator('.row[data-id].parent').first()).toBeVisible();
   await page.locator('.toolbar button[data-view="matrix"]').click();
   await expect(page.locator('.matrix-plot')).toBeVisible();
 }
@@ -16,7 +16,7 @@ test('matrix view plots one point per visible task and no parents', async ({ pag
   await expect(page.locator('.split .table.title-only')).toBeVisible();
 
   const points = page.locator('.matrix-plot .pt');
-  const taskRows = page.locator('.row.task:not(.header)');
+  const taskRows = page.locator('.row[data-id].task');
   const taskCount = await taskRows.count();
   expect(taskCount).toBeGreaterThan(5);
   await expect(points).toHaveCount(taskCount);
@@ -25,7 +25,7 @@ test('matrix view plots one point per visible task and no parents', async ({ pag
   const pointIds = await points.evaluateAll((els) => els.map((e) => e.dataset.id).sort());
   const rowIds = await taskRows.evaluateAll((els) => els.map((e) => e.dataset.id).sort());
   expect(pointIds).toEqual(rowIds);
-  const parentIds = await page.locator('.row.parent:not(.header)').evaluateAll((els) => els.map((e) => e.dataset.id));
+  const parentIds = await page.locator('.row[data-id].parent').evaluateAll((els) => els.map((e) => e.dataset.id));
   for (const id of parentIds) expect(pointIds).not.toContain(id);
 
   // Axes and ticks.
@@ -269,8 +269,117 @@ test('closed and blocked tasks are visually distinguished; assignee colour appli
 
 test('matrix view on backlog and ideas pages shows only those tasks', async ({ page }) => {
   await openMatrix(page, '/#/backlog');
-  const n = await page.locator('.row.task:not(.header)').count();
+  const n = await page.locator('.row[data-id].task').count();
   await expect(page.locator('.matrix-plot .pt')).toHaveCount(n);
   await expect(page.locator('.matrix-plot .pt[data-key="T-3"]')).toHaveCount(1); // Service lawnmower (backlog)
   await expect(page.locator('.matrix-plot .pt[data-key="T-9"]')).toHaveCount(0);
+});
+
+// ---- dependency lines ----
+
+const POINT_R = 5;
+
+/** Dependency lines keyed "blocker->blocked", each with its endpoints, the
+ *  two dot centres and styling. */
+async function depLines(page) {
+  const raw = await page.locator('.matrix-plot .deps .dep').evaluateAll((els) => els.map((l) => {
+    const svg = l.ownerSVGElement;
+    const centre = (id) => {
+      const d = svg.querySelector(`.pt[data-id="${id}"] .dot`);
+      return { x: +d.getAttribute('cx'), y: +d.getAttribute('cy') };
+    };
+    const key = (id) => svg.querySelector(`.pt[data-id="${id}"]`).dataset.key;
+    return {
+      edge: `${key(l.dataset.blocker)}->${key(l.dataset.blocked)}`,
+      x1: +l.getAttribute('x1'), y1: +l.getAttribute('y1'), x2: +l.getAttribute('x2'), y2: +l.getAttribute('y2'),
+      a: centre(l.dataset.blocker), b: centre(l.dataset.blocked),
+      open: l.classList.contains('open'), lit: l.classList.contains('lit'),
+      stroke: getComputedStyle(l).stroke, opacity: +getComputedStyle(l).opacity,
+      marker: l.getAttribute('marker-end'),
+    };
+  }));
+  return Object.fromEntries(raw.map((l) => [l.edge, l]));
+}
+
+/** The line runs along the centre-to-centre direction, starting POINT_R from
+ *  the blocker's centre and ending POINT_R short of the blocked centre. */
+function expectOnDotEdges(l) {
+  expect(Math.hypot(l.x1 - l.a.x, l.y1 - l.a.y)).toBeCloseTo(POINT_R, 3);
+  expect(Math.hypot(l.x2 - l.b.x, l.y2 - l.b.y)).toBeCloseTo(POINT_R, 3);
+  const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, len = Math.hypot(dx, dy);
+  // Start point lies on the segment a->b (cross product ~0, positive projection).
+  expect(Math.abs((l.x1 - l.a.x) * dy - (l.y1 - l.a.y) * dx) / len).toBeLessThan(0.01);
+  expect((l.x1 - l.a.x) * dx + (l.y1 - l.a.y) * dy).toBeGreaterThan(0);
+  expect(Math.abs((l.x2 - l.a.x) * dy - (l.y2 - l.a.y) * dx) / len).toBeLessThan(0.01);
+  expect(Math.hypot(l.x2 - l.x1, l.y2 - l.y1)).toBeCloseTo(len - 2 * POINT_R, 3);
+}
+
+const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`; };
+
+test('dependency lines run between the dots of blocking tasks, beneath the points', async ({ page }) => {
+  // The seed has no edge from a closed task: add one (done Demo old cabinets
+  // -> Buy seeds) for the muted styling and remove it afterwards.
+  const items = await (await page.request.get('/api/items')).json();
+  const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+  const extra = { blocker_id: byKey['T-8'].id, blocked_id: byKey['T-13'].id };
+  expect((await page.request.post('/api/dependencies', { data: extra })).ok()).toBe(true);
+  try {
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await openMatrix(page);
+
+    // Task-task edges among the plotted points; project edges are not drawn.
+    const lines = await depLines(page);
+    expect(Object.keys(lines).sort()).toEqual(['T-10->T-11', 'T-7->T-6', 'T-8->T-13', 'T-9->T-10']);
+    for (const l of Object.values(lines)) {
+      expectOnDotEdges(l);
+      expect(l.marker).toMatch(/^url\(["']?#mx-dep-arrow(-open)?["']?\)$/);
+      expect(l.lit).toBe(false);
+    }
+    // The lines group sits before the points group so the dots paint on top.
+    expect(await page.evaluate(() => {
+      const deps = document.querySelector('.matrix-plot .deps'), pts = document.querySelector('.matrix-plot .points');
+      return Boolean(deps.compareDocumentPosition(pts) & Node.DOCUMENT_POSITION_FOLLOWING);
+    })).toBe(true);
+
+    // Open blocker: alert colour; done blocker: muted and fainter.
+    const alert = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--hl-alert').trim());
+    const muted = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--fg-muted').trim());
+    expect(lines['T-7->T-6'].open).toBe(true); // Review budget is in progress
+    expect(lines['T-7->T-6'].stroke).toBe(rgb(alert));
+    expect(lines['T-7->T-6'].marker).toContain('mx-dep-arrow-open');
+    expect(lines['T-8->T-13'].open).toBe(false);
+    expect(lines['T-8->T-13'].stroke).toBe(rgb(muted));
+    expect(lines['T-8->T-13'].marker).not.toContain('open');
+    expect(lines['T-8->T-13'].opacity).toBeLessThan(lines['T-7->T-6'].opacity);
+    expect(lines['T-7->T-6'].opacity).toBeLessThan(0.7);
+
+    // A task blocked only through an open dependency gets the blocked ring.
+    const paint = page.locator('.matrix-plot .pt[data-key="T-11"]');
+    await expect(paint).toHaveClass(/blocked/);
+    await expect(paint.locator('.ring')).toHaveCount(1);
+    // ...but not one whose only blocker is done.
+    const seeds = page.locator('.matrix-plot .pt[data-key="T-13"]');
+    await expect(seeds).not.toHaveClass(/blocked/);
+    await expect(seeds.locator('.ring')).toHaveCount(0);
+
+    // Hovering a point lights the lines attached to it and names its blockers.
+    await page.locator('.matrix-plot .pt[data-key="T-10"]').hover();
+    await expect(page.locator('.matrix-tip')).toContainText('Blocked by T-9');
+    await expect.poll(async () => {
+      const l = await depLines(page);
+      return [l['T-9->T-10'].lit, l['T-10->T-11'].lit, l['T-7->T-6'].lit];
+    }).toEqual([true, true, false]);
+    await expect.poll(async () => (await depLines(page))['T-9->T-10'].opacity).toBeGreaterThan(lines['T-9->T-10'].opacity + 0.3);
+    await page.mouse.move(5, 500);
+    await expect.poll(async () => (await depLines(page))['T-9->T-10'].lit).toBe(false);
+
+    // Lines follow the points across a resize.
+    await page.setViewportSize({ width: 2000, height: 1100 });
+    await expect.poll(async () => (await depLines(page))['T-10->T-11'].x1).not.toBeCloseTo(lines['T-10->T-11'].x1, 0);
+    for (const l of Object.values(await depLines(page))) expectOnDotEdges(l);
+    expect(errors).toEqual([]);
+  } finally {
+    await page.request.delete(`/api/dependencies/${extra.blocker_id}/${extra.blocked_id}`);
+  }
 });
