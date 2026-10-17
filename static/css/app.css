@@ -196,8 +196,6 @@ main { padding: 12px 16px; flex: 1; }
 }
 .hl-warn { background: var(--hl-warn); color: var(--hl-warn-fg); }
 .hl-alert { background: var(--hl-alert); color: var(--hl-alert-fg); box-shadow: 0 0 0 2px color-mix(in srgb, var(--hl-alert) 35%, transparent); }
-.hl-warn .firm, .hl-alert .firm { color: inherit; opacity: 0.85; }
-.firm { font-size: 10px; margin-left: 3px; color: var(--fg-muted); vertical-align: middle; }
 
 /* Blocked: a translucent mask over the whole row so other highlights show through. */
 .row.blocked::after {
