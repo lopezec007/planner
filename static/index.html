@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Planner</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/edit.css">
+  <link rel="stylesheet" href="/css/plan.css">
+  <link rel="stylesheet" href="/css/matrix.css">
+  <link rel="stylesheet" href="/css/users.css">
+  <link rel="stylesheet" href="/css/search.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%234e79a7'/><path d='M4 8.5l2.5 2.5L12 5.5' stroke='white' stroke-width='2' fill='none'/></svg>">
+  <script src="/vendor/marked.min.js"></script>
+  <script src="/vendor/purify.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <nav class="nav" id="nav">
+      <a href="#/" data-page="home">Home</a>
+      <a href="#/backlog" data-page="backlog">Backlog</a>
+      <a href="#/ideas" data-page="ideas">Ideas</a>
+      <a href="#/everything" data-page="everything">Everything</a>
+      <a href="#/users" data-page="users">Users</a>
+    </nav>
+    <div class="toolbar" id="toolbar"></div>
+  </header>
+  <main id="main"></main>
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
