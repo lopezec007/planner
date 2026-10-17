@@ -22,9 +22,9 @@
 /* ---------- actions in the title-only table (Timeline / Matrix) ----------
    No actions column there, so the buttons sit at the right of the title cell
    and fade in on hover or keyboard focus. */
-.table.title-only .row:not(.editing) .title { display: flex; align-items: center; gap: 6px; }
+.table.title-only .row:not(.editing) .title { display: flex; align-items: center; } /* no gap: the caret-to-title spacing must match the full table */
 .table.title-only .title .title-text { flex: 1 1 auto; min-width: 0; }
-.table.title-only .title .actions { flex: 0 0 auto; padding: 0; opacity: 0; transition: opacity 0.1s; }
+.table.title-only .title .actions { flex: 0 0 auto; padding: 0; margin-left: 6px; opacity: 0; transition: opacity 0.1s; }
 .table.title-only .row:hover .title .actions,
 .table.title-only .row:focus-within .title .actions { opacity: 1; }
 

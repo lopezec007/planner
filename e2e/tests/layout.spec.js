@@ -56,10 +56,15 @@ test('Flat shows tasks only, with the parent key and title as leading columns', 
 test('Ctrl+Z undoes edits, deletions, creations, reorders and dependency changes', async ({ page, request }) => {
   await page.goto('/#/all');
   const gutters = await byTitle(request, 'Clean gutters');
+  // The undo entry is recorded when the browser sees the response and the
+  // table is then re-rendered; the API alone can be ahead of that, so each
+  // step waits for the re-render before pressing Ctrl+Z.
+  const settled = async () => { await expect(page.locator('.row[data-id]').first()).toBeVisible(); await page.waitForTimeout(350); };
   // Edit urgency 7 -> 3, undo.
   const row = page.locator('.row.task', { hasText: 'Clean gutters' });
   await row.locator('input[name=urgency]').press('3');
   await expect.poll(async () => (await byTitle(request, 'Clean gutters')).urgency).toBe(3);
+  await settled();
   await page.locator('body').click({ position: { x: 5, y: 400 } }); // leave the input
   await page.keyboard.press('Control+z');
   await expect(page.locator('#toast')).toContainText('Undid editing T-1');
@@ -68,6 +73,7 @@ test('Ctrl+Z undoes edits, deletions, creations, reorders and dependency changes
   page.on('dialog', (d) => d.accept());
   await page.locator('.row.task', { hasText: 'Review budget' }).locator('button[title=Delete]').click();
   await expect(page.locator('.row.task', { hasText: 'Review budget' })).toHaveCount(0);
+  await settled();
   await page.keyboard.press('Control+z');
   await expect(page.locator('.row.task', { hasText: 'Review budget' })).toBeVisible();
   // Create a project, undo removes it.
@@ -76,6 +82,7 @@ test('Ctrl+Z undoes edits, deletions, creations, reorders and dependency changes
   await page.locator('input[name=title]').press('Enter');
   await expect(page.locator('.row.parent', { hasText: 'Undo me' })).toBeVisible();
   expect(await byTitle(request, 'Undo me')).toBeDefined();
+  await settled();
   await page.keyboard.press('Control+z');
   await expect(page.locator('.row.parent', { hasText: 'Undo me' })).toHaveCount(0);
   expect(await byTitle(request, 'Undo me')).toBeUndefined();
@@ -84,6 +91,8 @@ test('Ctrl+Z undoes edits, deletions, creations, reorders and dependency changes
   await page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.toggle button').click();
   await page.locator('.row.description[data-desc-for] [data-deps=blocked_by] select.dep-add').selectOption(String(budget.id));
   await expect.poll(async () => (await byTitle(request, 'Clean gutters')).blocked_by).toEqual([budget.id]);
+  await expect(page.locator('.row.description[data-desc-for] [data-deps=blocked_by] .dep-chip', { hasText: 'Review budget' })).toBeVisible();
+  await settled();
   await page.keyboard.press('Control+z');
   await expect.poll(async () => (await byTitle(request, 'Clean gutters')).blocked_by).toEqual([]);
   // Reorder by drag, undo restores the order (one step for a move between parents).
@@ -92,6 +101,7 @@ test('Ctrl+Z undoes edits, deletions, creations, reorders and dependency changes
   const before = await order();
   await page.locator('.row.task', { hasText: 'Replace HVAC filter' }).locator('.drag-handle').dragTo(page.locator('.row.task', { hasText: 'Clean gutters' }), { targetPosition: { x: 200, y: 4 } });
   await expect.poll(order).not.toEqual(before);
+  await settled();
   await page.keyboard.press('Control+z');
   await expect.poll(order).toEqual(before);
   // Nothing left that we did: a further undo of unrelated stack entries is not attempted here.
@@ -107,7 +117,11 @@ test('switching views does not move the rows (the toolbar keeps its height)', as
     await page.setViewportSize({ width, height: 1000 });
     await page.goto('/#/all');
     await expect(page.locator('.row[data-id]').first()).toBeVisible();
-    const pos = () => page.evaluate(() => ({ top: document.querySelector('.row[data-id]').getBoundingClientRect().top, bar: document.querySelector('.topbar').getBoundingClientRect().height }));
+    const pos = () => page.evaluate(() => {
+      const row = document.querySelector('.row.parent[data-id]');
+      const caret = row.querySelector('.caret').getBoundingClientRect(), title = row.querySelector('.title-text').getBoundingClientRect();
+      return { top: document.querySelector('.row[data-id]').getBoundingClientRect().top, bar: document.querySelector('.topbar').getBoundingClientRect().height, caretGap: title.left - caret.right };
+    });
     const table = await pos();
     await page.locator('button[data-view=timeline]').click();
     await expect(page.locator('.timeline-canvas')).toBeVisible();
