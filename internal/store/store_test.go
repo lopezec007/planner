@@ -295,11 +295,15 @@ func TestSettings(t *testing.T) {
 	if st["week_start"] != "1" || st["color_task"] != "#123456" || st["color_ongoing"] != SettingDefaults["color_ongoing"] {
 		t.Fatalf("updated: %v", st)
 	}
-	for _, bad := range []map[string]string{{"week_start": "7"}, {"color_project": "blue"}, {"nope": "x"}, {"level_warn_min": "12"}, {"date_alert_days": "x"}, {"hl_warn_color": ""}} {
+	for _, bad := range []map[string]string{{"week_start": "7"}, {"color_project": "blue"}, {"nope": "x"}, {"level_colors": `["#fff"]`}, {"level_colors": `["x","","","","","","","","","",""]`}, {"date_alert_days": "x"}, {"hl_warn_color": ""}} {
 		var ve *ValidationError
 		if _, err := s.UpdateSettings(bad); !errors.As(err, &ve) {
 			t.Fatalf("%v: expected validation error, got %v", bad, err)
 		}
+	}
+	st, err = s.UpdateSettings(map[string]string{"level_colors": `["#000000","","","","","","","","","","#ffffff"]`})
+	if err != nil || st["level_colors"] != `["#000000","","","","","","","","","","#ffffff"]` {
+		t.Fatalf("level_colors: %v %v", st["level_colors"], err)
 	}
 	// Clearing a colour restores "no tint".
 	st, _ = s.UpdateSettings(map[string]string{"color_task": ""})

@@ -7,11 +7,57 @@
 import { api } from './api.js';
 import { state } from './state.js';
 import { renderUsers } from './users.js';
-import { el, toast } from './util.js';
+import { el, toast, contrastText } from './util.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DEFAULT_COLORS = { color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d' };
-const DEFAULT_NUMBERS = { level_warn_min: 6, level_alert_min: 9, date_warn_days: 7, date_alert_days: 0 };
+const DEFAULT_NUMBERS = { date_warn_days: 7, date_alert_days: 0 };
+
+// Presets for the urgency/importance colour ramp (values 0..10; '' = none).
+const RAMP_PRESETS = {
+  classic: { label: 'Classic (6-8 warn, 9-10 alert)', colors: ['', '', '', '', '', '', '#f5a524', '#f5a524', '#f5a524', '#e5484d', '#e5484d'] },
+  high: { label: 'High only (8-10)', colors: ['', '', '', '', '', '', '', '', '#f5a524', '#e5484d', '#b3121a'] },
+  traffic: { label: 'Traffic light (green to red)', colors: ['#2e9e4f', '#4caf50', '#7cb342', '#9ccc3d', '#c0ca33', '#fdd835', '#ffb300', '#fb8c00', '#f4511e', '#e53935', '#b71c1c'] },
+  heat: { label: 'Heat (yellow to red)', colors: ['#fff59d', '#fff176', '#ffee58', '#ffd54f', '#ffca28', '#ffb300', '#ff9800', '#f57c00', '#ef6c00', '#e64a19', '#d32f2f'] },
+  blues: { label: 'Blues (light to deep)', colors: ['#e3f2fd', '#bbdefb', '#90caf9', '#64b5f6', '#42a5f5', '#2196f3', '#1e88e5', '#1976d2', '#1565c0', '#0d47a1', '#0b3d91'] },
+  grey: { label: 'Greyscale', colors: ['#f5f5f5', '#e0e0e0', '#cfcfcf', '#bdbdbd', '#a8a8a8', '#9e9e9e', '#8a8a8a', '#757575', '#5f5f5f', '#424242', '#212121'] },
+  none: { label: 'None', colors: ['', '', '', '', '', '', '', '', '', '', ''] },
+};
+
+function currentRamp() {
+  try {
+    const r = JSON.parse(state.settings.level_colors || '[]');
+    if (Array.isArray(r) && r.length === 11) return r;
+  } catch {}
+  return RAMP_PRESETS.classic.colors.slice();
+}
+
+function levelRamp(ctx) {
+  const ramp = currentRamp();
+  const saveRamp = () => save({ level_colors: JSON.stringify(ramp) }, ctx);
+  const preset = el('select', { id: 'setting-level-preset', 'aria-label': 'Colour ramp preset' },
+    el('option', { value: '' }, 'Apply a preset…'));
+  for (const [k, p] of Object.entries(RAMP_PRESETS)) preset.append(el('option', { value: k }, p.label));
+  preset.addEventListener('change', () => {
+    if (!preset.value) return;
+    ramp.splice(0, ramp.length, ...RAMP_PRESETS[preset.value].colors);
+    saveRamp();
+  });
+  const cells = el('div', { class: 'ramp' });
+  ramp.forEach((c, i) => {
+    const swatch = el('input', { type: 'color', value: c || '#888888', 'aria-label': `Colour for ${i}`, dataset: { level: i } });
+    swatch.addEventListener('change', () => { ramp[i] = swatch.value; saveRamp(); });
+    const sample = el('span', { class: 'ramp-sample ' + (c ? 'hl-level' : ''), style: c ? { background: c, color: contrastText(c) } : {} }, String(i));
+    const clear = el('button', { type: 'button', class: 'ramp-clear', title: 'No highlight for this value', disabled: c ? null : true, dataset: { clear: i } }, 'none');
+    clear.addEventListener('click', () => { ramp[i] = ''; saveRamp(); });
+    cells.append(el('div', { class: 'ramp-cell' + (c ? '' : ' empty') }, sample, swatch, clear));
+  });
+  return [
+    el('p', { class: 'settings-help' }, 'Each urgency and importance value gets its own colour (or none). Pick a preset to fill them all, then adjust any value.'),
+    el('div', { class: 'settings-row' }, el('label', { for: 'setting-level-preset' }, 'Urgency / importance'), preset),
+    cells,
+  ];
+}
 
 async function save(patch, ctx) {
   try {
@@ -60,16 +106,16 @@ let ctxRef = null;
 
 function highlightRows(ctx) {
   ctxRef = ctx;
-  const row = (key, label, levelKey, dateKey, help) => el('div', { class: 'settings-row settings-hl' },
+  const row = (key, label, dateKey, help) => el('div', { class: 'settings-row settings-hl' },
     el('label', { for: `setting-${key}` }, label),
     (() => { const r = colorRow(key, label, '', ctx); r.classList.add('settings-inline'); r.querySelector('label').remove(); return r; })(),
     el('span', { class: 'settings-preview ' + (key === 'hl_warn_color' ? 'hl-warn' : 'hl-alert') }, 'sample'),
-    el('span', { class: 'settings-help' }, 'urgency/importance from'), numberInput(levelKey, 0, 11),
     el('span', { class: 'settings-help' }, 'end date within'), numberInput(dateKey, -1, 365), el('span', { class: 'settings-help' }, help));
   return [
-    el('p', { class: 'settings-help' }, 'Urgency and importance values at or above the threshold, and end dates within the given number of calendar days of today, are highlighted. Alert takes precedence over warn. Use 11 or -1 to disable a rule.'),
-    row('hl_warn_color', 'Warn', 'level_warn_min', 'date_warn_days', 'days'),
-    row('hl_alert_color', 'Alert', 'level_alert_min', 'date_alert_days', 'days (0 = today or overdue)'),
+    el('p', { class: 'settings-help' }, 'End dates within the given number of calendar days of today are highlighted. Alert takes precedence over warn. Use -1 to disable a rule.'),
+    row('hl_warn_color', 'End date warn', 'date_warn_days', 'days'),
+    row('hl_alert_color', 'End date alert', 'date_alert_days', 'days (0 = today or overdue)'),
+    ...levelRamp(ctx),
   ];
 }
 

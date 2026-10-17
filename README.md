@@ -37,8 +37,8 @@ the single SQLite file. The directory containing it must already exist.
    buttons or Ctrl+wheel, drag or scroll to pan, Today recentres). **Matrix**
    plots tasks by urgency and importance; hover a point for its description.
    Settings has the first day of the week, the row tint colours for
-   Ongoing, Project and Task rows, and the highlight colours and thresholds
-   for urgency, importance and end dates.
+   Ongoing, Project and Task rows, the end-date highlight colours and
+   windows, and a colour for each urgency/importance value (with presets).
 6. **Backlog** and **Ideas** list items in those statuses; **Everything**
    lists all live items with search and filters, which also apply to its
    Timeline and Matrix views.

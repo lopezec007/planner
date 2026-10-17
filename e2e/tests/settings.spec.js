@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 const weekday = (ymd) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).getDay(); };
 
 test.afterEach(async ({ request }) => {
-  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d', level_warn_min: '6', level_alert_min: '9', date_warn_days: '7', date_alert_days: '0' } });
+  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d', date_warn_days: '7', date_alert_days: '0', level_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]' } });
 });
 
 test('settings page hosts the users list and the old #/users route still works', async ({ page }) => {
@@ -76,29 +76,54 @@ test('unassigned items use the no-assignee colour in the matrix, and it is a set
   await expect(page.locator('#panel svg g.pt[data-key="T-10"]')).toHaveAttribute('style', /--pt: #ff00ff/);
 });
 
-test('highlight thresholds and colours come from settings', async ({ page, request }) => {
+test('highlight colours and date windows come from settings', async ({ page, request }) => {
   await page.goto('/');
   const gutters = page.locator('.row.task', { hasText: 'Clean gutters' }); // urgency 7, importance 4, ends in 3 days
-  await expect(gutters.locator('.num .hl-warn')).toHaveCount(1);
+  await expect(gutters.locator('.num .hl-level')).toHaveCount(1);
   await expect(gutters.locator('.date .hl-warn')).toHaveCount(1);
   await expect(gutters.locator('.hl-alert')).toHaveCount(0);
 
-  // Lower the alert threshold to 7 and widen the alert date window to 5 days.
-  await request.patch('/api/settings', { data: { level_alert_min: '7', date_alert_days: '5', hl_alert_color: '#112233' } });
+  // Widen the alert date window to 5 days and recolour it.
+  await request.patch('/api/settings', { data: { date_alert_days: '5', hl_alert_color: '#112233' } });
   await page.reload();
   const g2 = page.locator('.row.task', { hasText: 'Clean gutters' });
-  await expect(g2.locator('.num .hl-alert')).toHaveCount(1);
   await expect(g2.locator('.date .hl-alert')).toHaveCount(1);
   expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--hl-alert'))).toBe('#112233');
   expect(await g2.locator('.date .hl-alert').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(17, 34, 51)');
+});
 
-  // The settings page edits the same values.
-  await page.goto('/#/settings');
-  await expect(page.locator('#setting-level_alert_min')).toHaveValue('7');
-  await page.locator('#setting-level_warn_min').fill('4');
-  await page.locator('#setting-level_warn_min').press('Tab');
+test('urgency/importance colour ramp: per-value colours and presets', async ({ page, request }) => {
   await page.goto('/');
-  const budget = page.locator('.row.task', { hasText: 'Review budget' }); // urgency 4, importance 8
-  await expect(budget.locator('.num .hl-warn')).toHaveCount(1);  // urgency 4 >= warn 4
-  await expect(budget.locator('.num .hl-alert')).toHaveCount(1); // importance 8 >= alert 7
+  const gutters = page.locator('.row.task', { hasText: 'Clean gutters' }); // urgency 7, importance 4
+  await expect(gutters.locator('.num').nth(0).locator('.hl-level')).toHaveCount(1);
+  await expect(gutters.locator('.num').nth(1).locator('.hl-level')).toHaveCount(0);
+
+  // Colour value 4 and clear value 7 through the API.
+  const ramp = ['', '', '', '', '#123456', '', '', '', '#f5a524', '#e5484d', '#e5484d'];
+  await request.patch('/api/settings', { data: { level_colors: JSON.stringify(ramp) } });
+  await page.reload();
+  const g2 = page.locator('.row.task', { hasText: 'Clean gutters' });
+  await expect(g2.locator('.num').nth(0).locator('.hl-level')).toHaveCount(0);
+  const imp = g2.locator('.num').nth(1).locator('.hl-level');
+  await expect(imp).toHaveCount(1);
+  expect(await imp.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(18, 52, 86)');
+
+  // The settings page shows the ramp; a preset fills every value.
+  await page.goto('/#/settings');
+  await expect(page.locator('.ramp-cell')).toHaveCount(11);
+  await expect(page.locator('.ramp-cell').nth(4)).not.toHaveClass(/empty/);
+  await expect(page.locator('.ramp-cell').nth(7)).toHaveClass(/empty/);
+  await page.locator('#setting-level-preset').selectOption('traffic');
+  await expect(page.locator('.ramp-cell.empty')).toHaveCount(0);
+  const saved = JSON.parse((await (await request.get('/api/settings')).json()).level_colors);
+  expect(saved[0]).toBe('#2e9e4f');
+  expect(saved[10]).toBe('#b71c1c');
+  // Clearing one value and changing one swatch persist.
+  await page.locator('[data-clear="0"]').click();
+  await expect(page.locator('.ramp-cell').nth(0)).toHaveClass(/empty/);
+  await page.locator('input[data-level="10"]').fill('#000000');
+  await expect.poll(async () => JSON.parse((await (await request.get('/api/settings')).json()).level_colors)[10]).toBe('#000000');
+  expect(JSON.parse((await (await request.get('/api/settings')).json()).level_colors)[0]).toBe('');
+  await page.goto('/');
+  await expect(page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.num .hl-level')).toHaveCount(2); // 7 and 4 both coloured now
 });

@@ -45,11 +45,15 @@ export function userChip(id) {
 // Highlight thresholds come from Settings (see store.SettingDefaults).
 const setting = (k, def) => { const v = Number(state.settings?.[k]); return Number.isFinite(v) ? v : def; };
 
-function levelClass(n) {
+/** Colour for an urgency/importance value from the level_colors ramp, or ''. */
+export function levelColor(n) {
   if (n == null) return '';
-  if (n >= setting('level_alert_min', 9)) return 'hl-alert';
-  if (n >= setting('level_warn_min', 6)) return 'hl-warn';
-  return '';
+  let ramp = state.settings?._levelColors;
+  if (!ramp) {
+    try { ramp = JSON.parse(state.settings?.level_colors || '[]'); } catch { ramp = []; }
+    if (state.settings) state.settings._levelColors = ramp; // cached until the next load
+  }
+  return ramp[n] || '';
 }
 
 function endDateClass(ymd) {
@@ -67,8 +71,10 @@ function dateCell(ymd, firm, cls) {
 }
 
 function numCell(n, highlight) {
-  const cls = highlight ? levelClass(n) : '';
-  return el('div', { class: 'num' }, n == null ? '' : el('span', { class: cls }, String(n)));
+  const color = highlight ? levelColor(n) : '';
+  const span = el('span', { class: color ? 'hl-level' : '' }, n == null ? '' : String(n));
+  if (color) Object.assign(span.style, { background: color, color: contrastText(color) });
+  return el('div', { class: 'num' }, span);
 }
 
 function toggleCell(item, expanded, onToggle) {

@@ -7,6 +7,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -228,17 +229,20 @@ var SettingDefaults = map[string]string{
 	"color_project":    "#5b6cff",
 	"color_task":       "",        // empty = no tint
 	"color_unassigned": "#9aa3ad", // matrix points / timeline bars with no assignee
-	// Highlighting of urgency/importance values and end dates: a "warn" level
-	// and a stronger "alert" level, each with a colour and the values that
-	// trigger it (levels at or above level_*_min; end dates within date_*_days
-	// calendar days of today, where 0 means today or overdue).
+	// End-date highlighting: a "warn" level and a stronger "alert" level, each
+	// with a colour and a window (end dates within date_*_days calendar days of
+	// today, where 0 means today or overdue and -1 disables the rule).
 	"hl_warn_color":   "#f5a524",
 	"hl_alert_color":  "#e5484d",
-	"level_warn_min":  "6",
-	"level_alert_min": "9",
 	"date_warn_days":  "7",
 	"date_alert_days": "0",
+	// Urgency/importance colour ramp: a JSON array of 11 entries (values 0-10),
+	// each "#rrggbb" or "" for no highlight.
+	"level_colors": `["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]`,
 }
+
+// LevelCount is the number of urgency/importance values (0-10).
+const LevelCount = 11
 
 // Settings returns all settings with defaults applied.
 func (s *Store) Settings() (map[string]string, error) {
@@ -277,9 +281,15 @@ func validSetting(k, v string) error {
 		if !validColor(v) {
 			return verr("%s must be a #rrggbb hex string", k)
 		}
-	case "level_warn_min", "level_alert_min":
-		if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 11 {
-			return verr("%s must be 0-11 (11 disables it)", k)
+	case "level_colors":
+		var cols []string
+		if err := json.Unmarshal([]byte(v), &cols); err != nil || len(cols) != LevelCount {
+			return verr("level_colors must be a JSON array of %d colours", LevelCount)
+		}
+		for _, c := range cols {
+			if c != "" && !validColor(c) {
+				return verr("level_colors entries must be #rrggbb or empty")
+			}
 		}
 	case "date_warn_days", "date_alert_days":
 		if n, err := strconv.Atoi(v); err != nil || n < -1 || n > 365 {
