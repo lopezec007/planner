@@ -1,1 +1,121 @@
-/* styles for matrix (see js/matrix.js) */
+/* Matrix view (see js/matrix.js): urgency x importance scatter. */
+
+.matrix {
+  --pt-neutral: var(--fg-muted);
+  --grid: var(--border);
+  --quad-hot: rgba(214, 40, 40, 0.06);
+  --quad-cold: rgba(128, 128, 128, 0.06);
+  --diag: rgba(128, 128, 128, 0.35);
+  position: relative;
+  width: 100%;
+}
+@media (prefers-color-scheme: dark) {
+  .matrix {
+    --quad-hot: rgba(255, 92, 92, 0.09);
+    --quad-cold: rgba(255, 255, 255, 0.035);
+    --diag: rgba(200, 200, 200, 0.3);
+  }
+}
+
+.matrix-plot-wrap { width: 100%; line-height: 0; }
+.matrix-plot {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  font-family: var(--font);
+  user-select: none;
+}
+
+/* ---- frame ---- */
+.matrix-plot .plot-bg { fill: var(--bg-alt); stroke: var(--grid); stroke-width: 1; }
+.matrix-plot .quad-hot { fill: var(--quad-hot); }
+.matrix-plot .quad-cold { fill: var(--quad-cold); }
+.matrix-plot .diagonal { stroke: var(--diag); stroke-width: 1; stroke-dasharray: 2 5; }
+.matrix-plot .grid line { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; opacity: 0.6; }
+.matrix-plot .grid line.major { opacity: 1; }
+.matrix-plot .ticks text { fill: var(--fg-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.matrix-plot .axis-label { fill: var(--fg); font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
+.matrix-plot .quad-label {
+  fill: var(--red);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.55;
+}
+
+/* ---- points ---- */
+.matrix-plot .pt { cursor: pointer; }
+.matrix-plot .pt .hit { fill: transparent; stroke: none; pointer-events: all; }
+.matrix-plot .pt .dot {
+  fill: var(--pt, var(--pt-neutral));
+  stroke: var(--bg);           /* surface ring so overlapping dots stay legible */
+  stroke-width: 2;
+  paint-order: stroke;
+  transition: r 0.08s;
+}
+.matrix-plot .pt .ring {
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 2;
+}
+.matrix-plot .pt .label {
+  fill: var(--fg-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  pointer-events: none;
+}
+.matrix-plot .pt.closed .dot { fill: var(--pt-neutral); opacity: 0.45; }
+.matrix-plot .pt.closed .label { opacity: 0.6; text-decoration: line-through; }
+.matrix-plot .pt.blocked .dot { opacity: 0.55; }
+.matrix-plot .pt.blocked .label { opacity: 0.7; }
+
+.matrix-plot .pt.hover .dot,
+.matrix-plot .pt:hover .dot {
+  r: 7;
+  opacity: 1;
+  stroke: var(--accent);
+}
+.matrix-plot .pt.hover .label,
+.matrix-plot .pt:hover .label { fill: var(--fg); font-weight: 700; opacity: 1; }
+
+/* Table row highlighted from the plot. */
+.row.matrix-hover:not(.header) { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent); }
+
+/* ---- tooltip ---- */
+.matrix-tip {
+  position: fixed;
+  z-index: 50;
+  max-width: 360px;
+  min-width: 180px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: auto;
+  pointer-events: none;
+}
+.matrix-tip[hidden] { display: none; }
+.matrix-tip .tip-head { display: flex; gap: 8px; align-items: baseline; }
+.matrix-tip .tip-key { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); flex: none; }
+.matrix-tip .tip-title { font-weight: 600; }
+.matrix-tip .tip-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.matrix-tip .tip-meta b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.matrix-tip .tip-blocked { color: var(--fg); background: var(--mask); padding: 0 6px; border-radius: 4px; }
+.matrix-tip .tip-desc {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
