@@ -318,6 +318,9 @@ export function renderTimeline(panel, handle, ctx) {
   });
 
   scroll.addEventListener('scroll', () => {
+    // Ignore bogus events from a detached or not-yet-laid-out container
+    // (they report scrollLeft 0 and would reset the shared view state).
+    if (!scroll.isConnected || scroll.scrollWidth <= scroll.clientWidth) return;
     view.leftDay = scroll.scrollLeft / view.ppd + rangeStart;
   }, { passive: true });
 
@@ -350,6 +353,7 @@ export function renderTimeline(panel, handle, ctx) {
   // Redraw when the panel or table changes size (window resize, title wrap).
   let lastSize = '';
   const ro = new ResizeObserver(() => {
+    if (!panel.isConnected) return; // torn down; do not touch the shared view state
     if (!panel.isConnected) { ro.disconnect(); return; }
     const size = `${scroll.clientWidth}x${table?.offsetHeight}`;
     if (size === lastSize) return;

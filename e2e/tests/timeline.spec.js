@@ -137,3 +137,27 @@ test('switching back to table view restores the full columns', async ({ page }) 
   await expect(page.locator('.table.title-only')).toHaveCount(0);
   await expect(page.locator('#panel')).toHaveCount(0);
 });
+
+test('scroll position survives re-renders and page changes (today stays in view)', async ({ page }) => {
+  const todayInView = () => page.evaluate(() => {
+    const s = document.querySelector('.timeline-scroll').getBoundingClientRect();
+    const t = document.querySelector('.timeline-today').getBoundingClientRect();
+    return t.left >= s.left && t.left <= s.right;
+  });
+  await page.goto('/');
+  await page.locator('button[data-view=timeline]').click();
+  expect(await todayInView()).toBe(true);
+  // Edit and cancel a row beside the timeline (re-renders the timeline twice).
+  const row = page.locator('.row.task', { hasText: 'Demo old cabinets' });
+  await row.hover();
+  await row.locator('button[title=Edit]').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.row[data-editing]')).toHaveCount(0);
+  expect(await todayInView()).toBe(true);
+  // Another page's timeline opens at the same window.
+  await page.goto('/#/everything');
+  await page.locator('button[data-view=timeline]').click();
+  await page.waitForTimeout(200);
+  expect(await todayInView()).toBe(true);
+  await page.locator('button[data-view=table]').click();
+});
