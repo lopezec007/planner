@@ -21,28 +21,36 @@ the single SQLite file. The directory containing it must already exist.
    the Owner and Assignee columns everywhere.
 2. On **Active**, click **New Ongoing** or **New Project** to add a blank row;
    fill in the title (required) and anything else, then press Enter or the ✓
-   button. Use the **+** on an Ongoing or Project row to add a task beneath it.
-3. Rows are read-only until you click ✎ on that row. Escape cancels, Enter
-   saves (Ctrl+Enter inside the description). Only one row edits at a time.
-   With three or fewer users, Owner and Assignee are clickable chips (click
-   again to clear). In the urgency and importance fields a single key sets
-   the value: 1 to 9, 0 for 10 and ` for 0.
-   The description sits directly under the title, both when reading and when
-   editing.
-4. Drag the ⠿ handle to reorder: Ongoing/Project rows among themselves, tasks
+   button (✕ or Escape discards). Use the **+** on an Ongoing or Project row
+   to add a task beneath it.
+3. There is no edit mode: click any field to change it and it saves at once.
+   Titles, dates and the description become inputs when clicked (Enter or
+   leaving the field saves, Escape reverts; Ctrl+Enter in the description).
+   Owner and Assignee show the current user's chip; click it to pick another
+   (chips with three or fewer users, a dropdown otherwise; click the pressed
+   chip to clear). The `~` before a date marks it approximate; click it to
+   toggle firm. In the urgency and importance fields a single key sets the
+   value: 1 to 9, 0 for 10 and ` for 0.
+4. Expand a row (▸) for its description and, for projects and tasks, its
+   dependencies: "Blocked by" and "Blocks" lists with a dropdown to add more.
+   An item blocked by anything still open has its Blocked box locked on. Two
+   items cannot block each other, directly or through a chain. The Timeline
+   draws lines from a blocker's end to the blocked item's start; the Matrix
+   draws arrows between tasks.
+5. Drag the ⠿ handle to reorder: Ongoing/Project rows among themselves, tasks
    among any tasks. Dropping a task among another parent's tasks, or onto a
    parent row, moves it to that parent. The **Narrow** toggle caps the table
    width on very wide screens.
-5. **Timeline** shows a Gantt chart beside the titles (zoom with the +/−
+6. **Timeline** shows a Gantt chart beside the titles (zoom with the +/−
    buttons or Ctrl+wheel, drag or scroll to pan, Today recentres). **Matrix**
    plots tasks by urgency and importance; hover a point for its description.
    Settings has the first day of the week, the row tint colours for
    Ongoing, Project and Task rows, the end-date highlight colours and
    windows, and a colour for each urgency/importance value (with presets).
-6. **Backlog** and **Ideas** list items in those statuses; **Everything**
+7. **Backlog** and **Ideas** list items in those statuses; **Everything**
    lists all live items with search and filters, which also apply to its
    Timeline and Matrix views.
-7. Deleting hides an item (and its tasks) from the UI; the rows stay in the
+8. Deleting hides an item (and its tasks) from the UI; the rows stay in the
    database and keys are never reused. Each item's status history is kept and
    available at `/api/items/{id}/history`.
 
@@ -155,8 +163,8 @@ Layout:
       js/app.js           hash router, toolbar, page rendering
       js/state.js         client cache + local-timezone date helpers
       js/filters.js       which items each page shows (supersede rule lives here)
-      js/table.js         hierarchical table renderer, highlighting, drag reordering
-      js/edit.js          in-table create/edit forms
+      js/table.js         hierarchical table renderer, drag reordering, expanded rows
+      js/cells.js         inline-editable cells, new-row draft, dependency panel
       js/timeline.js      Timeline (Gantt) view
       js/matrix.js        Matrix (scatter) view
       js/settings.js      Settings page (week start, row colours)
@@ -185,9 +193,12 @@ API summary (all JSON):
     DELETE /api/items/{id}            soft delete (cascades to tasks)
     GET    /api/items/{id}/history    status changes, oldest first
     PUT    /api/order {ids: [...]}    reorder siblings
+    POST   /api/dependencies {blocker_id, blocked_id}   400 on self/ongoing/cycle
+    DELETE /api/dependencies/{blocker}/{blocked}
     GET    /api/settings              PATCH /api/settings {key: value}  (week_start, color_*)
 
 Item JSON fields: id, type (ongoing|project|task), key, num, parent_id, title,
 description, owner_id, assignee_id, status, start_date,
 start_firm, end_date, end_firm, urgency, importance, blocked, sort_order,
-created_at, updated_at, closed_at (set while status is done/cancelled).
+created_at, updated_at, closed_at (set while status is done/cancelled),
+blocked_by and blocks (ids of live projects/tasks).
