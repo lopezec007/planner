@@ -5,84 +5,52 @@
 //
 //   opts.groups    [{ parent, tasks }] from filters.js
 //   opts.mode      'full' | 'title-only'   (title-only is used beside Timeline/Matrix)
-//   opts.expanded  Set<number> of item ids whose description is expanded
+//   opts.expanded  Set<number> of item ids whose detail row is open
 //                  (owned by the caller so it survives re-renders)
-//   opts.actions   { onEdit(item), onDelete(item), onAddTask(parent),
-//                    onChanged() } — optional. onChanged() reloads data after
-//                  a save or reorder; without it the table only re-renders.
+//   opts.actions   { onDelete(item), onAddTask(parent), onChanged() } — optional.
+//                  onChanged() reloads data after any save or reorder.
 //
-// Rows carry data-id / data-kind attributes so side panels (Timeline) can align
-// to them, and so editing code can find them. Task rows also carry
-// data-parent. A row in edit/new mode (see edit.js) carries data-editing and
-// is rendered as a form instead of cells; a new row has no data-id yet and is
-// not included in the handle's rows.
+// Every field is edited in place (see cells.js): there is no edit mode. A
+// single unsaved "new row" (cells.draft) is rendered where it will live and
+// created once it has a title. Rows carry data-id / data-kind / data-type
+// (tasks also data-parent) so side panels (Timeline) can align to them; a new
+// row carries data-editing="new" and no id.
 //
-// Reordering: every row has a drag handle in its key cell. Top-level rows can
-// be dropped among top-level rows; tasks among any parent's tasks or onto a
-// parent row (which reparents them). The full sibling list (from state,
+// Reordering: every saved row has a drag handle in its key cell. Top-level
+// rows can be dropped among top-level rows; tasks among any parent's tasks or
+// onto a parent row (which reparents them). The full sibling list (from state,
 // including siblings hidden by the page's filter) is sent to api.reorder so
 // hidden siblings keep their positions.
 
-import { state, isClosed, daysFromToday, STATUS_LABEL } from './state.js';
-import { renderMarkdown } from './markdown.js';
+import { state, isClosed, isBlocked } from './state.js';
 import { api } from './api.js';
 import { el, contrastText, toast } from './util.js';
-import { editing, isEditingItem, cancelEdit, renderEditRows } from './edit.js';
-
-const FIRM_ICON = '🔒';
+import {
+  draft, discardNew, commitNew, isDraft, makeSaver,
+  titleControl, statusControl, userControl, dateControl, levelControl, blockedControl,
+  descriptionControl, dependencyPanel,
+} from './cells.js';
 
 export function userChip(id) {
   if (id == null) return '';
   const u = state.usersById.get(id);
   if (!u) return el('span', { class: 'chip' }, `#${id}`);
-  return el('span', {
-    class: 'chip',
-    style: { background: u.color, color: contrastText(u.color) },
-    title: u.name,
-  }, u.name);
+  return el('span', { class: 'chip', style: { background: u.color, color: contrastText(u.color) }, title: u.name }, u.name);
 }
 
-// Highlight thresholds come from Settings (see store.SettingDefaults).
-const setting = (k, def) => { const v = Number(state.settings?.[k]); return Number.isFinite(v) ? v : def; };
-
-/** Colour for an urgency/importance value from the level_colors ramp, or ''. */
-export function levelColor(n) {
-  if (n == null) return '';
-  let ramp = state.settings?._levelColors;
-  if (!ramp) {
-    try { ramp = JSON.parse(state.settings?.level_colors || '[]'); } catch { ramp = []; }
-    if (state.settings) state.settings._levelColors = ramp; // cached until the next load
-  }
-  return ramp[n] || '';
-}
-
-function endDateClass(ymd) {
-  const d = daysFromToday(ymd);
-  if (d == null) return '';
-  if (d <= setting('date_alert_days', 0)) return 'hl-alert';
-  if (d <= setting('date_warn_days', 7)) return 'hl-warn';
-  return '';
-}
-
-function dateCell(ymd, firm, cls) {
-  const c = el('span', { class: ['date', cls].filter(Boolean).join(' ') }, ymd || '');
-  if (ymd && firm) c.append(el('span', { class: 'firm', title: 'Firm' }, FIRM_ICON));
-  return el('div', { class: 'date' }, c);
-}
-
-function numCell(n, highlight) {
-  const color = highlight ? levelColor(n) : '';
-  const span = el('span', { class: color ? 'hl-level' : '' }, n == null ? '' : String(n));
-  if (color) Object.assign(span.style, { background: color, color: contrastText(color) });
-  return el('div', { class: 'num' }, span);
+/** Projects and tasks can always be expanded (dependencies live there);
+ *  an Ongoing only when it has a description. */
+export function isExpandable(item) {
+  if (isDraft(item)) return true;
+  return item.type !== 'ongoing' || !!item.description?.trim();
 }
 
 function toggleCell(item, expanded, onToggle) {
   const cell = el('div', { class: 'toggle' });
-  if (item.description && item.description.trim()) {
+  if (isExpandable(item) && !isDraft(item)) {
     cell.append(el('button', {
       type: 'button',
-      title: expanded ? 'Collapse description' : 'Expand description',
+      title: expanded ? 'Collapse' : 'Expand (description and dependencies)',
       'aria-expanded': expanded ? 'true' : 'false',
       onClick: (e) => { e.stopPropagation(); onToggle(item); },
     }));
@@ -90,14 +58,19 @@ function toggleCell(item, expanded, onToggle) {
   return cell;
 }
 
-function actionButtons(item, actions) {
+function actionButtons(item, ctx) {
   const cell = el('div', { class: 'actions' });
+  if (isDraft(item)) {
+    cell.append(
+      el('button', { class: 'primary icon', type: 'button', title: 'Save', 'aria-label': 'Save', onClick: () => commitNew(ctx) }, '✓'),
+      el('button', { class: 'icon', type: 'button', title: 'Discard', 'aria-label': 'Discard', onClick: () => { discardNew(); ctx.rerender(); } }, '✕'),
+    );
+    return cell;
+  }
+  const { actions } = ctx;
   if (!actions) return cell;
   if (item.type !== 'task' && actions.onAddTask) {
     cell.append(el('button', { class: 'icon', type: 'button', title: 'Add task', onClick: () => actions.onAddTask(item) }, '+'));
-  }
-  if (actions.onEdit) {
-    cell.append(el('button', { class: 'icon', type: 'button', title: 'Edit', onClick: () => actions.onEdit(item) }, '✎'));
   }
   if (actions.onDelete) {
     cell.append(el('button', { class: 'icon', type: 'button', title: 'Delete', onClick: () => actions.onDelete(item) }, '🗑'));
@@ -106,8 +79,6 @@ function actionButtons(item, actions) {
 }
 
 function headerRow(mode) {
-  // One header row. Key and title need no label; task rows are indented
-  // beneath their parent, which makes the hierarchy obvious.
   const row = el('div', { class: 'row header' }, el('div'), el('div'), el('div'));
   if (mode === 'full') {
     row.append(
@@ -122,7 +93,8 @@ function headerRow(mode) {
 
 function rowClasses(item, kind, expanded) {
   const cls = ['row', kind];
-  if (item.blocked) cls.push('blocked');
+  if (isDraft(item)) cls.push('new');
+  else if (isBlocked(item)) cls.push('blocked');
   if (isClosed(item.status)) cls.push('closed');
   if (expanded) cls.push('expanded');
   return cls.join(' ');
@@ -133,60 +105,82 @@ function dragHandle() {
 }
 
 function keyCell(item) {
+  if (isDraft(item)) {
+    const prefix = item.type === 'ongoing' ? 'N' : item.type === 'project' ? 'P' : 'T';
+    return el('div', { class: 'key' }, el('span', { class: 'key-text new-key' }, `${prefix}-?`));
+  }
   return el('div', { class: 'key' }, dragHandle(), el('span', { class: 'key-text' }, item.key));
 }
 
 // In the title-only table there is no actions column, so the action buttons
 // sit at the right of the title cell (revealed on hover, see edit.css).
-function titleCell(item, mode, ctx) {
-  const cell = el('div', { class: 'title' }, el('span', { class: 'title-text' }, item.title));
-  if (mode !== 'full') cell.append(actionButtons(item, ctx.actions));
+function titleCell(item, mode, ctx, saver) {
+  const cell = el('div', { class: 'title' }, titleControl(item, saver, ctx));
+  if (mode !== 'full') cell.append(actionButtons(item, ctx));
   return cell;
-}
-
-function statusCell(item) {
-  if (!item.status) return el('div');
-  return el('div', {}, el('span', { class: `status ${item.status}` }, STATUS_LABEL[item.status] || item.status));
-}
-
-function blockedCell(item) {
-  if (item.type !== 'task') return el('div', { class: 'blocked-cell' });
-  return el('div', { class: 'blocked-cell' },
-    el('input', { type: 'checkbox', checked: item.blocked ? true : null, tabindex: '-1', 'aria-label': 'Blocked', title: item.blocked ? 'Blocked' : 'Not blocked' }));
 }
 
 /** One row for either kind; parents simply leave the task-only cells empty. */
 function itemRow(item, kind, mode, expanded, ctx) {
-  const closed = isClosed(item.status);
-  const dataset = { id: item.id, kind, type: item.type };
-  if (kind === 'task') dataset.parent = item.parent_id;
+  const saver = makeSaver(item, ctx);
+  const dataset = { kind, type: item.type };
+  if (isDraft(item)) dataset.editing = 'new';
+  else dataset.id = item.id;
+  if (kind === 'task' && item.parent_id != null) dataset.parent = item.parent_id;
   const row = el('div', { class: rowClasses(item, kind, expanded), dataset },
     toggleCell(item, expanded, ctx.onToggle),
     keyCell(item),
-    titleCell(item, mode, ctx),
+    titleCell(item, mode, ctx, saver),
   );
   if (mode === 'full') {
     row.append(
-      statusCell(item),
-      el('div', {}, userChip(item.owner_id)),
-      el('div', {}, userChip(item.assignee_id)),
-      dateCell(item.start_date, item.start_firm, ''),
-      dateCell(item.end_date, item.end_firm, closed ? '' : endDateClass(item.end_date)),
-      numCell(item.urgency, !closed),
-      numCell(item.importance, !closed),
-      blockedCell(item),
-      actionButtons(item, ctx.actions),
+      statusControl(item, saver),
+      userControl(item, 'owner_id', saver),
+      userControl(item, 'assignee_id', saver),
+      dateControl(item, 'start', saver),
+      dateControl(item, 'end', saver, { highlight: true }),
+      levelControl(item, 'urgency', saver),
+      levelControl(item, 'importance', saver),
+      blockedControl(item, saver),
+      actionButtons(item, ctx),
     );
   }
   return row;
 }
 
-function descriptionRow(item, kind) {
-  const md = el('div', { class: 'md' });
-  md.innerHTML = renderMarkdown(item.description);
-  // Same grid as the item row; the content occupies the title column.
-  return el('div', { class: `row description ${kind}`, dataset: { descFor: item.id } },
-    el('div'), el('div'), el('div', { class: 'title' }, md));
+/** The expanded detail row: description on the left, dependencies on the right. */
+function detailRow(item, kind, ctx) {
+  const saver = makeSaver(item, ctx);
+  const wrap = el('div', { class: 'desc-wrap' }, descriptionControl(item, saver));
+  const deps = dependencyPanel(item, ctx);
+  if (deps) wrap.append(el('div', { class: 'desc-deps' }, deps));
+  const dataset = isDraft(item) ? { editing: 'new' } : { descFor: item.id };
+  // Not given the kind class itself, so `.row.task` / `.row.parent` only ever
+  // match item rows (detail rows contain other items' titles in chips).
+  return el('div', { class: `row description kind-${kind}`, dataset }, el('div'), el('div'), el('div', { class: 'title' }, wrap));
+}
+
+/** Remember which control has focus so a re-render can give it back. */
+function captureFocus(container) {
+  const a = document.activeElement;
+  if (!a || !container.contains(a) || !a.name) return null;
+  const rowEl = a.closest('.row');
+  if (!rowEl) return null;
+  const id = rowEl.dataset.id || rowEl.dataset.descFor || (rowEl.dataset.editing ? 'new' : null);
+  if (!id) return null;
+  const sel = typeof a.selectionStart === 'number' ? [a.selectionStart, a.selectionEnd] : null;
+  return { id, name: a.name, sel };
+}
+
+function restoreFocus(container, f) {
+  if (!f) return;
+  const rowSel = f.id === 'new' ? '.row[data-editing="new"]' : `.row[data-id="${f.id}"], .row[data-desc-for="${f.id}"]`;
+  const target = container.querySelector(`${rowSel} [name="${f.name}"]`);
+  if (!target) return;
+  target.focus({ preventScroll: true });
+  if (f.sel && typeof target.setSelectionRange === 'function') {
+    try { target.setSelectionRange(f.sel[0], f.sel[1]); } catch {}
+  }
 }
 
 export function renderTable(container, opts) {
@@ -195,54 +189,51 @@ export function renderTable(container, opts) {
 
   const ctx = {
     actions,
+    rerender: () => handle.rerender(),
+    onChanged: async () => { if (actions?.onChanged) await actions.onChanged(); else handle.rerender(); },
     onToggle: (item) => {
       if (expanded.has(item.id)) expanded.delete(item.id); else expanded.add(item.id);
       handle.rerender();
     },
   };
 
-  const editCtx = {
-    rerender: () => handle.rerender(),
-    onChanged: async () => { if (actions?.onChanged) await actions.onChanged(); else handle.rerender(); },
-  };
-
-  // Drop an edit/new state whose row cannot be shown on this render (e.g. the
-  // item was removed or the page changed) so it does not block new edits.
-  if (editing.mode === 'edit' && !groups.some((g) => g.parent.id === editing.id || g.tasks.some((t) => t.id === editing.id))) cancelEdit();
-  if (editing.mode === 'new' && editing.draft.type === 'task' && !groups.some((g) => g.parent.id === editing.draft.parent_id)) cancelEdit();
+  // A new task row only makes sense under a parent shown on this page.
+  if (draft.item && draft.item.type === 'task' && !groups.some((g) => g.parent.id === draft.item.parent_id)) discardNew();
 
   const table = el('div', { class: `table ${mode === 'title-only' ? 'title-only' : ''}` });
   table.append(headerRow(mode));
 
-  if (!groups.length && editing.mode !== 'new') {
+  if (!groups.length && !draft.item) {
     table.append(el('div', { class: 'empty' }, 'Nothing to show.'));
   }
 
   const appendRow = (item, kind) => {
-    if (isEditingItem(item)) {
-      const [row, detail] = renderEditRows(editing.draft, kind, mode, editCtx);
-      table.append(row, detail);
-      handle.rows.push({ item, el: row, kind });
-      return;
-    }
     const isExpanded = expanded.has(item.id);
     const row = itemRow(item, kind, mode, isExpanded, ctx);
     table.append(row);
     handle.rows.push({ item, el: row, kind });
-    if (isExpanded) table.append(descriptionRow(item, kind));
+    if (isExpanded) table.append(detailRow(item, kind, ctx));
   };
-  const appendNewRow = (kind) => table.append(...renderEditRows(editing.draft, kind, mode, editCtx));
+  const appendNewRow = (kind) => {
+    const row = itemRow(draft.item, kind, mode, true, ctx);
+    table.append(row, detailRow(draft.item, kind, ctx));
+    queueMicrotask(() => { const t = row.querySelector('input[name="title"]'); if (t && row.isConnected && !captureFocusActive) t.focus(); });
+  };
+  let captureFocusActive = false;
 
   for (const g of groups) {
     appendRow(g.parent, 'parent');
     for (const t of g.tasks) appendRow(t, 'task');
-    if (editing.mode === 'new' && editing.draft.type === 'task' && editing.draft.parent_id === g.parent.id) appendNewRow('task');
+    if (draft.item && draft.item.type === 'task' && draft.item.parent_id === g.parent.id) appendNewRow('task');
   }
-  if (editing.mode === 'new' && editing.draft.type !== 'task') appendNewRow('parent');
+  if (draft.item && draft.item.type !== 'task') appendNewRow('parent');
 
-  installDragAndDrop(table, editCtx);
+  installDragAndDrop(table, ctx);
 
+  const focus = captureFocus(container);
+  captureFocusActive = !!focus;
   container.replaceChildren(table);
+  restoreFocus(container, focus);
   if (opts.onRendered) opts.onRendered(handle);
   return handle;
 }
@@ -291,14 +282,14 @@ function clearDropMarks(table) {
   for (const n of table.querySelectorAll('.drop-before, .drop-after, .drop-into')) n.classList.remove('drop-before', 'drop-after', 'drop-into');
 }
 
-function installDragAndDrop(table, editCtx) {
+function installDragAndDrop(table, ctx) {
   let drag = null; // { id, kind, parent }
   let over = null; // { el, mode, after }
 
   table.addEventListener('dragstart', (e) => {
     const handleEl = e.target.closest?.('.drag-handle');
     const rowEl = handleEl?.closest('.row[data-id]');
-    if (!handleEl || !rowEl || editing.mode) { e.preventDefault(); return; }
+    if (!handleEl || !rowEl) { e.preventDefault(); return; }
     drag = { id: Number(rowEl.dataset.id), kind: rowEl.dataset.kind, parent: rowEl.dataset.parent ?? '' };
     rowEl.classList.add('dragging');
     table.classList.add('drag-active');
@@ -372,7 +363,7 @@ function installDragAndDrop(table, editCtx) {
         await api.updateItem(d.id, { parent_id: newParent });
       }
       await api.reorder(ids);
-      await editCtx.onChanged();
+      await ctx.onChanged();
     } catch (err) {
       toast(err.message);
     }
@@ -381,12 +372,12 @@ function installDragAndDrop(table, editCtx) {
   table.addEventListener('dragend', finish);
 }
 
-/** Ids of all rows in groups that have a description (for expand-all). */
-export function describedIds(groups) {
+/** Ids of all rows in groups that can be expanded (for expand-all). */
+export function expandableIds(groups) {
   const ids = [];
   for (const g of groups) {
-    if (g.parent.description?.trim()) ids.push(g.parent.id);
-    for (const t of g.tasks) if (t.description?.trim()) ids.push(t.id);
+    if (isExpandable(g.parent)) ids.push(g.parent.id);
+    for (const t of g.tasks) if (isExpandable(t)) ids.push(t.id);
   }
   return ids;
 }

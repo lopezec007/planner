@@ -1,4 +1,4 @@
-/* styles for in-table editing and drag-and-drop reordering (see js/edit.js, js/table.js) */
+/* styles for inline editing, drag-and-drop reordering, and the expanded row (see js/cells.js, js/table.js) */
 
 /* ---------- drag handle and drop indicators ---------- */
 .row .key { display: flex; align-items: center; gap: 4px; }
@@ -28,77 +28,90 @@
 .table.title-only .row:hover .title .actions,
 .table.title-only .row:focus-within .title .actions { opacity: 1; }
 
-/* ---------- edit mode rows ---------- */
-.row.editing,
-.row.edit-detail {
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg)) !important;
-  font-weight: normal;
-}
-.row.editing { align-items: start; }
-.row.editing > * { overflow: visible; white-space: normal; }
-.row.editing .new-key { color: var(--fg-muted); font-style: italic; }
-.row.editing input:not([type="checkbox"]),
-.row.editing select,
-.edit-detail input:not([type="checkbox"]),
-.edit-detail select,
-.edit-detail textarea {
+/* ---------- inline editing (every field is a live control) ---------- */
+.cell-input, .cell-select {
   width: 100%;
   min-width: 0;
-  padding: 3px 6px;
-  font-size: 13px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font: inherit;
+  color: inherit;
 }
-.row.editing input[type="date"],
-.edit-detail input[type="date"] { padding: 2px 3px; font-size: 12px; }
-.row.editing .num input { text-align: center; padding: 3px 2px; -moz-appearance: textfield; appearance: textfield; }
-.row.editing .num input::-webkit-outer-spin-button,
-.row.editing .num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.date-edit { display: flex; flex-direction: row; align-items: center; gap: 4px; }
-.date-edit input[type="date"] { flex: 1 1 auto; min-width: 0; }
-/* Firm toggle: a checkbox drawn as a lock icon. */
-input[type="checkbox"].firm-toggle {
-  appearance: none; -webkit-appearance: none;
-  width: 18px; height: 18px; margin: 0; padding: 0; flex: 0 0 auto;
-  border: none; background: transparent; cursor: pointer;
-  font-size: 13px; line-height: 18px; text-align: center; opacity: 0.35;
+.cell-input:hover, .cell-select:hover { border-color: var(--border); }
+.cell-input:focus, .cell-select:focus { outline: none; border-color: var(--accent); background: var(--bg); }
+.title-input { font-weight: inherit; text-overflow: ellipsis; }
+.title-input::placeholder { color: var(--fg-muted); font-style: italic; }
+.row.parent .title-input { font-weight: 600; }
+.title-text { cursor: text; padding: 2px 4px; margin: -2px -4px; border: 1px solid transparent; border-radius: 4px; }
+.title-text:hover { border-color: var(--border); }
+.title-text:focus-visible { outline: 2px solid var(--accent); }
+.title-text.empty { color: var(--fg-muted); font-style: italic; }
+.row.closed .title-text { text-decoration: line-through; opacity: 0.8; }
+.cell-select { cursor: pointer; }
+.status .cell-select { padding: 1px 2px; width: auto; max-width: 100%; font-size: 12px; }
+.num-input {
+  width: 36px; text-align: center; padding: 2px 0;
+  -moz-appearance: textfield; appearance: textfield;
 }
-input[type="checkbox"].firm-toggle::after { content: "🔓"; }
-input[type="checkbox"].firm-toggle:checked { opacity: 1; }
-input[type="checkbox"].firm-toggle:checked::after { content: "🔒"; }
-input[type="checkbox"].firm-toggle:hover { opacity: 0.8; }
-input[type="checkbox"].firm-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
-.edit-field input[type="checkbox"].firm-toggle { width: 18px; margin: 0; align-self: center; }
-.row.editing .actions { gap: 4px; }
-.row.editing .actions button,
-.edit-detail .actions button { padding: 3px 8px; line-height: 1.2; }
+.num-input::-webkit-outer-spin-button, .num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.num-input.hl-level { border-color: transparent; }
+.num-input.hl-level:focus { outline: 2px solid var(--accent); }
+.row .blocked-cell input { pointer-events: auto; cursor: pointer; }
+.row .blocked-cell input:disabled { cursor: not-allowed; }
 
-/* The detail row shares the grid; its content sits in the title column. */
-.row.edit-detail { align-items: start; }
-.edit-detail-content { display: flex; flex-direction: column; gap: 8px; overflow: visible; white-space: normal; }
-.edit-detail textarea { width: 100%; }
-.edit-detail .edit-fields { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-end; }
-.edit-detail .edit-fields:empty { display: none; }
-.edit-field { display: flex; flex-direction: column; gap: 2px; min-width: 90px; }
-.edit-field .edit-label { font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.02em; }
-.edit-field select { width: auto; max-width: 320px; }
-.edit-field input[type="checkbox"] { width: auto; align-self: flex-start; margin: 6px 0; }
-.edit-field input[type="date"] { width: auto; }
-.edit-field input[type="number"] { width: 60px; }
-.edit-detail textarea { min-height: 72px; resize: vertical; font-family: var(--mono); font-size: 12.5px; }
-.edit-detail .actions { display: flex; gap: 6px; }
-.row.editing .blocked-cell input { pointer-events: auto; }
-.row.drop-into { box-shadow: inset 0 0 0 2px var(--accent); }
+/* Dates: tilde = approximate (not firm); the text becomes an input on click. */
+.date-cell { gap: 2px; }
+.firm-toggle {
+  flex: 0 0 auto; width: 14px; padding: 0; border: none; background: transparent;
+  font-weight: 700; font-size: 14px; line-height: 1; cursor: pointer; color: var(--fg-muted);
+}
+.firm-toggle.approx { color: var(--fg); }
+.firm-toggle.firm { opacity: 0.22; }
+.firm-toggle:hover { opacity: 1; color: var(--accent); }
+.date-text { cursor: text; padding: 2px 4px; border: 1px solid transparent; border-radius: 4px; white-space: nowrap; }
+.date-text:hover { border-color: var(--border); }
+.date-text:focus-visible { outline: 2px solid var(--accent); }
+.date-text.empty { color: var(--fg-muted); }
+.date-input { width: auto; font-size: 12px; padding: 1px 2px; }
 
-/* ---------- owner / assignee chip picker (few users) ---------- */
+/* New (unsaved) row */
+.row.new { background: color-mix(in srgb, var(--accent) 8%, var(--bg)) !important; }
+.new-key { font-style: italic; }
+
+/* Owner / assignee chip picker */
 .user-pick { display: flex; flex-wrap: wrap; gap: 4px; padding: 0; }
 .user-pick .chip {
-  cursor: pointer;
-  border: 2px solid transparent;
-  opacity: 0.4;
-  padding: 0 8px;
-  line-height: 18px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
+  cursor: pointer; border: 2px solid transparent; opacity: 0.4;
+  padding: 0 8px; line-height: 18px; font: inherit; font-size: 12px; font-weight: 500;
 }
 .user-pick .chip:hover { opacity: 0.75; }
 .user-pick .chip[aria-pressed="true"] { opacity: 1; border-color: var(--fg); }
+
+/* ---------- expanded row: description + dependencies ---------- */
+.desc-wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: flex-start; width: 100%; }
+.desc-main { flex: 1 1 320px; min-width: 0; }
+.desc-main .md { cursor: text; border: 1px solid transparent; border-radius: 4px; padding: 2px 4px; margin: -2px -4px; }
+.desc-main .md:hover { border-color: var(--border); }
+.desc-main .md.placeholder { color: var(--fg-muted); font-style: italic; }
+.desc-textarea { width: 100%; min-height: 84px; resize: vertical; font-family: var(--mono); font-size: 12.5px; }
+.desc-deps { flex: 0 1 420px; min-width: 260px; }
+.deps { font-size: 12.5px; }
+.deps-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 0 6px; }
+.deps-label { min-width: 78px; color: var(--fg-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; }
+.deps-note { color: var(--fg-muted); font-style: italic; }
+.dep-chip {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  padding: 1px 3px 1px 7px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-alt);
+}
+.dep-chip.open { border-color: var(--hl-alert); }
+.dep-chip.closed { opacity: 0.6; }
+.dep-chip .dep-key { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); }
+.dep-chip .dep-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.dep-remove { border: none; background: transparent; padding: 0 3px; cursor: pointer; color: var(--fg-muted); line-height: 1; font-size: 14px; }
+.dep-remove:hover { color: var(--hl-alert); background: transparent; }
+.dep-add { font-size: 12px; padding: 1px 4px; max-width: 220px; }
+.chip-pick { cursor: pointer; }
+.chip-pick.empty { background: transparent; color: var(--fg-muted); border: 1px dashed var(--border); }
+.chip-pick:hover { outline: 2px solid var(--border); }

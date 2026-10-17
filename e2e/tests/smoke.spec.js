@@ -41,8 +41,10 @@ test('description expand and collapse', async ({ page }) => {
   expect(await page.locator('.row.description').count()).toBeGreaterThan(3);
   await page.locator('#btn-collapse-all').click();
   await expect(page.locator('.row.description')).toHaveCount(0);
-  // Rows without a description have no toggle button.
-  await expect(page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.toggle button')).toHaveCount(0);
+  // Projects and tasks can always be expanded (dependencies live there); an
+  // Ongoing without a description has no toggle.
+  await expect(page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.toggle button')).toHaveCount(1);
+  await expect(page.locator('.row.parent', { hasText: 'Finance' }).locator('.toggle button')).toHaveCount(0);
 });
 
 test('backlog, ideas and everything pages', async ({ page }) => {

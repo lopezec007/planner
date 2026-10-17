@@ -15,7 +15,7 @@
 // matches itself or any of its tasks match; only matching tasks are shown.
 // With nothing active the groups pass through unchanged.
 
-import { state, STATUSES, STATUS_LABEL } from './state.js';
+import { state, STATUSES, STATUS_LABEL, isBlocked } from './state.js';
 import { el } from './util.js';
 
 const TYPES = [['ongoing', 'Ongoing'], ['project', 'Project'], ['task', 'Task']];
@@ -71,7 +71,7 @@ function matches(it) {
   if (c.assignee) {
     if (c.assignee === 'none' ? it.assignee_id != null : String(it.assignee_id) !== c.assignee) return false;
   }
-  if (c.blocked && (c.blocked === 'yes') !== !!it.blocked) return false;
+  if (c.blocked && (c.blocked === 'yes') !== isBlocked(it)) return false;
   if (c.endAfter || c.endBefore) {
     if (!it.end_date) return false;
     if (c.endAfter && it.end_date < c.endAfter) return false;

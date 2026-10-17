@@ -135,11 +135,17 @@ test('owner, assignee and blocked filters', async ({ page }) => {
   await expect(parents(page)).toHaveCount(1);
   await page.locator('[data-search-key="assignee"]').selectOption({ label: 'Any' });
 
+  // Blocked = the stored flag or an open blocking dependency: Pay insurance
+  // (flag, and blocked by Review budget), Electrical rough-in (by Order
+  // countertops), Paint walls (by Electrical rough-in); Spring garden is a
+  // project blocked by Kitchen remodel.
   await page.locator('[data-search-key="blocked"]').selectOption({ label: 'Blocked' });
-  await expect(tasks(page)).toHaveCount(1);
+  await expect(tasks(page)).toHaveCount(3);
   await expect(task(page, 'Pay insurance')).toBeVisible();
-  await expect(parents(page)).toHaveCount(1);
+  await expect(task(page, 'Paint walls')).toBeVisible();
+  await expect(parents(page)).toHaveCount(3);
   await expect(parent(page, 'Finance')).toBeVisible();
+  await expect(parent(page, 'Spring garden')).toBeVisible();
 
   await page.locator('[data-search-key="blocked"]').selectOption({ label: 'Not blocked' });
   await expect(task(page, 'Pay insurance')).toHaveCount(0);

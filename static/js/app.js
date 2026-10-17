@@ -5,13 +5,13 @@
 import { api } from './api.js';
 import { state, load } from './state.js';
 import { PAGES } from './filters.js';
-import { renderTable, describedIds } from './table.js';
+import { renderTable, expandableIds } from './table.js';
 import { renderTimeline } from './timeline.js';
 import { renderMatrix } from './matrix.js';
 import { renderSettings } from './settings.js';
 import { renderSearch } from './search.js';
 import { el, toast, contrastText } from './util.js';
-import { beginNew, beginEdit, cancelEdit } from './edit.js';
+import { beginNew, discardNew } from './cells.js';
 
 const main = document.getElementById('main');
 const toolbar = document.getElementById('toolbar');
@@ -65,9 +65,8 @@ function applySettings() {
 
 // ---------------------------------------------------------------- actions
 
-// Creating and editing happen in the table (see edit.js): these actions put
-// the table into new/edit mode and re-render; the edit form saves via the
-// API and then calls onChanged() to reload.
+// Every field edits in place (see cells.js). These actions add a new row,
+// delete, and reload after any change.
 const actions = {
   onNew(type, page) {
     const def = PAGES[page];
@@ -76,9 +75,6 @@ const actions = {
   onAddTask(parent) {
     const page = route();
     if (beginNew({ type: 'task', parentId: parent.id, status: PAGES[page]?.newStatus || 'todo' })) render();
-  },
-  onEdit(item) {
-    if (beginEdit(item)) render();
   },
   onChanged: reload,
   async onDelete(item) {
@@ -113,7 +109,7 @@ function render() {
   toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', onClick: () => actions.onNew('project', page) }, 'New Project'));
 
   toolbar.append(
-    el('button', { type: 'button', id: 'btn-expand-all', onClick: () => { for (const id of describedIds(currentGroups)) st.expanded.add(id); render(); } }, 'Expand all'),
+    el('button', { type: 'button', id: 'btn-expand-all', onClick: () => { for (const id of expandableIds(currentGroups)) st.expanded.add(id); render(); } }, 'Expand all'),
     el('button', { type: 'button', id: 'btn-collapse-all', onClick: () => { st.expanded.clear(); render(); } }, 'Collapse all'),
   );
 
@@ -173,5 +169,5 @@ function render() {
   }
 }
 
-window.addEventListener('hashchange', () => { cancelEdit(); render(); });
+window.addEventListener('hashchange', () => { discardNew(); render(); });
 reload();
