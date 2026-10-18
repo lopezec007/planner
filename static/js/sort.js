@@ -2,15 +2,18 @@
 //
 // The sort is a list of { key, dir } applied in order; an empty list is the
 // user-defined order (drag and drop, sort_order). Clicking a column header
-// (table.js) appends that column ascending, flips it to descending on the
-// second click and removes it on the third, so headers clicked in sequence
-// build a multi-column sort. The menu shows the same list, lets the direction
+// (table.js) appends that column in its default direction (ascending, except
+// urgency and importance which start descending), flips it on the second
+// click and removes it on the third, so headers clicked in sequence build a
+// multi-column sort. The menu shows the same list, lets the direction
 // be flipped or a column removed, resets to user-defined, and holds the
 // "blocked items last" switch, which sinks blocked items whatever the sort.
 //
-//   SORT_COLUMNS                 key -> { label, parentOnly?, flatOnly? }
+//   SORT_COLUMNS                 key -> { label, flatOnly?, defaultDir? }
+//   defaultDir(key)              'asc' | 'desc': the direction a first click gives
 //   compareItems(sort, blockedLast) -> comparator for sibling items
-//   renderSortMenu(slot, ctx)    ctx = { sort, blockedLast, flat, setSort(keys), setBlockedLast(on) }
+//   renderSortMenu(slot, ctx)    ctx = { sort, blockedLast, flat, setSort(keys, all?), setBlockedLast(on) }
+//                                setSort(keys, true) replaces the whole stored sort (User-defined)
 //   toggleSort(sort, key)        the header-click rule, returns the new list
 
 import { state, STATUSES, isBlocked } from './state.js';
@@ -26,8 +29,8 @@ export const SORT_COLUMNS = {
   assignee: { label: 'Assignee' },
   start: { label: 'Start' },
   end: { label: 'End' },
-  urgency: { label: 'Urgency' },
-  importance: { label: 'Importance' },
+  urgency: { label: 'Urgency', defaultDir: 'desc' },   // the most urgent first
+  importance: { label: 'Importance', defaultDir: 'desc' },
   blocked: { label: 'Blocked' },
 };
 
@@ -46,12 +49,16 @@ export function normalizeSort(sort) {
   return out;
 }
 
-/** Header click: add ascending, then descending, then remove. */
+export const defaultDir = (key) => SORT_COLUMNS[key]?.defaultDir || 'asc';
+const flip = (dir) => (dir === 'asc' ? 'desc' : 'asc');
+
+/** Header click: add in the column's default direction, then the other
+ *  direction, then remove. */
 export function toggleSort(sort, key) {
   const cur = normalizeSort(sort);
   const i = cur.findIndex((s) => s.key === key);
-  if (i < 0) return cur.length >= MAX_KEYS ? cur : [...cur, { key, dir: 'asc' }];
-  if (cur[i].dir === 'asc') return cur.map((s, j) => (j === i ? { key, dir: 'desc' } : s));
+  if (i < 0) return cur.length >= MAX_KEYS ? cur : [...cur, { key, dir: defaultDir(key) }];
+  if (cur[i].dir === defaultDir(key)) return cur.map((s, j) => (j === i ? { key, dir: flip(s.dir) } : s));
   return cur.filter((s) => s.key !== key);
 }
 
@@ -146,7 +153,7 @@ export function renderSortMenu(slot, ctx) {
   // Order: user-defined or the list of columns in effect.
   const orderBox = el('div', { class: 'sort-order' });
   orderBox.append(el('label', { class: 'sort-choice' },
-    el('input', { type: 'radio', name: 'sort-mode', value: 'user', checked: active ? null : true, onChange: () => ctx.setSort([]) }),
+    el('input', { type: 'radio', name: 'sort-mode', value: 'user', checked: active ? null : true, onChange: () => ctx.setSort([], true) }),
     ' User-defined (drag rows to reorder)'));
   const listLabel = el('label', { class: 'sort-choice' },
     el('input', { type: 'radio', name: 'sort-mode', value: 'columns', checked: active ? true : null, disabled: active ? null : true }),
@@ -174,7 +181,7 @@ export function renderSortMenu(slot, ctx) {
   if (addable.length && sort.length < MAX_KEYS) {
     const add = el('select', { class: 'sort-add', 'aria-label': 'Add a sort column' }, el('option', { value: '' }, active ? '+ then by…' : '+ sort by…'));
     for (const [k, c] of addable) add.append(el('option', { value: k }, c.label));
-    add.addEventListener('change', () => { if (add.value) ctx.setSort([...sort, { key: add.value, dir: 'asc' }]); });
+    add.addEventListener('change', () => { if (add.value) ctx.setSort([...sort, { key: add.value, dir: defaultDir(add.value) }]); });
     orderBox.append(add);
   }
   panel.append(orderBox);

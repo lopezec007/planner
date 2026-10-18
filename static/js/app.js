@@ -187,7 +187,22 @@ function render() {
   const collapsed = collapsedSet();
   // The "Ongoing / Project" column only exists in Flat; a stored sort on it
   // is set aside (not forgotten) while Flat is off.
-  const sort = normalizeSort(prefs.getJSON('sort')).filter((k) => flat || !SORT_COLUMNS[k.key].flatOnly);
+  const storedSort = normalizeSort(prefs.getJSON('sort'));
+  const setAside = (k) => !flat && SORT_COLUMNS[k.key].flatOnly;
+  const sort = storedSort.filter((k) => !setAside(k));
+  // A change to the visible sort columns keeps the set-aside ones in their
+  // place (so removing the last visible column does not wipe them);
+  // "User-defined" in the Sort menu clears everything.
+  const mergeSort = (keys) => {
+    const byKey = new Map(keys.map((k) => [k.key, k]));
+    const out = [];
+    for (const s of storedSort) {
+      if (setAside(s)) out.push(s);
+      else if (byKey.has(s.key)) { out.push(byKey.get(s.key)); byKey.delete(s.key); }
+    }
+    for (const k of keys) if (byKey.has(k.key)) out.push(k);
+    return out;
+  };
   const blockedLast = flag('blocked_last');
   const hidden = normalizeHidden(prefs.getJSON('hidden_cols'));
 
@@ -217,7 +232,7 @@ function render() {
   toolbar.append(sortSlot);
   const sortCtx = {
     sort, blockedLast, flat,
-    setSort: (keys) => { prefs.set('sort', keys); render(); },
+    setSort: (keys, all = false) => { prefs.set('sort', all ? keys : mergeSort(keys)); render(); },
     setBlockedLast: (on) => { prefs.set('blocked_last', on ? '1' : '0'); render(); },
   };
   renderSortMenu(sortSlot, sortCtx);

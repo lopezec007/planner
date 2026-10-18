@@ -164,7 +164,7 @@ The order of items is user-specified via drag-and-drop, and the order is persist
 reorders a task among its own parent's tasks and never changes its parent.
 
 Sorting: clicking a column header sorts by that column (ascending, then descending on a second click, removed on a
-third); clicking further headers appends them, so the order in which headers are clicked is the multi-column sort
+third; Urgency and Importance start descending instead); clicking further headers appends them, so the order in which headers are clicked is the multi-column sort
 order.  "User-defined" (the drag order) remains available and is the default; a Sort menu lists the columns in
 effect.  An option pushes blocked items to the bottom regardless of the sort.  While a sort is in effect rows
 cannot be dragged.

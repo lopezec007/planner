@@ -71,9 +71,10 @@ the single SQLite file. The directory containing it must already exist.
    Ongoing or Project (it goes last there). The **Wide / Narrow** icon pair
    caps the table width on very wide screens, and **Nested / Flat** next to
    it switches the layout (see Flat above).
-   **Sort**: click a column header to sort by it (again for descending, a
-   third time to remove it); headers clicked in sequence build a
-   multi-column sort, numbered in the header. The Sort menu shows the
+   **Sort**: click a column header to sort by it (again for the other
+   direction, a third time to remove it); Urgency and Importance start
+   with the highest first, the other columns ascending. Headers clicked in
+   sequence build a multi-column sort, numbered under the arrows. The Sort menu shows the
    columns in effect, flips or removes them, returns to **User-defined** (the
    drag order) and has **Blocked items last**, which sinks blocked items
    whatever the sort. While sorted, rows cannot be dragged. The **Columns**

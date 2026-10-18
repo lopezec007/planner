@@ -49,7 +49,7 @@ import {
   titleControl, statusControl, userControl, dateControl, levelControl, blockedControl,
   descriptionControl, dependencyPanel, attachmentsPanel, attachmentBadge,
 } from './cells.js';
-import { SORT_COLUMNS, normalizeSort, compareItems, toggleSort } from './sort.js';
+import { SORT_COLUMNS, normalizeSort, compareItems, toggleSort, defaultDir } from './sort.js';
 import { visibleColumns, gridTemplate } from './columns.js';
 import { rowTint } from './colors.js';
 import { colorSwatch } from './swatch.js';
@@ -142,23 +142,26 @@ function actionButtons(item, ctx) {
 }
 
 /** A header cell that sorts by `key` when clicked: shows the direction and,
- *  with several sort columns, its position in the order (a tiny badge on the
- *  arrow's corner, so narrow columns are not widened). */
+ *  with several sort columns, its position in the order (a tiny badge right
+ *  under the arrow, so narrow columns are neither widened nor clipped). */
 function sortHeader(key, label, ctx, extraClass = '') {
   const keys = normalizeSort(ctx.sort);
   const i = keys.findIndex((s) => s.key === key);
   const active = i >= 0;
   const dir = active ? keys[i].dir : null;
+  const name = SORT_COLUMNS[key].label;
+  const word = (d) => (d === 'asc' ? 'ascending' : 'descending');
+  const first = defaultDir(key);
   const cell = el('div', {
     class: `sortable ${extraClass} ${active ? 'sorted' : ''}`, role: 'columnheader', tabindex: '0',
     dataset: { sort: key },
-    'aria-sort': active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none',
+    'aria-sort': active ? word(dir) : 'none',
     title: active
-      ? (dir === 'asc' ? `Sorted by ${SORT_COLUMNS[key].label} ascending: click for descending` : `Sorted by ${SORT_COLUMNS[key].label} descending: click to stop sorting by it`)
-      : `Sort by ${SORT_COLUMNS[key].label}${keys.length ? ' (after the current sort columns)' : ''}`,
+      ? (dir === first ? `Sorted by ${name} ${word(dir)}: click for ${word(dir === 'asc' ? 'desc' : 'asc')}` : `Sorted by ${name} ${word(dir)}: click to stop sorting by it`)
+      : `Sort by ${name}, ${word(first)} first${keys.length ? ' (after the current sort columns)' : ''}`,
   }, el('span', { class: 'sort-label' }, label));
   if (active) {
-    const arrow = el('span', { class: 'sort-arrow', 'aria-hidden': 'true' }, dir === 'asc' ? '↑' : '↓');
+    const arrow = el('span', { class: 'sort-arrow', 'aria-hidden': 'true' }, el('span', { class: 'sort-glyph' }, dir === 'asc' ? '↑' : '↓'));
     if (keys.length > 1) arrow.append(el('span', { class: 'sort-index' }, String(i + 1)));
     cell.append(arrow);
   }

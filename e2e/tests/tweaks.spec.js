@@ -28,20 +28,28 @@ test('toolbar buttons are icons with mouseover descriptions and accessible names
   await expect(page.locator('#btn-back svg')).toHaveCount(1);
 });
 
-test('sort-position badges sit on the arrow and the Urg/Imp labels stay visible', async ({ page }) => {
+test('sort-position badges sit under the arrow, whole, and the Urg/Imp labels stay visible', async ({ page }) => {
   await page.goto('/#/all');
   await page.locator('.row.header [data-sort="urgency"]').click();
   await page.locator('.row.header [data-sort="importance"]').click();
+  for (const [key, n] of [['urgency', '1'], ['importance', '2']]) {
+    const h = page.locator(`.row.header [data-sort="${key}"]`);
+    await expect(h.locator('.sort-index')).toHaveText(n);
+    const cell = await h.boundingBox();
+    const label = await h.locator('.sort-label').boundingBox();
+    const glyph = await h.locator('.sort-glyph').boundingBox();
+    const badge = await h.locator('.sort-index').boundingBox();
+    const header = await page.locator('.row.header').boundingBox();
+    expect(label.x + label.width).toBeLessThanOrEqual(cell.x + cell.width + 0.5);   // label not clipped
+    expect(badge.x + badge.width).toBeLessThanOrEqual(cell.x + cell.width + 0.5);   // badge whole, inside the cell
+    expect(badge.x).toBeGreaterThanOrEqual(cell.x - 0.5);
+    expect(badge.height).toBeLessThan(11);
+    expect(badge.y).toBeGreaterThanOrEqual(glyph.y + glyph.height - 1);             // right under the arrow glyph
+    expect(Math.abs((badge.x + badge.width / 2) - (glyph.x + glyph.width / 2))).toBeLessThan(3); // centred on it
+    expect(badge.y + badge.height).toBeLessThanOrEqual(header.y + header.height + 0.5); // within the header row
+    expect(header.height).toBe(36);
+  }
   const urg = page.locator('.row.header [data-sort="urgency"]');
-  await expect(urg.locator('.sort-index')).toHaveText('1');
-  const label = await urg.locator('.sort-label').boundingBox();
-  const cell = await urg.boundingBox();
-  expect(label.x + label.width).toBeLessThanOrEqual(cell.x + cell.width + 0.5); // not clipped
-  const arrow = await urg.locator('.sort-arrow').boundingBox();
-  const badge = await urg.locator('.sort-index').boundingBox();
-  expect(badge.height).toBeLessThan(11);
-  expect(badge.y + badge.height).toBeGreaterThan(arrow.y + arrow.height - 1); // overlaps the arrow's lower corner
-  expect(badge.x + badge.width).toBeGreaterThan(arrow.x + arrow.width - 1);
   for (let i = 0; i < 2; i++) { await urg.click(); } // off
   await page.locator('.row.header [data-sort="importance"]').click();
   await page.locator('.row.header [data-sort="importance"]').click();
