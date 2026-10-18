@@ -49,7 +49,7 @@ test('dragging a timeline bar moves its dates; dragging an edge resizes', async 
     expect((await byTitle(request, 'Electrical rough-in')).end_date).toBe(addDays(elec.end_date, 3));
     // Wait for the re-render (the bar has moved right) before the next drag.
     const movedX = bb.x + 3 * ppd;
-    await expect.poll(async () => (await barFor(page, elec.id).boundingBox()).x).toBeGreaterThan(movedX - 2);
+    await expect.poll(async () => (await barFor(page, elec.id).boundingBox())?.x ?? -Infinity).toBeGreaterThan(movedX - 2); // null while re-rendering
     await page.waitForTimeout(300); // let the re-rendered timeline settle (pointer capture, tooltip)
     // Drag the right edge two days earlier: only the end changes.
     bb = await barFor(page, elec.id).boundingBox();

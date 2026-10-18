@@ -12,6 +12,11 @@
 // a full re-render that recreates the controls, focus and caret position are
 // saved before each rerender and restored into the freshly mounted controls.
 //
+// Persistence: the criteria (everything but the search text) are saved as
+// the "filters" preference (prefs.js) whenever they change, and app.js calls
+// restoreFilters() after loading an account's preferences, so the filter
+// settings survive a reload and follow the account.
+//
 // Semantics: an item matches on its own fields (the status filter never
 // excludes Ongoing rows, which have no status; `recentDays` also admits items
 // closed within that many days). A parent row is shown if it matches itself
@@ -22,6 +27,8 @@
 import { state, STATUSES, STATUS_LABEL, isBlocked, isClosed, withinLastDays } from './state.js';
 import { PRESETS, PRESET_ORDER } from './filters.js';
 import { el } from './util.js';
+import { icon } from './icons.js';
+import { prefs } from './prefs.js';
 
 const TYPES = [['ongoing', 'Ongoing'], ['project', 'Project'], ['task', 'Task']];
 
@@ -86,6 +93,47 @@ export function newStatus() {
 /** Whether the type filter lets a newly created item of this type show. */
 export function typeAllowed(type) {
   return !criteria.types.size || criteria.types.has(type);
+}
+
+// ---- persistence (the "filters" preference) ----
+
+/** The criteria as stored in the preference (the search text is left out). */
+function criteriaToPref(c) {
+  return {
+    types: [...c.types], statuses: [...c.statuses], recent_days: c.recentDays, hide_empty_parents: !!c.hideEmptyParents,
+    owner: c.owner, assignee: c.assignee, blocked: c.blocked, end_after: c.endAfter, end_before: c.endBefore,
+  };
+}
+
+function criteriaFromPref(p) {
+  const c = emptyCriteria();
+  c.types = new Set((p.types || []).filter((t) => TYPES.some(([v]) => v === t)));
+  c.statuses = new Set((p.statuses || []).filter((s) => STATUSES.includes(s)));
+  c.recentDays = Math.max(0, Number(p.recent_days) || 0);
+  c.hideEmptyParents = !!p.hide_empty_parents;
+  c.owner = String(p.owner ?? '');
+  c.assignee = String(p.assignee ?? '');
+  c.blocked = ['yes', 'no'].includes(p.blocked) ? p.blocked : '';
+  c.endAfter = String(p.end_after ?? '');
+  c.endBefore = String(p.end_before ?? '');
+  return c;
+}
+
+/** Save the current criteria as the account's (or browser's) preference. */
+export function persistFilters() {
+  prefs.set('filters', criteriaToPref(criteria));
+}
+
+/** Replace the criteria with the stored preference (the Active template
+ *  when none is stored); keeps the search text. Call after prefs.load(). */
+export function restoreFilters() {
+  const stored = prefs.get('filters');
+  let next = null;
+  if (stored) { try { next = criteriaFromPref(JSON.parse(stored)); } catch { next = null; } }
+  if (!next) next = presetCriteria('active');
+  next.text = criteria.text;
+  criteria = next;
+  pinned.clear();
 }
 
 // ---- module state (survives re-renders) ----
@@ -178,6 +226,7 @@ function applyFilter(groups) {
 // ---- re-render plumbing ----
 
 function rerender() {
+  persistFilters();
   const a = document.activeElement;
   if (a && a.dataset && a.dataset.searchKey) {
     pendingFocus = { key: a.dataset.searchKey };
@@ -297,22 +346,24 @@ export function renderSearch(slot, ctx) {
   for (const k of PRESET_ORDER) {
     presets.append(el('button', {
       type: 'button', class: `search-preset${cur === k ? ' active' : ''}`, dataset: { preset: k, searchKey: `preset:${k}` },
-      'aria-pressed': cur === k ? 'true' : 'false', title: `Set the status and type filters for ${PRESETS[k].title.toLowerCase()} items`,
+      'aria-pressed': cur === k ? 'true' : 'false', 'aria-label': PRESETS[k].title,
+      title: `${PRESETS[k].title}: ${PRESETS[k].hint}`,
       onClick: () => { applyPreset(k); rerender(); },
-    }, PRESETS[k].title));
+    }, icon(k)));
   }
 
   const nActive = activeFilterCount();
   const filtersBtn = el('button', {
     type: 'button', id: 'btn-filters', class: nActive ? 'active' : '', 'aria-expanded': panelOpen ? 'true' : 'false',
-    'aria-controls': 'search-panel', dataset: { searchKey: 'filters' },
+    'aria-controls': 'search-panel', dataset: { searchKey: 'filters' }, 'aria-label': 'Filters',
+    title: nActive ? `Filters: ${nActive} in effect. Type, status, owner, assignee, blocked and end date.` : 'Filters: type, status, owner, assignee, blocked and end date',
     onClick: () => setPanel(!panelOpen),
-  }, 'Filters ▾', nActive ? el('span', { class: 'search-badge' }, String(nActive)) : null);
+  }, icon('filter'), nActive ? el('span', { class: 'search-badge' }, String(nActive)) : null);
 
   const clearBtn = el('button', {
-    type: 'button', id: 'btn-search-clear', disabled: !isActive(), title: 'Clear search and filters',
+    type: 'button', id: 'btn-search-clear', disabled: !isActive(), title: 'Clear the search and every filter (show everything)', 'aria-label': 'Clear',
     onClick: () => { clearTimeout(debounceTimer); criteria = emptyCriteria(); pinned.clear(); rerender(); },
-  }, 'Clear');
+  }, icon('clear'));
 
   countEl = el('span', { class: 'search-count', id: 'search-count', 'aria-live': 'polite', hidden: true });
   panelEl = buildPanel();

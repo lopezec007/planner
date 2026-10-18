@@ -14,8 +14,7 @@ import { state, STATUSES, STATUS_LABEL, isClosed, isBlocked, openBlockers, daysF
 import { renderMarkdown } from './markdown.js';
 import { el, toast, contrastText } from './util.js';
 import { pin } from './search.js';
-
-export const CHIP_MAX_USERS = 3;
+import { itemTooltip } from './tooltip.js';
 
 // ---------------------------------------------------------------- new-row draft
 
@@ -68,6 +67,18 @@ export async function commitNew(ctx) {
   discardNew();
   await ctx.onChanged();
   return true;
+}
+
+/** A dropdown opened with showPicker() keeps focus when its native picker is
+ *  dismissed by a click elsewhere, so a blur handler alone leaves it open.
+ *  Close it on the first pointerdown outside instead. Returns a function that
+ *  stops listening (call it from the close path). */
+export function closeOnOutsidePointer(node, close) {
+  const onDown = (e) => { if (!node.contains(e.target)) { stop(); close(); } };
+  const stop = () => document.removeEventListener('pointerdown', onDown, true);
+  // Deferred: the click that opened the control must not close it.
+  setTimeout(() => document.addEventListener('pointerdown', onDown, true), 0);
+  return stop;
 }
 
 export function makeSaver(item, ctx) {
@@ -157,15 +168,18 @@ export function statusControl(item, saver) {
   return el('div', {}, el('span', { class: `status ${item.status}` }, sel));
 }
 
+/** The text on a user's chip: the short label from Settings (1-3 characters). */
+export const chipLabel = (u) => u.short || u.name;
+
 /** Owner / assignee: the current user's chip (or a dash). Clicking it opens
- *  the picker in place: a row of user chips with a handful of users, else a
- *  select. Picking saves; clicking elsewhere or Escape closes it. */
+ *  the picker in place: a row of every user's chip when they all fit in the
+ *  cell, else a select. Picking saves; clicking elsewhere or Escape closes it. */
 export function userControl(item, field, saver) {
   const name = field === 'owner_id' ? 'owner' : 'assignee';
   const current = item[field];
   const u = current != null ? state.usersById.get(current) : null;
   const chip = u
-    ? el('span', { class: 'chip chip-pick', tabindex: '0', role: 'button', title: `${u.name}: click to change`, style: { background: u.color, color: contrastText(u.color) }, dataset: { name } }, u.name)
+    ? el('span', { class: 'chip chip-pick', tabindex: '0', role: 'button', title: `${u.name}: click to change`, style: { background: u.color, color: contrastText(u.color) }, dataset: { name, userName: u.name } }, chipLabel(u))
     : el('span', { class: 'chip chip-pick empty', tabindex: '0', role: 'button', title: 'Click to set', dataset: { name }, 'aria-label': `${name}: none` });
 
   const openSelect = () => {
@@ -176,6 +190,7 @@ export function userControl(item, field, saver) {
     const finish = (save) => {
       if (done) return;
       done = true;
+      stopOutside();
       const v = sel.value ? Number(sel.value) : null;
       if (save && v !== (current ?? null)) saver({ [field]: v });
       else sel.replaceWith(chip);
@@ -183,6 +198,7 @@ export function userControl(item, field, saver) {
     sel.addEventListener('change', () => finish(true));
     sel.addEventListener('blur', () => finish(false));
     sel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
+    const stopOutside = closeOnOutsidePointer(sel, () => finish(false));
     chip.replaceWith(sel);
     sel.focus();
     try { sel.showPicker?.(); } catch {}
@@ -196,19 +212,27 @@ export function userControl(item, field, saver) {
       const pressed = current === x.id;
       const b = el('button', {
         type: 'button', class: 'chip', title: pressed ? `${x.name}: click to clear` : x.name,
-        dataset: { user: String(x.id) }, 'aria-pressed': pressed ? 'true' : 'false',
+        dataset: { user: String(x.id), userName: x.name }, 'aria-pressed': pressed ? 'true' : 'false',
         style: { background: x.color, color: contrastText(x.color) },
-      }, x.name);
+      }, chipLabel(x));
       b.addEventListener('click', () => { done = true; saver({ [field]: pressed ? null : x.id }); });
       wrap.append(b);
     }
     wrap.addEventListener('focusout', (e) => { if (!wrap.contains(e.relatedTarget)) close(); });
     wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
     chip.replaceWith(wrap);
+    // The chips sit on one line; if they would overflow the cell, use the
+    // dropdown instead.
+    if (wrap.scrollWidth > wrap.clientWidth + 1) {
+      done = true;
+      wrap.replaceWith(chip);
+      openSelect();
+      return;
+    }
     (wrap.querySelector('[aria-pressed="true"]') || wrap.firstElementChild)?.focus();
   };
 
-  const open = state.users.length > CHIP_MAX_USERS ? openSelect : openChips;
+  const open = state.users.length ? openChips : openSelect;
   chip.addEventListener('click', open);
   chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
   return el('div', {}, chip);
@@ -224,8 +248,9 @@ function endDateClass(ymd) {
   return '';
 }
 
-/** Start / end date: a tilde toggle for "approximate" (not firm) before the
- *  date; the date text becomes a date input when clicked. */
+/** Start / end date: a toggle before the date shows "~" while the date is
+ *  approximate and a pin once it is firm; the date text becomes a date input
+ *  when clicked. */
 export function dateControl(item, field, saver, { highlight = false } = {}) {
   const dateKey = `${field}_date`, firmKey = `${field}_firm`;
   const value = item[dateKey];
@@ -234,10 +259,10 @@ export function dateControl(item, field, saver, { highlight = false } = {}) {
 
   const tilde = el('button', {
     type: 'button', name: firmKey, class: `firm-toggle ${firm ? 'firm' : 'approx'}`,
-    'aria-pressed': firm ? 'false' : 'true',
-    title: firm ? 'Firm date: it will not move. Click to mark it approximate.' : 'Approximate date: a best guess that may move. Click to mark it firm.',
+    'aria-pressed': firm ? 'true' : 'false', 'aria-label': firm ? 'Firm date' : 'Approximate date',
+    title: firm ? 'Firm date: it will not move. Click to mark it approximate (~).' : 'Approximate date (~): a best guess that may move. Click to pin it as firm.',
     hidden: value ? null : true,
-  }, '~');
+  }, firm ? '📌' : '~');
   tilde.addEventListener('click', () => saver({ [firmKey]: !firm }));
 
   const cls = ['date-text', value ? '' : 'empty', highlight && value && !isClosed(item.status) ? endDateClass(value) : ''].filter(Boolean).join(' ');
@@ -376,27 +401,54 @@ export function dependencyPanel(item, ctx) {
       const other = state.itemsById.get(id);
       if (!other) continue;
       const open = !isClosed(other.status);
-      const chip = el('span', { class: `dep-chip ${open ? 'open' : 'closed'}`, dataset: { id: other.id }, title: `${other.key} ${other.title} (${STATUS_LABEL[other.status] || other.status})` },
-        el('span', { class: 'dep-key' }, other.key), el('span', { class: 'dep-title' }, other.title),
-        el('button', { type: 'button', class: 'dep-remove', title: 'Remove dependency', 'aria-label': `Remove ${other.key}` }, '×'));
+      // Only the key shows; the title, status and description come up in a
+      // tooltip (the same one as the Matrix points) on mouseover.
+      const chip = el('span', { class: `dep-chip ${open ? 'open' : 'closed'}`, dataset: { id: other.id }, 'aria-label': `${other.key} ${other.title}` },
+        el('span', { class: 'dep-key' }, other.key),
+        el('button', { type: 'button', class: 'dep-remove', title: `Remove ${other.key} ${other.title}`, 'aria-label': `Remove ${other.key}` }, '×'));
+      const tip = itemTooltip();
+      chip.addEventListener('pointerenter', () => tip.show(other, chip));
+      chip.addEventListener('pointerleave', () => tip.hide());
       chip.querySelector('.dep-remove').addEventListener('click', async () => {
         const [a, b] = dir === 'blocked_by' ? [other.id, item.id] : [item.id, other.id];
         try { await api.removeDependency(a, b); await ctx.onChanged(); } catch (e) { toast(e.message); }
       });
       line.append(chip);
     }
-    const sel = el('select', { class: 'dep-add', 'aria-label': `Add to ${label}` }, el('option', { value: '' }, '+ add…'));
-    for (const c of candidates) {
-      if (ids.includes(c.id)) continue;
-      sel.append(el('option', { value: String(c.id) }, `${c.key} ${c.title}`));
-    }
-    sel.addEventListener('change', async () => {
-      if (!sel.value) return;
-      const other = Number(sel.value);
-      const [a, b] = dir === 'blocked_by' ? [other, item.id] : [item.id, other];
-      try { await api.addDependency(a, b); await ctx.onChanged(); } catch (e) { toast(e.message); sel.value = ''; }
+    // A small "+" that becomes the dropdown of candidates when clicked.
+    const addBtn = el('button', { type: 'button', class: 'dep-add-btn', title: `Add to ${label}…`, 'aria-label': `Add to ${label}` }, '+');
+    addBtn.addEventListener('click', () => {
+      const sel = el('select', { class: 'dep-add', 'aria-label': `Add to ${label}` }, el('option', { value: '' }, 'Choose an item…'));
+      for (const c of candidates) {
+        if (ids.includes(c.id)) continue;
+        sel.append(el('option', { value: String(c.id) }, `${c.key} ${c.title}`));
+      }
+      let done = false;
+      const finish = async (save) => {
+        if (done) return;
+        done = true;
+        stopOutside();
+        const v = sel.value ? Number(sel.value) : null;
+        if (!save || v == null) { sel.replaceWith(addBtn); return; }
+        const [a, b] = dir === 'blocked_by' ? [v, item.id] : [item.id, v];
+        try {
+          await api.addDependency(a, b);
+          await ctx.onChanged();
+        } catch (e) {
+          // A rejected cycle needs reading: show it for longer than usual.
+          toast(e.message, 8000);
+          sel.replaceWith(addBtn);
+        }
+      };
+      sel.addEventListener('change', () => finish(true));
+      sel.addEventListener('blur', () => finish(false));
+      sel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
+      const stopOutside = closeOnOutsidePointer(sel, () => finish(false));
+      addBtn.replaceWith(sel);
+      sel.focus();
+      try { sel.showPicker?.(); } catch {}
     });
-    line.append(sel);
+    line.append(addBtn);
     return line;
   };
   panel.append(
@@ -404,4 +456,98 @@ export function dependencyPanel(item, ctx) {
     row('Blocks', item.blocks || [], 'blocks'),
   );
   return panel;
+}
+
+// ---------------------------------------------------------------- attachments
+
+/** Types a browser can show itself: these open in a new tab, others download.
+ *  Mirrors the server's rule (Content-Disposition inline vs attachment). */
+export function isRenderable(contentType) {
+  const t = (contentType || '').split(';')[0].trim().toLowerCase();
+  return t.startsWith('image/') || t.startsWith('video/') || t.startsWith('audio/') || t.startsWith('text/')
+    || t === 'application/pdf' || t === 'application/json';
+}
+
+export function formatSize(n) {
+  if (n == null) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1048576).toFixed(1)} MB`;
+  return `${(n / 1073741824).toFixed(2)} GB`;
+}
+
+function fileIcon(contentType) {
+  const t = (contentType || '').toLowerCase();
+  if (t.startsWith('image/')) return '🖼';
+  if (t.startsWith('video/')) return '🎞';
+  if (t.startsWith('audio/')) return '🎵';
+  if (t === 'application/pdf') return '📄';
+  if (t.startsWith('text/') || t === 'application/json') return '📝';
+  if (/zip|compressed|tar|7z|rar/.test(t)) return '🗜';
+  return '📎';
+}
+
+/** "📎 3" after the title of an item with attachments; clicking expands the row. */
+export function attachmentBadge(item, onClick) {
+  const n = item.attachments?.length || 0;
+  if (!n) return null;
+  return el('button', {
+    type: 'button', class: 'attach-badge', dataset: { attachCount: n },
+    title: `${n} attachment${n === 1 ? '' : 's'}: click to show`, 'aria-label': `${n} attachment${n === 1 ? '' : 's'}`,
+    onClick: (e) => { e.stopPropagation(); onClick(); },
+  }, '📎', n > 1 ? el('span', { class: 'attach-count' }, String(n)) : null);
+}
+
+/** The attachments section of the expanded row: an "Attachments" header
+ *  with a "+" button (or drop files anywhere on the section) and, below it,
+ *  one chip per file (a link that opens renderable files in a new tab and
+ *  downloads the rest) with a remove button on each. */
+export function attachmentsPanel(item, ctx) {
+  if (isDraft(item)) return null;
+  const files = item.attachments || [];
+  const box = el('div', { class: 'attachments', dataset: { attachments: item.id } });
+  const list = el('div', { class: 'attach-list' });
+  for (const a of files) {
+    const renderable = isRenderable(a.content_type);
+    const link = el('a', {
+      class: 'attach-chip', href: `/api/attachments/${a.id}`, dataset: { attachment: a.id },
+      title: `${a.name} · ${formatSize(a.size)} · ${a.content_type}${renderable ? ' (opens in a new tab)' : ' (downloads)'}`,
+      target: renderable ? '_blank' : null, rel: renderable ? 'noopener' : null, download: renderable ? null : a.name,
+    }, el('span', { class: 'attach-icon', 'aria-hidden': 'true' }, fileIcon(a.content_type)),
+      el('span', { class: 'attach-name' }, a.name), el('span', { class: 'attach-size' }, formatSize(a.size)));
+    const rm = el('button', { type: 'button', class: 'attach-remove', title: 'Remove attachment (Ctrl+Z restores it)', 'aria-label': `Remove ${a.name}` }, '×');
+    rm.addEventListener('click', async () => {
+      try { await api.deleteAttachment(a.id, item.id, a.name); await ctx.onChanged(); } catch (e) { toast(e.message); }
+    });
+    list.append(el('span', { class: 'attach-item' }, link, rm));
+  }
+  const input = el('input', { type: 'file', multiple: true, name: 'attach-files', class: 'attach-input', 'aria-label': 'Attach files', tabindex: '-1' });
+  const add = el('button', { type: 'button', class: 'attach-add', title: 'Attach files of any type (or drop them here)', 'aria-label': 'Attach files' }, '+');
+  const status = el('span', { class: 'attach-status', hidden: true });
+  const upload = async (picked) => {
+    const all = [...picked].filter(Boolean);
+    const chosen = all.filter((f) => f.size > 0);
+    if (chosen.length < all.length) toast(`Skipped ${all.length - chosen.length} empty file(s)`);
+    if (!chosen.length) return;
+    add.disabled = true;
+    status.textContent = `Uploading ${chosen.length === 1 ? chosen[0].name : `${chosen.length} files`}…`;
+    status.hidden = false;
+    try {
+      await api.uploadAttachments(item.id, chosen);
+      await ctx.onChanged();
+    } catch (e) {
+      toast(e.message);
+      add.disabled = false;
+      status.hidden = true;
+    }
+  };
+  add.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => { upload(input.files); input.value = ''; });
+  // Files dragged from the desktop can be dropped on the strip.
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  box.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; box.classList.add('drop-files'); } });
+  box.addEventListener('dragleave', (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove('drop-files'); });
+  box.addEventListener('drop', (e) => { if (hasFiles(e)) { e.preventDefault(); e.stopPropagation(); box.classList.remove('drop-files'); upload(e.dataTransfer.files); } });
+  box.append(el('div', { class: 'attach-head' }, el('span', { class: 'attach-label' }, 'Attachments'), add, status, input), list);
+  return box;
 }

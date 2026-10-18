@@ -21,6 +21,13 @@
   }
 }
 
+/* Point colouring picker, in a strip above the plot (right-aligned). */
+.matrix-controls { display: flex; justify-content: flex-end; padding: 0 0 4px; }
+.matrix-controls select.matrix-color {
+  box-sizing: border-box; height: 22px; padding: 0 4px; font-size: 12px; line-height: 18px;
+  color: var(--fg-muted); background: var(--bg); cursor: pointer;
+}
+.matrix-controls select.matrix-color:hover { color: var(--fg); background: var(--bg-hover); }
 .matrix-plot-wrap { width: 100%; line-height: 0; }
 .matrix-plot {
   display: block;
@@ -98,43 +105,6 @@
 
 /* Table row highlighted from the plot. */
 .row.matrix-hover:not(.header) { background: var(--bg-hover); box-shadow: inset 3px 0 0 var(--accent); }
-
-/* ---- tooltip ---- */
-.matrix-tip {
-  position: fixed;
-  z-index: 50;
-  max-width: 360px;
-  min-width: 180px;
-  padding: 8px 10px;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-  font-size: 13px;
-  line-height: 1.35;
-  overflow: auto;
-  pointer-events: none;
-}
-.matrix-tip[hidden] { display: none; }
-.matrix-tip .tip-head { display: flex; gap: 8px; align-items: baseline; }
-.matrix-tip .tip-key { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); flex: none; }
-.matrix-tip .tip-title { font-weight: 600; }
-.matrix-tip .tip-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 4px;
-  color: var(--fg-muted);
-  font-size: 12px;
-}
-.matrix-tip .tip-meta b { color: var(--fg); font-variant-numeric: tabular-nums; }
-.matrix-tip .tip-blocked { color: var(--fg); background: var(--mask); padding: 0 6px; border-radius: 4px; }
-.matrix-tip .tip-desc {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
 
 /* dragging a point */
 .matrix-plot .pt { cursor: grab; }

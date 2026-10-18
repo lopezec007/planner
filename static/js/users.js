@@ -3,8 +3,9 @@
 // renderUsers(main, ctx)   ctx = { reload() } reloads state and re-renders.
 //
 // Each user is shown as a row: a chip preview (how the user appears in the
-// Owner/Assignee columns), an inline name input (Enter or blur saves), a colour
-// picker (saves when the picker closes) and a Delete button. Deleting a user
+// Owner/Assignee columns) with an input for its label (1-3 characters), an
+// inline name input (Enter or blur saves), a colour picker (saves when the
+// picker closes) and a Delete button. Deleting a user
 // that is still referenced by live items fails with the server's 409 message,
 // which is shown as a toast.
 
@@ -12,9 +13,11 @@ import { api } from './api.js';
 import { state } from './state.js';
 import { el, toast, contrastText } from './util.js';
 
-function chip(name, color) {
-  return el('span', { class: 'chip', style: { background: color, color: contrastText(color) }, title: name }, name);
+function chip(label, name, color) {
+  return el('span', { class: 'chip', style: { background: color, color: contrastText(color) }, title: name }, label);
 }
+
+export const SHORT_MAX = 3;
 
 function addForm(ctx) {
   const input = el('input', {
@@ -36,7 +39,28 @@ function addForm(ctx) {
 }
 
 function userRow(u, ctx) {
-  const preview = chip(u.name, u.color);
+  const preview = chip(u.short || u.name, u.name, u.color);
+
+  // The chip label: up to SHORT_MAX characters; Enter or blur saves.
+  const short = el('input', {
+    type: 'text', class: 'user-short', value: u.short || '', maxlength: String(SHORT_MAX), 'aria-label': `Chip label of ${u.name}`,
+    title: `The label on ${u.name}'s chip (1 to ${SHORT_MAX} characters)`, autocomplete: 'off', spellcheck: 'false',
+    onInput: () => { preview.textContent = short.value.trim() || u.short; },
+    onChange: async () => {
+      const next = short.value.trim();
+      if (!next || [...next].length > SHORT_MAX) { short.value = u.short; preview.textContent = u.short; toast(`The chip label must be 1 to ${SHORT_MAX} characters.`); return; }
+      if (next === u.short) { short.value = u.short; return; }
+      try {
+        await api.updateUser(u.id, { short: next });
+        await ctx.reload();
+      } catch (err) {
+        short.value = u.short;
+        preview.textContent = u.short;
+        toast(err.message);
+      }
+    },
+    onKeydown: (e) => { if (e.key === 'Escape') { short.value = u.short; preview.textContent = u.short; short.blur(); } if (e.key === 'Enter') short.blur(); },
+  });
 
   const name = el('input', {
     type: 'text', class: 'user-name', value: u.name, 'aria-label': `Name of ${u.name}`, maxlength: '255',
@@ -85,7 +109,7 @@ function userRow(u, ctx) {
   }, '🗑');
 
   return el('div', { class: 'user-row', dataset: { userId: u.id } },
-    el('div', { class: 'user-preview' }, preview),
+    el('div', { class: 'user-preview' }, preview, short),
     el('div', {}, name),
     el('div', { class: 'user-color-cell' }, color, el('code', { class: 'user-hex' }, u.color)),
     el('div', { class: 'user-actions' }, del),
@@ -96,7 +120,7 @@ export function renderUsers(main, ctx) {
   const page = el('div', { class: 'users-page' },
     el('div', { class: 'users-head' },
       el('h2', {}, 'Users'),
-      el('p', { class: 'users-hint' }, 'Each user gets a colour, used to highlight the Owner and Assignee columns. Click a name to rename it.'),
+      el('p', { class: 'users-hint' }, 'Each user gets a colour and a short chip label (up to three characters), used in the Owner and Assignee columns. Click a label or a name to edit it.'),
     ),
     addForm(ctx),
   );

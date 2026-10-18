@@ -7,6 +7,7 @@
   --fg: #1c1f24;
   --fg-muted: #6b7280;
   --border: #d9dde3;
+  --border-strong: #9aa3ad; /* rule above Ongoing/Project rows */
   --accent: #2f6fdb;
   --accent-fg: #ffffff;
   --orange: #e8891c;
@@ -14,6 +15,7 @@
   --red: #d62828;
   --red-bg: rgba(214, 40, 40, 0.18);
   --mask: rgba(128, 128, 128, 0.45);
+  --code-bg: rgba(100, 110, 125, 0.16); /* inline code and code blocks in markdown: visibly darker than the page */
   --radius: 6px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -36,6 +38,7 @@
     --fg: #e6e8eb;
     --fg-muted: #9aa3ad;
     --border: #353a43;
+    --border-strong: #6b7380;
     --accent: #6ea0ff;
     --accent-fg: #0b1220;
     --orange: #f3a24a;
@@ -43,6 +46,7 @@
     --red: #ff5c5c;
     --red-bg: rgba(255, 92, 92, 0.22);
     --mask: rgba(60, 60, 60, 0.55);
+    --code-bg: rgba(255, 255, 255, 0.11);
   }
 }
 
@@ -76,7 +80,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .topbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-alt);
@@ -89,13 +93,23 @@ button:disabled { opacity: 0.5; cursor: default; }
   background: transparent; border: 1px solid transparent; color: var(--fg);
 }
 .icon-btn:hover { background: var(--bg-hover); border-color: var(--border); }
-.toolbar { display: flex; gap: 8px; align-items: center; flex: 1; flex-wrap: wrap; }
+.toolbar { display: flex; gap: 6px; align-items: center; flex: 1; flex-wrap: wrap; }
 .toolbar .spacer { flex: 1; }
-.toolbar .version { color: var(--fg-muted); font-size: 12px; font-family: var(--mono); padding: 0 4px; cursor: help; }
+.version { color: var(--fg-muted); font-size: 12px; font-family: var(--mono); padding: 0 4px; cursor: help; }
 .toolbar .group { display: flex; gap: 0; }
 .toolbar .group button { border-radius: 0; }
 .toolbar .group button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
 .toolbar .group button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+/* Icon-only toolbar buttons (see js/icons.js): the words live in aria-label
+   and the mouseover title. */
+.toolbar button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 30px; }
+.toolbar button > .icon { display: block; }
+.toolbar .search-badge { margin-left: 2px; }
+.key-glyph { font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.02em; }
+.toolbar button.primary .key-glyph { color: var(--accent-fg); }
+/* Account menu at the far right: who is using this browser (preferences follow it). */
+.account { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.account-select { max-width: 130px; padding: 3px 4px; font-size: 13px; cursor: pointer; }
 
 main { padding: 12px 16px; flex: 1; }
 .empty { color: var(--fg-muted); padding: 24px; text-align: center; }
@@ -115,7 +129,7 @@ main { padding: 12px 16px; flex: 1; }
    One grid template for every row so the shared columns line up across
    parents and tasks. Task key and title cells are indented via padding. */
 .table {
-  --cols: 28px 92px minmax(220px, 1fr) 110px 120px 120px 150px 150px 44px 44px 80px 96px;
+  --cols: 28px 92px minmax(220px, 1fr) 110px 136px 136px 150px 150px 44px 44px 80px 96px;
   --indent: 26px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -123,13 +137,11 @@ main { padding: 12px 16px; flex: 1; }
 }
 .table.title-only { --cols: 28px 92px minmax(200px, 1fr); }
 /* Flat: tasks only, with the parent's key and title as leading columns. */
-.table.flat { --cols: 28px 72px 72px minmax(150px, 0.8fr) minmax(200px, 1.2fr) 110px 120px 120px 150px 150px 44px 44px 80px 96px; }
+.table.flat { --cols: 28px 72px 72px minmax(150px, 0.8fr) minmax(200px, 1.2fr) 110px 136px 136px 150px 150px 44px 44px 80px 96px; }
 .table.flat.title-only { --cols: 28px 72px 72px minmax(140px, 0.8fr) minmax(180px, 1.2fr); }
 .table.flat .row.task .key, .table.flat .row.task .title, .table.flat .row.kind-task > .title { padding-left: 8px; }
 .row .parent-ref { color: var(--fg-muted); font-weight: 400; }
 .row.header .parent-ref { font-weight: 600; }
-.table.flat .row.description > .deps-cell { grid-column: 6 / -1; }
-.table.flat.title-only .row.description > .deps-cell { grid-column: 5 / -1; }
 /* Collapse caret on parent rows (hides their tasks). */
 .caret { flex: 0 0 auto; border: none; background: transparent; padding: 0 6px 0 0; color: var(--fg-muted); cursor: pointer; font-size: 11px; line-height: 1; }
 .caret::before { content: "▾"; display: inline-block; }
@@ -153,14 +165,22 @@ main { padding: 12px 16px; flex: 1; }
 .row:first-child { border-top: none; }
 .row > * { padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; min-width: 0; }
 .row.parent { font-weight: 600; }
-.row.parent[data-type="ongoing"] { background: color-mix(in srgb, var(--row-ongoing) 16%, var(--bg)); }
-.row.parent[data-type="project"] { background: color-mix(in srgb, var(--row-project) 16%, var(--bg)); }
-.row.task { background: color-mix(in srgb, var(--row-task) 12%, var(--bg)); }
+/* Row tints come from --row-color: the type colour from Settings by default;
+   table.js sets it inline to an Ongoing's/Project's own colour, and to the
+   parent's colour on task rows when that preference is on (see colors.js). */
+.row.parent[data-type="ongoing"] { --row-color: var(--row-ongoing); }
+.row.parent[data-type="project"] { --row-color: var(--row-project); }
+.row.parent { background: color-mix(in srgb, var(--row-color, transparent) 16%, var(--bg)); }
+.row.task { --row-color: var(--row-task); background: color-mix(in srgb, var(--row-color) 12%, var(--bg)); }
 .row.header {
   background: var(--bg-alt); color: var(--fg-muted); font-weight: 600; font-size: 12px;
   text-transform: uppercase; letter-spacing: 0.02em; min-height: 36px;
 }
 .row:not(.header):not(.editing):not(.edit-detail):hover { background: var(--bg-hover); }
+/* An expanded row and its detail row below highlight together: hovering
+   either one lights up the other. */
+.row.expanded:not(.editing):hover + .row.description,
+.row.expanded:not(.editing):has(+ .row.description:hover) { background: var(--bg-hover); }
 .row.task .key, .row.task .title, .row.kind-task > .title { padding-left: calc(8px + var(--indent)); }
 .row .key { font-family: var(--mono); color: var(--fg-muted); font-size: 12px; }
 .row .title { white-space: nowrap; }
@@ -183,14 +203,57 @@ main { padding: 12px 16px; flex: 1; }
   font-weight: normal;
   align-items: start;
 }
-.row.description > .title { white-space: normal; padding-top: 0; padding-bottom: 10px; overflow: visible; }
-.md > :first-child { margin-top: 0; }
-.md > :last-child { margin-bottom: 0; }
-.md p { margin: 0.4em 0; }
-.md pre { background: var(--bg-alt); padding: 8px; border-radius: var(--radius); overflow-x: auto; }
-.md code { font-family: var(--mono); font-size: 0.92em; }
+.row.description > .title { white-space: normal; padding-top: 0; padding-bottom: 8px; overflow: visible; }
+/* Rendered markdown (descriptions, tooltips): dense, after the Standard
+   Notes editor: no space inside lists, a hairline between blocks, modest
+   headings, a compact indent, and code/quote/table blocks that hug their
+   content. Single newlines are line breaks (see js/markdown.js). */
+.md { line-height: 1.35; }
+.md > :first-child { margin-top: 0 !important; }
+.md > :last-child { margin-bottom: 0 !important; }
+.md p, .md ul, .md ol, .md blockquote, .md pre, .md table, .md hr { margin: 0.2em 0; }
+.md ul, .md ol { padding-left: 1.4em; }
+.md li, .md li > p, .md li > ul, .md li > ol { margin: 0; }
+.md li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.4em; }
+.md input[type="checkbox"] { margin: 0 5px 0 0; vertical-align: -1px; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 0.45em 0 0.1em; line-height: 1.25; font-weight: 700; }
+.md h1 { font-size: 1.2em; }
+.md h2 { font-size: 1.1em; }
+.md h3 { font-size: 1.03em; }
+.md h4, .md h5, .md h6 { font-size: 1em; }
+.md pre { background: var(--code-bg); border: 1px solid var(--border); padding: 5px 8px; border-radius: 4px; overflow-x: auto; line-height: 1.3; }
+.md code { font-family: var(--mono); font-size: 0.9em; }
+.md :not(pre) > code { padding: 0 4px; border-radius: 3px; background: var(--code-bg); }
+.md blockquote { padding: 0 0 0 10px; border-left: 3px solid var(--border-strong); color: var(--fg-muted); }
+.md blockquote > :first-child { margin-top: 0; }
+.md blockquote > :last-child { margin-bottom: 0; }
 .md table { border-collapse: collapse; }
-.md th, .md td { border: 1px solid var(--border); padding: 2px 6px; }
+.md th, .md td { border: 1px solid var(--border); padding: 1px 6px; }
+.md hr { border: 0; border-top: 1px solid var(--border); }
+.md img { max-width: 100%; }
+
+/* ---------- Ongoing / Project colour swatch (js/swatch.js) ---------- */
+.color-swatch {
+  flex: 0 0 auto; width: 12px; height: 12px; margin-right: 7px; padding: 0;
+  border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.25); background: transparent; cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+}
+.color-swatch.none { border: 1px dashed var(--fg-muted); }
+.color-swatch:hover { transform: scale(1.25); border-color: var(--fg); }
+.color-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.row.closed .color-swatch { opacity: 0.6; }
+.color-pop {
+  position: fixed; z-index: 60; padding: 8px; width: 196px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); font-size: 12px; font-weight: normal; white-space: normal;
+}
+.color-grid { display: grid; grid-template-columns: repeat(6, 24px); gap: 6px; }
+.color-opt { width: 24px; height: 24px; padding: 0; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.color-opt:hover { transform: scale(1.12); }
+.color-opt[aria-pressed="true"] { border-color: var(--fg); box-shadow: 0 0 0 2px var(--bg) inset; }
+.color-actions { display: flex; gap: 6px; margin-top: 8px; position: relative; }
+.color-actions button { font-size: 12px; padding: 2px 8px; flex: 1 1 auto; }
+.color-custom-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; left: 0; bottom: 0; }
 
 /* ---------- highlighting ---------- */
 .chip {
@@ -234,3 +297,30 @@ main { padding: 12px 16px; flex: 1; }
 .status.done::before { color: #59a14f; }
 .status.cancelled::before { color: #888; }
 
+
+/* ---------- item tooltip (js/tooltip.js): Matrix points and dependency chips ---------- */
+.item-tip {
+  position: fixed;
+  z-index: 50;
+  max-width: 360px;
+  min-width: 180px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: auto;
+  pointer-events: none;
+}
+.item-tip[hidden] { display: none; }
+.item-tip .tip-head { display: flex; gap: 8px; align-items: baseline; }
+.item-tip .tip-key { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); flex: none; }
+.item-tip .tip-title { font-weight: 600; }
+.item-tip .tip-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; color: var(--fg-muted); font-size: 12px; }
+.item-tip .tip-meta b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.item-tip .tip-dates { font-variant-numeric: tabular-nums; }
+.item-tip .tip-blocked { color: var(--fg); background: var(--mask); padding: 0 6px; border-radius: 4px; }
+.item-tip .tip-desc { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }

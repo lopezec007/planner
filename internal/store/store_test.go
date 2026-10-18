@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +75,8 @@ func TestDefaultsAndValidation(t *testing.T) {
 		{"bad date", TypeProject, Patch{Title: str("x"), EndDate: str("01/02/2026")}},
 		{"urgency range", TypeTask, Patch{Title: str("x"), ParentID: i64(o.ID), Urgency: in(11)}},
 		{"missing owner", TypeTask, Patch{Title: str("x"), ParentID: i64(o.ID), OwnerID: i64(999)}},
+		{"task with colour", TypeTask, Patch{Title: str("x"), ParentID: i64(o.ID), Color: str("#112233")}},
+		{"bad colour", TypeProject, Patch{Title: str("x"), Color: str("red")}},
 	}
 	for _, c := range cases {
 		_, err := s.CreateItem(NewItem{Type: c.typ, Patch: c.p})
@@ -84,9 +87,59 @@ func TestDefaultsAndValidation(t *testing.T) {
 	}
 }
 
+func TestItemColor(t *testing.T) {
+	s := openTest(t)
+	p := mustCreate(t, s, TypeProject, Patch{Title: str("Plain")})
+	if p.Color != "" {
+		t.Fatalf("new items have no colour of their own, got %q", p.Color)
+	}
+	p2 := mustCreate(t, s, TypeProject, Patch{Title: str("Teal"), Color: str("#2a9d8f")})
+	if p2.Color != "#2a9d8f" {
+		t.Fatalf("colour on create: %q", p2.Color)
+	}
+	p2, err := s.UpdateItem(p2.ID, Patch{Color: str("#AABBCC")})
+	if err != nil || p2.Color != "#AABBCC" {
+		t.Fatalf("colour update: %q %v", p2.Color, err)
+	}
+	p2, err = s.UpdateItem(p2.ID, Patch{Color: str("")})
+	if err != nil || p2.Color != "" {
+		t.Fatalf("colour clear: %q %v", p2.Color, err)
+	}
+	var ve *ValidationError
+	if _, err := s.UpdateItem(p2.ID, Patch{Color: str("#12")}); !errors.As(err, &ve) {
+		t.Fatalf("bad colour: %v", err)
+	}
+	tk := mustCreate(t, s, TypeTask, Patch{Title: str("T"), ParentID: i64(p.ID)})
+	if _, err := s.UpdateItem(tk.ID, Patch{Color: str("#112233")}); !errors.As(err, &ve) {
+		t.Fatalf("task colour: %v", err)
+	}
+	items, _ := s.ListItems()
+	if items[1].Color != "" || items[0].Title != "Plain" {
+		t.Fatalf("list: %+v", items)
+	}
+}
+
+func TestColorColumnAdded(t *testing.T) {
+	s := openTest(t)
+	mustCreate(t, s, TypeOngoing, Patch{Title: str("old")})
+	if _, err := s.db.Exec(`ALTER TABLE items DROP COLUMN color`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(); err != nil {
+		t.Fatal(err)
+	}
+	items, err := s.ListItems()
+	if err != nil || len(items) != 1 || items[0].Color != "" {
+		t.Fatalf("after adding the column: %+v %v", items, err)
+	}
+	if _, err := s.UpdateItem(items[0].ID, Patch{Color: str("#123456")}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAssigneeSetAndClear(t *testing.T) {
 	s := openTest(t)
-	u, _ := s.CreateUser("Evan", "")
+	u, _ := s.CreateUser("Evan", "", "")
 	p := mustCreate(t, s, TypeProject, Patch{Title: str("P"), AssigneeID: i64(u.ID)})
 	if p.AssigneeID == nil || *p.AssigneeID != u.ID {
 		t.Fatal("assignee should be user")
@@ -232,24 +285,53 @@ func TestReparentMovesToEnd(t *testing.T) {
 
 func TestUsers(t *testing.T) {
 	s := openTest(t)
-	u1, err := s.CreateUser("Evan", "")
+	u1, err := s.CreateUser("Evan", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	u2, _ := s.CreateUser("Sam", "")
+	u2, _ := s.CreateUser("Sam", "", "")
 	if u1.Color == "" || u1.Color == u2.Color {
 		t.Fatal("auto colours should differ")
 	}
-	if _, err := s.CreateUser("evan", ""); err == nil {
+	if _, err := s.CreateUser("evan", "", ""); err == nil {
 		t.Fatal("case-insensitive duplicate should fail")
 	}
-	if _, err := s.CreateUser("Z", "red"); err == nil {
+	if _, err := s.CreateUser("Z", "red", ""); err == nil {
 		t.Fatal("bad colour should fail")
 	}
-	u1, _ = s.UpdateUser(u1.ID, nil, str("#112233"))
+	u1, _ = s.UpdateUser(u1.ID, nil, str("#112233"), nil)
 	if u1.Color != "#112233" {
 		t.Fatal("colour not updated")
 	}
+	// Chip labels: derived from the name by default, 1-3 characters when set.
+	if u1.Short != "Eva" || u2.Short != "Sam" {
+		t.Fatalf("default short labels: %q %q", u1.Short, u2.Short)
+	}
+	rl, err := s.CreateUser("Robin Lee", "", "")
+	if err != nil || rl.Short != "RL" {
+		t.Fatalf("initials: %+v %v", rl, err)
+	}
+	if u, err := s.CreateUser("Émilie Dupont-Smith", "", " éd "); err != nil || u.Short != "éd" {
+		t.Fatalf("given short: %+v %v", u, err)
+	}
+	if _, err := s.CreateUser("Four", "", "FOUR"); err == nil {
+		t.Fatal("4-character short should fail")
+	}
+	u1, err = s.UpdateUser(u1.ID, nil, nil, str("EV"))
+	if err != nil || u1.Short != "EV" {
+		t.Fatalf("short update: %+v %v", u1, err)
+	}
+	u1, _ = s.UpdateUser(u1.ID, str("Evan Lopez"), nil, nil)
+	if u1.Short != "EV" {
+		t.Fatal("renaming must keep the chip label")
+	}
+	for _, bad := range []string{"", "   ", "ABCD"} {
+		var ve *ValidationError
+		if _, err := s.UpdateUser(u1.ID, nil, nil, str(bad)); !errors.As(err, &ve) {
+			t.Errorf("short %q: expected validation error, got %v", bad, err)
+		}
+	}
+	s.DeleteUser(rl.ID)
 	p := mustCreate(t, s, TypeProject, Patch{Title: str("p"), OwnerID: i64(u1.ID)})
 	if err := s.DeleteUser(u1.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected conflict, got %v", err)
@@ -259,8 +341,24 @@ func TestUsers(t *testing.T) {
 		t.Fatalf("delete after item deleted: %v", err)
 	}
 	us, _ := s.ListUsers()
-	if len(us) != 1 {
-		t.Fatalf("expected 1 user, got %d", len(us))
+	if len(us) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(us))
+	}
+}
+
+func TestShortColumnAdded(t *testing.T) {
+	s := openTest(t)
+	s.CreateUser("Evan", "", "")
+	s.CreateUser("Robin Lee", "", "")
+	if _, err := s.db.Exec(`ALTER TABLE users DROP COLUMN short`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(); err != nil {
+		t.Fatal(err)
+	}
+	us, _ := s.ListUsers()
+	if len(us) != 2 || us[0].Short != "Eva" || us[1].Short != "RL" {
+		t.Fatalf("defaults after adding the column: %+v", us)
 	}
 }
 
@@ -480,5 +578,235 @@ func TestBackupBeforeMigration(t *testing.T) {
 	defer s3.Close()
 	if s3.LastBackup != "" {
 		t.Fatalf("no backup expected when up to date, got %s", s3.LastBackup)
+	}
+}
+
+func TestUserPrefs(t *testing.T) {
+	s := openTest(t)
+	u, _ := s.CreateUser("Evan", "", "")
+	prefs, err := s.UserPrefs(u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prefs) != len(PrefDefaults) || prefs["view"] != "table" || prefs["sort"] != "[]" || prefs["bar_color"] != "assignee" {
+		t.Fatalf("defaults: %v", prefs)
+	}
+	prefs, err = s.UpdateUserPrefs(u.ID, map[string]string{
+		"view": "timeline", "narrow": "1", "collapsed": "[3, 7]",
+		"sort": `[{"key":"end","dir":"asc"},{"key":"title","dir":"desc"}]`, "bar_color": "combo", "hidden_cols": `["owner","urgency"]`,
+		"parent_colors": "type", "task_colors": "parent", "point_color": "parent",
+		"filters": `{"types":["task"],"statuses":["todo","in-progress"],"recent_days":14,"hide_empty_parents":true,"owner":"3","assignee":"none","blocked":"yes","end_after":"2026-01-01","end_before":""}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prefs["view"] != "timeline" || prefs["narrow"] != "1" || prefs["collapsed"] != "[3, 7]" || prefs["bar_color"] != "combo" || prefs["flat"] != "0" || prefs["hidden_cols"] != `["owner","urgency"]` ||
+		prefs["parent_colors"] != "type" || prefs["task_colors"] != "parent" || prefs["point_color"] != "parent" {
+		t.Fatalf("updated: %v", prefs)
+	}
+	if _, err := s.UpdateUserPrefs(u.ID, map[string]string{"bar_color": "parent", "filters": ""}); err != nil {
+		t.Fatalf("bar_color parent / empty filters: %v", err)
+	}
+	// Upsert replaces, and other keys are untouched.
+	prefs, _ = s.UpdateUserPrefs(u.ID, map[string]string{"view": "matrix"})
+	if prefs["view"] != "matrix" || prefs["narrow"] != "1" {
+		t.Fatalf("second update: %v", prefs)
+	}
+	bad := []map[string]string{
+		{"nope": "x"},
+		{"view": "kanban"},
+		{"narrow": "yes"},
+		{"flat": "2"},
+		{"blocked_last": ""},
+		{"collapsed": "[1,"},
+		{"collapsed": `["a"]`},
+		{"collapsed": "[1.5]"},
+		{"collapsed": "{}"},
+		{"sort": "not json"},
+		{"sort": `[{"key":"title"}]`},
+		{"sort": `[{"key":"colour","dir":"asc"}]`},
+		{"sort": `[{"key":"title","dir":"up"}]`},
+		{"sort": `[{"key":"title","dir":"asc","extra":1}]`},
+		{"sort": `[` + strings.Repeat(`{"key":"title","dir":"asc"},`, 12) + `{"key":"key","dir":"asc"}]`},
+		{"bar_color": "red"},
+		{"hidden_cols": "nope"},
+		{"hidden_cols": `["title"]`},
+		{"parent_colors": "own"},
+		{"task_colors": "1"},
+		{"point_color": "combo"},
+		{"filters": "nope"},
+		{"filters": `{"types":["epic"]}`},
+		{"filters": `{"statuses":["open"]}`},
+		{"filters": `{"recent_days":400}`},
+		{"filters": `{"owner":"bob"}`},
+		{"filters": `{"blocked":"maybe"}`},
+		{"filters": `{"end_after":"tomorrow"}`},
+		{"filters": `{"text":"x"}`},
+		// One bad key fails the whole batch.
+		{"view": "table", "nope": "x"},
+	}
+	for _, c := range bad {
+		var ve *ValidationError
+		if _, err := s.UpdateUserPrefs(u.ID, c); !errors.As(err, &ve) {
+			t.Errorf("%v: expected validation error, got %v", c, err)
+		}
+	}
+	prefs, _ = s.UserPrefs(u.ID)
+	if prefs["view"] != "matrix" {
+		t.Fatalf("failed batch should not write: %v", prefs)
+	}
+	big := make([]string, MaxCollapsed+1)
+	for i := range big {
+		big[i] = "1"
+	}
+	var ve *ValidationError
+	if _, err := s.UpdateUserPrefs(u.ID, map[string]string{"collapsed": "[" + strings.Join(big, ",") + "]"}); !errors.As(err, &ve) {
+		t.Fatalf("oversized collapsed: %v", err)
+	}
+	if _, err := s.UserPrefs(999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown user: %v", err)
+	}
+	if _, err := s.UpdateUserPrefs(999, map[string]string{"view": "table"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown user update: %v", err)
+	}
+	// Prefs go with the user.
+	if err := s.DeleteUser(u.ID); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	s.db.QueryRow(`SELECT COUNT(*) FROM user_prefs WHERE user_id = ?`, u.ID).Scan(&n)
+	if n != 0 {
+		t.Fatalf("expected prefs to be removed with the user, %d left", n)
+	}
+}
+
+func TestAttachments(t *testing.T) {
+	s := openTest(t)
+	p := mustCreate(t, s, TypeProject, Patch{Title: str("P")})
+	png := []byte("\x89PNG\r\n\x1a\n...")
+	a, err := s.AddAttachment(p.ID, "  ../../etc/passwd ", "", png)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Name != "passwd" || a.ContentType != "application/octet-stream" || a.Size != int64(len(png)) || a.ItemID != p.ID || a.CreatedAt == "" {
+		t.Fatalf("attachment: %+v", a)
+	}
+	b, err := s.AddAttachment(p.ID, `C:\Users\evan\report.pdf`, "application/pdf", []byte("%PDF-1.4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Name != "report.pdf" || b.ContentType != "application/pdf" {
+		t.Fatalf("attachment: %+v", b)
+	}
+
+	// Items carry the metadata, oldest first, from both GetItem and ListItems.
+	got, _ := s.GetItem(p.ID)
+	if len(got.Attachments) != 2 || got.Attachments[0].ID != a.ID || got.Attachments[1].ID != b.ID {
+		t.Fatalf("item attachments: %+v", got.Attachments)
+	}
+	other := mustCreate(t, s, TypeProject, Patch{Title: str("other")})
+	items, _ := s.ListItems()
+	for _, it := range items {
+		switch it.ID {
+		case p.ID:
+			if len(it.Attachments) != 2 || it.Attachments[1].Name != "report.pdf" {
+				t.Fatalf("list attachments: %+v", it.Attachments)
+			}
+		case other.ID:
+			if it.Attachments == nil || len(it.Attachments) != 0 {
+				t.Fatalf("other should have an empty, non-nil slice: %#v", it.Attachments)
+			}
+		}
+	}
+	list, err := s.ListAttachments(p.ID)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("list: %v %v", list, err)
+	}
+
+	// Bytes come back intact.
+	ga, data, err := s.GetAttachment(a.ID)
+	if err != nil || ga.Name != "passwd" || string(data) != string(png) {
+		t.Fatalf("get: %+v %q %v", ga, data, err)
+	}
+
+	// Validation.
+	cases := []struct {
+		name  string
+		item  int64
+		fname string
+		data  []byte
+	}{
+		{"empty file", p.ID, "x.txt", nil},
+		{"blank name", p.ID, "   ", []byte("x")},
+		{"directory only", p.ID, "dir/", []byte("x")},
+		{"long name", p.ID, strings.Repeat("a", 256), []byte("x")},
+		{"oversize", p.ID, "big.bin", make([]byte, MaxAttachmentSize+1)},
+	}
+	for _, c := range cases {
+		var ve *ValidationError
+		if _, err := s.AddAttachment(c.item, c.fname, "", c.data); !errors.As(err, &ve) {
+			t.Errorf("%s: expected validation error, got %v", c.name, err)
+		}
+	}
+	if _, err := s.AddAttachment(999, "x.txt", "", []byte("x")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing item: %v", err)
+	}
+	if _, err := s.ListAttachments(999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("list missing item: %v", err)
+	}
+
+	// Delete hides; restore brings back; both idempotent in the documented way.
+	if err := s.DeleteAttachment(a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.GetAttachment(a.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted attachment should be hidden: %v", err)
+	}
+	if err := s.DeleteAttachment(a.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("double delete: %v", err)
+	}
+	got, _ = s.GetItem(p.ID)
+	if len(got.Attachments) != 1 || got.Attachments[0].ID != b.ID {
+		t.Fatalf("after delete: %+v", got.Attachments)
+	}
+	if err := s.RestoreAttachment(a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RestoreAttachment(a.ID); err != nil {
+		t.Fatal("restoring a live attachment is a no-op")
+	}
+	if err := s.RestoreAttachment(999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("restore missing: %v", err)
+	}
+	got, _ = s.GetItem(p.ID)
+	if len(got.Attachments) != 2 {
+		t.Fatalf("after restore: %+v", got.Attachments)
+	}
+
+	// A deleted item hides its attachments and blocks restoring them.
+	if err := s.DeleteAttachment(b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteItem(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.GetAttachment(a.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("attachment of deleted item: %v", err)
+	}
+	if _, err := s.ListAttachments(p.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("list of deleted item: %v", err)
+	}
+	if _, err := s.AddAttachment(p.ID, "x.txt", "", []byte("x")); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("add to deleted item: %v", err)
+	}
+	var ve *ValidationError
+	if err := s.RestoreAttachment(b.ID); !errors.As(err, &ve) {
+		t.Fatalf("restore under deleted item: %v", err)
+	}
+	if err := s.RestoreItem(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.GetAttachment(a.ID); err != nil {
+		t.Fatalf("attachment should be back with its item: %v", err)
 	}
 }

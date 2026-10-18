@@ -92,9 +92,14 @@
   right: 0;
   border-top: 1px solid var(--border);
 }
-.timeline-row.ongoing { background: color-mix(in srgb, var(--row-ongoing) 16%, var(--bg)); }
-.timeline-row.project { background: color-mix(in srgb, var(--row-project) 16%, var(--bg)); }
-.timeline-row.task { background: color-mix(in srgb, var(--row-task) 12%, var(--bg)); }
+/* Bands are tinted like the table rows (--row-color, see app.css; timeline.js
+   sets an item's own or its parent's colour inline the same way). */
+.timeline-row.ongoing { --row-color: var(--row-ongoing); }
+.timeline-row.project { --row-color: var(--row-project); }
+.timeline-row.parent { background: color-mix(in srgb, var(--row-color, transparent) 16%, var(--bg)); }
+/* Parent bands get the same heavier top rule as the table's parent rows. */
+.timeline-row.parent { border-top: 2px solid var(--border-strong); }
+.timeline-row.task { --row-color: var(--row-task); background: color-mix(in srgb, var(--row-color) 12%, var(--bg)); }
 .timeline-row:hover { background: var(--bg-hover) !important; }
 
 /* ---- bars ---- */
@@ -203,6 +208,52 @@
 }
 .timeline-controls button { padding: 1px 7px; font-size: 13px; line-height: 18px; }
 .timeline-controls button.icon { min-width: 24px; font-weight: 600; }
+/* Bar colouring mode picker, left of the zoom buttons; same height as them. */
+.timeline-controls select.timeline-color {
+  box-sizing: border-box;
+  height: 22px;
+  margin-right: 4px;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fg-muted);
+  background: var(--bg);
+  cursor: pointer;
+}
+.timeline-controls select.timeline-color:hover { color: var(--fg); background: var(--bg-hover); }
+
+/* ---- legend for the bar colours (ramps and the combo corners); floats
+   under the controls, never catches the pointer ---- */
+.timeline-legend {
+  position: absolute;
+  top: 34px;
+  right: 6px;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px 8px;
+  max-width: calc(100% - 12px);
+  padding: 3px 6px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+}
+.timeline-legend.importance, .timeline-legend.urgency { gap: 2px 4px; }
+.timeline-legend-item { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.timeline-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+.timeline-legend-label { font-variant-numeric: tabular-nums; }
 
 /* ---- tooltip ---- */
 .timeline-tooltip {

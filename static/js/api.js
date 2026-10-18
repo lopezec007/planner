@@ -10,7 +10,9 @@ import { state } from './state.js';
 
 async function req(method, path, body) {
   const opts = { method, headers: {} };
-  if (body !== undefined) {
+  if (body instanceof FormData) {
+    opts.body = body; // the browser sets the multipart boundary
+  } else if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
@@ -26,6 +28,9 @@ const raw = {
   createUser: (body) => req('POST', '/api/users', body),
   updateUser: (id, body) => req('PATCH', `/api/users/${id}`, body),
   deleteUser: (id) => req('DELETE', `/api/users/${id}`),
+  // Per-user preferences (see prefs.js): {key: value}; PATCH returns the full map
+  getUserPrefs: (id) => req('GET', `/api/users/${id}/prefs`),
+  updateUserPrefs: (id, body) => req('PATCH', `/api/users/${id}/prefs`, body),
 
   listItems: () => req('GET', '/api/items'),
   getItem: (id) => req('GET', `/api/items/${id}`),
@@ -42,6 +47,17 @@ const raw = {
   removeDependency: (blockerId, blockedId) => req('DELETE', `/api/dependencies/${blockerId}/${blockedId}`),
 
   restoreItem: (id) => req('POST', `/api/items/${id}/restore`),
+
+  // Attachments: files stored with an item. Upload takes File objects and
+  // returns the created metadata; the bytes are at /api/attachments/{id}.
+  listAttachments: (itemId) => req('GET', `/api/items/${itemId}/attachments`),
+  uploadAttachments: (itemId, files) => {
+    const form = new FormData();
+    for (const f of files) form.append('file', f, f.name);
+    return req('POST', `/api/items/${itemId}/attachments`, form);
+  },
+  deleteAttachment: (id) => req('DELETE', `/api/attachments/${id}`),
+  restoreAttachment: (id) => req('POST', `/api/attachments/${id}/restore`),
   getVersion: () => req('GET', '/api/version'),
   getSettings: () => req('GET', '/api/settings'),
   // body: {key: value, ...}; returns the full settings
@@ -113,6 +129,12 @@ export const api = {
     await raw.reorder(ids);
     record('reordering', () => raw.reorder(prevOrder));
   },
+  /** Record the current order of a parent's tasks (null: the top level) as
+   *  an undo step, for changes that move an item away from its siblings. */
+  rememberOrder(parentId) {
+    const ids = state.items.filter((i) => (i.parent_id ?? null) === (parentId ?? null)).map((i) => i.id);
+    if (ids.length) record('reordering', () => raw.reorder(ids));
+  },
   async addDependency(blockerId, blockedId) {
     await raw.addDependency(blockerId, blockedId);
     record(`adding a dependency to ${label(blockedId)}`, () => raw.removeDependency(blockerId, blockedId));
@@ -120,5 +142,15 @@ export const api = {
   async removeDependency(blockerId, blockedId) {
     await raw.removeDependency(blockerId, blockedId);
     record(`removing a dependency from ${label(blockedId)}`, () => raw.addDependency(blockerId, blockedId));
+  },
+  async uploadAttachments(itemId, files) {
+    const created = await raw.uploadAttachments(itemId, files);
+    record(`attaching ${created.length === 1 ? created[0].name : `${created.length} files`} to ${label(itemId)}`,
+      async () => { for (const a of created) await raw.deleteAttachment(a.id); });
+    return created;
+  },
+  async deleteAttachment(id, itemId, name) {
+    await raw.deleteAttachment(id);
+    record(`removing ${name || 'an attachment'} from ${label(itemId)}`, () => raw.restoreAttachment(id));
   },
 };

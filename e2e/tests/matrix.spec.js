@@ -61,7 +61,7 @@ async function plotGeometry(page) {
     const label = svg.querySelector('.quad-label');
     return {
       svg: { x: box.x, y: box.y, width: box.width, height: box.height, attrW: +svg.getAttribute('width'), attrH: +svg.getAttribute('height') },
-      panel: { width: panel.clientWidth, top: panel.getBoundingClientRect().top },
+      panel: { width: panel.clientWidth, top: panel.getBoundingClientRect().top, controls: document.querySelector('.matrix-controls').offsetHeight },
       viewport: { width: window.innerWidth, height: window.innerHeight },
       bg: rect('.plot-bg'), hot: rect('.quad-hot'), cold: rect('.quad-cold'),
       xTicks: Object.fromEntries(ticks.map((t) => [t.v, t.x])),
@@ -127,10 +127,12 @@ test('plot fills the panel width and the remaining viewport height, and follows 
   await openMatrix(page);
   const check = async () => {
     const g = await plotGeometry(page);
-    // Width: the SVG spans the panel. Height: its bottom edge sits ~16px above the viewport bottom.
+    // Width: the SVG spans the panel. Height: below the colour picker strip,
+    // its bottom edge sits ~16px above the viewport bottom.
     expect(g.svg.attrW).toBe(g.panel.width);
     expect(Math.abs(g.svg.width - g.panel.width)).toBeLessThanOrEqual(1);
-    expect(g.svg.attrH).toBe(Math.round(g.viewport.height - g.panel.top - 16));
+    expect(g.panel.controls).toBeGreaterThan(15);
+    expect(g.svg.attrH).toBe(Math.round(g.viewport.height - g.panel.top - 16 - g.panel.controls));
     expect(Math.abs(g.svg.y + g.svg.height - (g.viewport.height - 16))).toBeLessThanOrEqual(1);
     // Non-square plot area: each axis uses its own extent, with margins for the labels.
     expect(g.bg.w).toBeGreaterThan(g.bg.h);
@@ -205,7 +207,7 @@ test('points with identical values are jittered apart', async ({ page }) => {
 
 test('hovering a point shows a tooltip and highlights the table row', async ({ page }) => {
   await openMatrix(page);
-  const tip = page.locator('.matrix-tip');
+  const tip = page.locator('.item-tip');
   await expect(tip).toBeHidden();
 
   const pt = page.locator('.matrix-plot .pt[data-key="T-9"]');
@@ -360,7 +362,7 @@ test('dependency lines run between the dots of blocking tasks, beneath the point
 
     // Hovering a point lights the lines attached to it and names its blockers.
     await page.locator('.matrix-plot .pt[data-key="T-10"]').hover();
-    await expect(page.locator('.matrix-tip')).toContainText('Blocked by T-9');
+    await expect(page.locator('.item-tip')).toContainText('Blocked by T-9');
     await expect.poll(async () => {
       const l = await depLines(page);
       return [l['T-9->T-10'].lit, l['T-10->T-11'].lit, l['T-7->T-6'].lit];

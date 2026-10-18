@@ -3,7 +3,7 @@
 // renderTable(container, opts) renders the groups into container and returns
 // a handle: { rows: [{ item, el, kind }], rerender() }.
 //
-//   opts.groups    [{ parent, tasks }] from filters.js
+//   opts.groups    [{ parent, tasks }] from filters.js (user-defined order)
 //   opts.mode      'full' | 'title-only'   (title-only is used beside Timeline/Matrix)
 //   opts.expanded  Set<number> of item ids whose detail row is open
 //                  (owned by the caller so it survives re-renders)
@@ -13,6 +13,10 @@
 //   opts.onCollapse(parentId, collapsed)  called when the caret is clicked
 //   opts.flat      true: no parent rows; each task row carries its parent's
 //                  key and title in extra leading columns
+//   opts.sort      [{ key, dir }] column sort (see sort.js); [] = user-defined
+//   opts.blockedLast  true: blocked items sink to the bottom of their group
+//   opts.onSort(sort)  called when a column header is clicked
+//   opts.hidden    Set of hidden column names (see columns.js)
 //
 // Every field is edited in place (see cells.js): there is no edit mode. A
 // single unsaved "new row" (cells.draft) is rendered where it will live and
@@ -20,26 +24,41 @@
 // (tasks also data-parent) so side panels (Timeline) can align to them; a new
 // row carries data-editing="new" and no id.
 //
+// Columns: the visible columns (columns.js) decide the grid template, set on
+// the table element, and every row appends only those cells in that order.
+//
+// Ordering: with no column sort and "blocked last" off, rows follow the
+// user-defined order (sort_order) and can be dragged. Otherwise parents are
+// sorted among themselves and tasks within each parent (in Flat, all tasks
+// together), ties keeping the user-defined order, and dragging is disabled
+// because the positions no longer mean anything.
+//
 // Reordering: every saved row has a drag handle in its key cell. Top-level
 // rows can be dropped among top-level rows; tasks among any parent's tasks or
-// onto a parent row (which reparents them). The full sibling list (from state,
-// including siblings hidden by the page's filter) is sent to api.reorder so
-// hidden siblings keep their positions.
+// onto a parent row (which reparents them). In Flat there are no parent rows
+// to show where one parent ends and the next begins, so a task can only be
+// dropped among the tasks of its own parent and never changes parent there.
+// The full sibling list (from state, including siblings hidden by the page's
+// filter) is sent to api.reorder so hidden siblings keep their positions.
 
 import { state, isClosed, isBlocked } from './state.js';
 import { api, group } from './api.js';
 import { el, contrastText, toast } from './util.js';
 import {
-  draft, discardNew, commitNew, isDraft, makeSaver,
+  draft, discardNew, commitNew, isDraft, makeSaver, closeOnOutsidePointer,
   titleControl, statusControl, userControl, dateControl, levelControl, blockedControl,
-  descriptionControl, dependencyPanel,
+  descriptionControl, dependencyPanel, attachmentsPanel, attachmentBadge,
 } from './cells.js';
+import { SORT_COLUMNS, normalizeSort, compareItems, toggleSort } from './sort.js';
+import { visibleColumns, gridTemplate } from './columns.js';
+import { rowTint } from './colors.js';
+import { colorSwatch } from './swatch.js';
 
 export function userChip(id) {
   if (id == null) return '';
   const u = state.usersById.get(id);
   if (!u) return el('span', { class: 'chip' }, `#${id}`);
-  return el('span', { class: 'chip', style: { background: u.color, color: contrastText(u.color) }, title: u.name }, u.name);
+  return el('span', { class: 'chip', style: { background: u.color, color: contrastText(u.color) }, title: u.name }, u.short || u.name);
 }
 
 /** Every row can be expanded: the description is edited there (and, for
@@ -53,12 +72,52 @@ function toggleCell(item, expanded, onToggle) {
   if (isExpandable(item) && !isDraft(item)) {
     cell.append(el('button', {
       type: 'button',
-      title: expanded ? 'Collapse' : 'Expand (description and dependencies)',
+      title: expanded ? 'Collapse' : 'Expand (description, dependencies and attachments)',
       'aria-expanded': expanded ? 'true' : 'false',
       onClick: (e) => { e.stopPropagation(); onToggle(item); },
     }));
   }
   return cell;
+}
+
+/** "Move to another Ongoing/Project": the button becomes a dropdown of the
+ *  other parents; picking one reparents the task (it goes last there). */
+function reparentButton(item, ctx) {
+  const btn = el('button', { class: 'icon reparent', type: 'button', title: 'Move to another Ongoing or Project', 'aria-label': `Move ${item.key} to another Ongoing or Project` }, '⇄');
+  btn.addEventListener('click', () => {
+    const sel = el('select', { class: 'cell-select reparent-select', name: 'reparent', 'aria-label': 'Move to' }, el('option', { value: '' }, 'Move to…'));
+    for (const p of state.items) {
+      if (p.type === 'task' || p.id === item.parent_id) continue;
+      sel.append(el('option', { value: String(p.id) }, `${p.key} ${p.title}`));
+    }
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      stopOutside();
+      const v = sel.value ? Number(sel.value) : null;
+      if (!save || v == null) { sel.replaceWith(btn); return; }
+      try {
+        // One undo step: back to the old parent and back into its old place.
+        await group(`moving ${item.key}`, async () => {
+          api.rememberOrder(item.parent_id);
+          await api.updateItem(item.id, { parent_id: v });
+        });
+        await ctx.onChanged();
+      } catch (e) {
+        toast(e.message);
+        sel.replaceWith(btn);
+      }
+    };
+    sel.addEventListener('change', () => finish(true));
+    sel.addEventListener('blur', () => finish(false));
+    sel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
+    const stopOutside = closeOnOutsidePointer(sel, () => finish(false));
+    btn.replaceWith(sel);
+    sel.focus();
+    try { sel.showPicker?.(); } catch {}
+  });
+  return btn;
 }
 
 function actionButtons(item, ctx) {
@@ -75,24 +134,69 @@ function actionButtons(item, ctx) {
   if (item.type !== 'task' && actions.onAddTask) {
     cell.append(el('button', { class: 'icon', type: 'button', title: 'Add task', onClick: () => actions.onAddTask(item) }, '+'));
   }
+  if (item.type === 'task') cell.append(reparentButton(item, ctx));
   if (actions.onDelete) {
     cell.append(el('button', { class: 'icon', type: 'button', title: 'Delete', onClick: () => actions.onDelete(item) }, '🗑'));
   }
   return cell;
 }
 
-function headerRow(mode, flat) {
-  const row = el('div', { class: 'row header' }, el('div'), el('div'), el('div'));
-  if (flat) row.append(el('div', { class: 'parent-ref' }, 'Ongoing / Project'), el('div', {}, 'Task'));
-  if (mode === 'full') {
-    row.append(
-      el('div', {}, 'Status'), el('div', {}, 'Owner'), el('div', {}, 'Assignee'),
-      el('div', {}, 'Start'), el('div', {}, 'End'),
-      el('div', { class: 'num', title: 'Urgency' }, 'Urg'), el('div', { class: 'num', title: 'Importance' }, 'Imp'),
-      el('div', { class: 'blocked-cell' }, 'Blocked'), el('div'),
-    );
+/** A header cell that sorts by `key` when clicked: shows the direction and,
+ *  with several sort columns, its position in the order (a tiny badge on the
+ *  arrow's corner, so narrow columns are not widened). */
+function sortHeader(key, label, ctx, extraClass = '') {
+  const keys = normalizeSort(ctx.sort);
+  const i = keys.findIndex((s) => s.key === key);
+  const active = i >= 0;
+  const dir = active ? keys[i].dir : null;
+  const cell = el('div', {
+    class: `sortable ${extraClass} ${active ? 'sorted' : ''}`, role: 'columnheader', tabindex: '0',
+    dataset: { sort: key },
+    'aria-sort': active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none',
+    title: active
+      ? (dir === 'asc' ? `Sorted by ${SORT_COLUMNS[key].label} ascending: click for descending` : `Sorted by ${SORT_COLUMNS[key].label} descending: click to stop sorting by it`)
+      : `Sort by ${SORT_COLUMNS[key].label}${keys.length ? ' (after the current sort columns)' : ''}`,
+  }, el('span', { class: 'sort-label' }, label));
+  if (active) {
+    const arrow = el('span', { class: 'sort-arrow', 'aria-hidden': 'true' }, dir === 'asc' ? '↑' : '↓');
+    if (keys.length > 1) arrow.append(el('span', { class: 'sort-index' }, String(i + 1)));
+    cell.append(arrow);
   }
-  return row;
+  const click = () => {
+    if (!ctx.onSort) return;
+    const hadFocus = document.activeElement === cell;
+    ctx.onSort(toggleSort(ctx.sort, key)); // re-renders the table
+    if (hadFocus) document.querySelector(`.row.header [data-sort="${key}"]`)?.focus();
+  };
+  cell.addEventListener('click', click);
+  cell.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); click(); } });
+  return cell;
+}
+
+/** Header cells by column name (see columns.js for the order). */
+function headerCells(ctx) {
+  const h = (key, label, cls) => sortHeader(key, label, ctx, cls);
+  return {
+    toggle: el('div'),
+    pkey: el('div', { class: 'key' }),
+    key: h('key', 'Key', 'key'),
+    ptitle: h('parent', 'Ongoing / Project', 'parent-ref'),
+    title: h('title', ctx.flat ? 'Task' : 'Title'),
+    status: h('status', 'Status'),
+    owner: h('owner', 'Owner'),
+    assignee: h('assignee', 'Assignee'),
+    start: h('start', 'Start'),
+    end: h('end', 'End'),
+    urgency: (() => { const c = h('urgency', 'Urg', 'num'); c.title = `Urgency. ${c.title}`; return c; })(),
+    importance: (() => { const c = h('importance', 'Imp', 'num'); c.title = `Importance. ${c.title}`; return c; })(),
+    blocked: h('blocked', 'Blocked', 'blocked-cell'),
+    actions: el('div'),
+  };
+}
+
+function headerRow(ctx) {
+  const cells = headerCells(ctx);
+  return el('div', { class: 'row header' }, ...ctx.columns.map((n) => cells[n]));
 }
 
 function rowClasses(item, kind, expanded) {
@@ -104,16 +208,19 @@ function rowClasses(item, kind, expanded) {
   return cls.join(' ');
 }
 
-function dragHandle() {
+function dragHandle(ctx) {
+  if (ctx.sorting) {
+    return el('span', { class: 'drag-handle disabled', title: 'Rows cannot be dragged while sorted by a column or with blocked items last; choose User-defined in the Sort menu to reorder', 'aria-hidden': 'true' }, '⠿');
+  }
   return el('span', { class: 'drag-handle', title: 'Drag to reorder', draggable: 'true', 'aria-label': 'Drag to reorder' }, '⠿');
 }
 
-function keyCell(item) {
+function keyCell(item, ctx) {
   if (isDraft(item)) {
     const prefix = item.type === 'ongoing' ? 'N' : item.type === 'project' ? 'P' : 'T';
     return el('div', { class: 'key' }, el('span', { class: 'key-text new-key' }, `${prefix}-?`));
   }
-  return el('div', { class: 'key' }, dragHandle(), el('span', { class: 'key-text' }, item.key));
+  return el('div', { class: 'key' }, dragHandle(ctx), el('span', { class: 'key-text' }, item.key));
 }
 
 // In the title-only table there is no actions column, so the action buttons
@@ -129,67 +236,77 @@ function titleCell(item, mode, ctx, saver, kind) {
       dataset: { collapse: item.id },
       onClick: (e) => { e.stopPropagation(); ctx.onCollapse(item.id, !isCollapsed); },
     }));
+    cell.append(colorSwatch(item, saver)); // the item's own colour (see swatch.js)
   }
   cell.append(titleControl(item, saver, ctx));
   if (kind === 'parent' && !isDraft(item) && ctx.collapsed.has(item.id)) {
     const n = (state.childrenOf.get(item.id) || []).length;
     if (n) cell.append(el('span', { class: 'task-count', title: `${n} hidden task(s)` }, `(${n})`));
   }
+  if (!isDraft(item)) {
+    const badge = attachmentBadge(item, () => ctx.onToggle(item));
+    if (badge) cell.append(badge);
+  }
   if (mode !== 'full') cell.append(actionButtons(item, ctx));
   return cell;
 }
 
 /** One row for either kind; parents simply leave the task-only cells empty.
- *  In flat mode a task row starts with its parent's key and title. */
+ *  In flat mode a task row starts with its parent's key and title. Only the
+ *  visible columns are built. */
 function itemRow(item, kind, mode, expanded, ctx) {
   const saver = makeSaver(item, ctx);
   const dataset = { kind, type: item.type };
   if (isDraft(item)) dataset.editing = 'new';
   else dataset.id = item.id;
   if (kind === 'task' && item.parent_id != null) dataset.parent = item.parent_id;
-  const row = el('div', { class: rowClasses(item, kind, expanded) + (ctx.collapsed.has(item.id) ? ' collapsed' : ''), dataset },
-    toggleCell(item, expanded, ctx.onToggle));
-  if (ctx.flat) {
-    const parent = item.parent_id != null ? state.itemsById.get(item.parent_id) : null;
-    row.append(
-      el('div', { class: 'key parent-ref' }, parent ? parent.key : ''),
-      keyCell(item),
-      el('div', { class: 'title parent-ref', title: parent ? `${parent.key} ${parent.title}` : '' }, parent ? parent.title : ''),
-      titleCell(item, mode, ctx, saver, kind),
-    );
-  } else {
-    row.append(keyCell(item), titleCell(item, mode, ctx, saver, kind));
-  }
-  if (mode === 'full') {
-    row.append(
-      statusControl(item, saver),
-      userControl(item, 'owner_id', saver),
-      userControl(item, 'assignee_id', saver),
-      dateControl(item, 'start', saver),
-      dateControl(item, 'end', saver, { highlight: true }),
-      levelControl(item, 'urgency', saver),
-      levelControl(item, 'importance', saver),
-      blockedControl(item, saver),
-      actionButtons(item, ctx),
-    );
-  }
+  const row = el('div', { class: rowClasses(item, kind, expanded) + (ctx.collapsed.has(item.id) ? ' collapsed' : ''), dataset });
+  // Row tint: a parent's own colour, or the parent's colour on a task row
+  // when that preference is on (colors.js); otherwise the stylesheet's type tint.
+  const tint = rowTint(item, kind);
+  if (tint) row.style.setProperty('--row-color', tint);
+  const parent = ctx.flat && item.parent_id != null ? state.itemsById.get(item.parent_id) : null;
+  const build = {
+    toggle: () => toggleCell(item, expanded, ctx.onToggle),
+    pkey: () => el('div', { class: 'key parent-ref' }, parent ? parent.key : ''),
+    key: () => keyCell(item, ctx),
+    ptitle: () => el('div', { class: 'title parent-ref', title: parent ? `${parent.key} ${parent.title}` : '' }, parent ? parent.title : ''),
+    title: () => titleCell(item, mode, ctx, saver, kind),
+    status: () => statusControl(item, saver),
+    owner: () => userControl(item, 'owner_id', saver),
+    assignee: () => userControl(item, 'assignee_id', saver),
+    start: () => dateControl(item, 'start', saver),
+    end: () => dateControl(item, 'end', saver, { highlight: true }),
+    urgency: () => levelControl(item, 'urgency', saver),
+    importance: () => levelControl(item, 'importance', saver),
+    blocked: () => blockedControl(item, saver),
+    actions: () => actionButtons(item, ctx),
+  };
+  for (const n of ctx.columns) row.append(build[n]());
   return row;
 }
 
-/** The expanded detail row: description on the left, dependencies on the right. */
+/** The expanded detail row: the description under the title column; the
+ *  dependencies and attachments under the remaining columns (or below, in
+ *  title-only mode). */
 function detailRow(item, kind, ctx) {
   const saver = makeSaver(item, ctx);
   const deps = dependencyPanel(item, ctx);
+  const files = attachmentsPanel(item, ctx);
   const dataset = isDraft(item) ? { editing: 'new' } : { descFor: item.id };
-  // Same grid as the item row: the description fills the title column and the
-  // dependencies sit under the remaining columns (or below, in title-only
-  // mode). Not given the kind class itself, so `.row.task` / `.row.parent`
-  // only ever match item rows (detail rows contain other items' titles).
-  const lead = ctx.flat ? 4 : 2;
+  // Same grid as the item row. Not given the kind class itself, so
+  // `.row.task` / `.row.parent` only ever match item rows (detail rows
+  // contain other items' titles).
+  const titleCol = ctx.columns.indexOf('title') + 1; // 1-based grid line
   const row = el('div', { class: `row description kind-${kind}`, dataset });
-  for (let i = 0; i < lead; i++) row.append(el('div'));
+  for (let i = 1; i < titleCol; i++) row.append(el('div'));
   row.append(el('div', { class: 'title' }, descriptionControl(item, saver)));
-  if (deps) row.append(el('div', { class: 'deps-cell' }, deps));
+  if (deps || files) {
+    // Full table: to the right of the description. Title-only: the title is
+    // the last column, so the side panel wraps onto its own line below.
+    const from = ctx.mode === 'full' ? titleCol + 1 : titleCol;
+    row.append(el('div', { class: 'deps-cell', style: { gridColumn: `${from} / -1` } }, deps, files));
+  }
   return row;
 }
 
@@ -216,14 +333,40 @@ function restoreFocus(container, f) {
   }
 }
 
+/** Apply the column sort and "blocked last" to the groups. Returns
+ *  { groups, flatTasks, grouped }: `flatTasks` is the single list shown in
+ *  Flat, `grouped` whether consecutive tasks there still share a parent. */
+function orderGroups(groups, sort, blockedLast, flat) {
+  const keys = normalizeSort(sort);
+  const sorting = keys.length > 0 || blockedLast;
+  if (!sorting) {
+    return { groups, flatTasks: groups.flatMap((g) => g.tasks), grouped: true, sorting };
+  }
+  const cmp = compareItems(keys, blockedLast);
+  const ordered = groups.map((g) => ({ parent: g.parent, tasks: [...g.tasks].sort(cmp) })).sort((a, b) => cmp(a.parent, b.parent));
+  let flatTasks = ordered.flatMap((g) => g.tasks);
+  // In Flat every task takes part in one sort; the parent column (the first
+  // sort key or no sort) is what keeps tasks grouped by parent.
+  if (flat) flatTasks = flatTasks.sort(cmp);
+  const grouped = !blockedLast && (!keys.length || keys[0].key === 'parent');
+  return { groups: ordered, flatTasks, grouped, sorting };
+}
+
 export function renderTable(container, opts) {
-  const { groups, mode = 'full', expanded = new Set(), actions, collapsed = new Set(), flat = false } = opts;
+  const { groups, mode = 'full', expanded = new Set(), actions, collapsed = new Set(), flat = false, sort = [], blockedLast = false, hidden = new Set() } = opts;
   const handle = { rows: [], rerender: () => renderTable(container, opts) };
+  const order = orderGroups(groups, sort, blockedLast, flat);
+  const columns = visibleColumns(mode, flat, hidden);
 
   const ctx = {
     actions,
     collapsed,
     flat,
+    mode,
+    columns,
+    sort,
+    sorting: order.sorting,
+    onSort: opts.onSort,
     rerender: () => handle.rerender(),
     onChanged: async () => { if (actions?.onChanged) await actions.onChanged(); else handle.rerender(); },
     onToggle: (item) => {
@@ -240,16 +383,21 @@ export function renderTable(container, opts) {
   // A new task row only makes sense under a parent shown on this page.
   if (draft.item && draft.item.type === 'task' && !groups.some((g) => g.parent.id === draft.item.parent_id)) discardNew();
 
-  const table = el('div', { class: `table ${mode === 'title-only' ? 'title-only' : ''} ${flat ? 'flat' : ''}` });
-  table.append(headerRow(mode, flat));
+  const table = el('div', {
+    class: `table ${mode === 'title-only' ? 'title-only' : ''} ${flat ? 'flat' : ''} ${order.sorting ? 'sorted' : ''}`,
+    dataset: { columns: columns.join(' ') },
+  });
+  table.style.setProperty('--cols', gridTemplate(columns, mode, flat));
+  table.append(headerRow(ctx));
 
   if (!groups.length && !draft.item) {
     table.append(el('div', { class: 'empty' }, 'Nothing to show.'));
   }
 
-  const appendRow = (item, kind) => {
+  const appendRow = (item, kind, extraClass = '') => {
     const isExpanded = expanded.has(item.id);
     const row = itemRow(item, kind, mode, isExpanded, ctx);
+    if (extraClass) row.classList.add(extraClass);
     table.append(row);
     handle.rows.push({ item, el: row, kind });
     if (isExpanded) table.append(detailRow(item, kind, ctx));
@@ -261,15 +409,27 @@ export function renderTable(container, opts) {
   };
   let captureFocusActive = false;
 
-  for (const g of groups) {
-    if (!flat) appendRow(g.parent, 'parent');
-    const hidden = !flat && collapsed.has(g.parent.id);
-    if (!hidden) for (const t of g.tasks) appendRow(t, 'task');
-    if (draft.item && draft.item.type === 'task' && draft.item.parent_id === g.parent.id) appendNewRow('task');
+  if (flat) {
+    // Tasks only. A bold rule marks where one parent's tasks end and the
+    // next's begin, while the order still keeps them together.
+    let prevParent = null;
+    for (const t of order.flatTasks) {
+      const starts = order.grouped && prevParent != null && t.parent_id !== prevParent;
+      appendRow(t, 'task', starts ? 'group-start' : '');
+      prevParent = t.parent_id;
+    }
+    if (draft.item && draft.item.type === 'task') appendNewRow('task');
+  } else {
+    for (const g of order.groups) {
+      appendRow(g.parent, 'parent');
+      const hidden = collapsed.has(g.parent.id);
+      if (!hidden) for (const t of g.tasks) appendRow(t, 'task');
+      if (draft.item && draft.item.type === 'task' && draft.item.parent_id === g.parent.id) appendNewRow('task');
+    }
+    if (draft.item && draft.item.type !== 'task') appendNewRow('parent');
   }
-  if (draft.item && draft.item.type !== 'task' && !flat) appendNewRow('parent');
 
-  installDragAndDrop(table, ctx);
+  if (!order.sorting) installDragAndDrop(table, ctx);
 
   const focus = captureFocus(container);
   captureFocusActive = !!focus;
@@ -284,7 +444,8 @@ export function renderTable(container, opts) {
 // Top-level rows (Ongoing/Project) can be dropped among top-level rows. Tasks
 // can be dropped before/after any task (in any parent) or onto a parent row,
 // which moves them to the start of that parent's tasks; dropping into a
-// different parent reparents the task first, then orders it.
+// different parent reparents the task first, then orders it. In Flat, a task
+// can only be dropped among its own parent's tasks (no reparenting).
 
 /** Live children of a parent (null = top level), in current sort order. */
 function childIds(parentId) {
@@ -300,7 +461,7 @@ function groupEnd(parentRowEl) {
 
 /** Resolve the element under the pointer to a drop target: { el, mode } with
  *  mode 'sibling' (before/after el) or 'into' (el is a parent row), or null. */
-function dropTarget(table, drag, target) {
+function dropTarget(table, drag, target, flat) {
   const rowEl = target.closest?.('.row');
   if (!rowEl || !table.contains(rowEl) || rowEl.classList.contains('header')) return null;
   let candidate = rowEl;
@@ -316,6 +477,8 @@ function dropTarget(table, drag, target) {
   }
   if (candidate.classList.contains('parent')) return { el: candidate, mode: 'into' };
   if (Number(candidate.dataset.id) === drag.id) return null;
+  // Flat: only among the tasks of the same parent.
+  if (flat && (candidate.dataset.parent ?? '') !== drag.parent) return null;
   return { el: candidate, mode: 'sibling' };
 }
 
@@ -341,7 +504,7 @@ function installDragAndDrop(table, ctx) {
 
   table.addEventListener('dragover', (e) => {
     if (!drag) return;
-    const t = dropTarget(table, drag, e.target);
+    const t = dropTarget(table, drag, e.target, ctx.flat);
     clearDropMarks(table);
     if (!t) { over = null; return; }
     e.preventDefault();
@@ -393,6 +556,8 @@ function installDragAndDrop(table, ctx) {
       const targetItem = state.itemsById.get(targetId);
       if (!targetItem) return;
       newParent = targetItem.parent_id ?? null;
+      // Flat never reparents (dropTarget already refuses other parents' tasks).
+      if (ctx.flat && d.kind === 'task' && newParent !== (item.parent_id ?? null)) return;
       ids = childIds(newParent).filter((id) => id !== d.id);
       idx = ids.indexOf(targetId);
       if (idx < 0) return;

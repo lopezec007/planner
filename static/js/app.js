@@ -1,9 +1,15 @@
-// Application shell: hash router, toolbar, page rendering.
+// Application shell: hash router, toolbar, account menu, page rendering.
 //
 // There is one planner page (all items, narrowed by the search/filter
 // controls, which start on the Active template) and a Settings page reached
 // from the gear at the far left. Routes: #/ and #/settings; #/active,
 // #/backlog, #/ideas and #/all (or #/everything) apply that filter template.
+//
+// View, Flat, Narrow, collapsed parents, sort order, the filter settings,
+// the Timeline bar and Matrix point colours and the row colour-coding are
+// preferences (prefs.js):
+// per account when one is picked in the account menu at the far right,
+// otherwise per browser.
 
 import { api, undo } from './api.js';
 import { state, load } from './state.js';
@@ -12,28 +18,31 @@ import { renderTable, expandableIds } from './table.js';
 import { renderTimeline } from './timeline.js';
 import { renderMatrix } from './matrix.js';
 import { renderSettings } from './settings.js';
-import { renderSearch, applyPreset, newStatus, typeAllowed } from './search.js';
+import { renderSearch, applyPreset, newStatus, typeAllowed, restoreFilters, persistFilters } from './search.js';
 import { el, toast, contrastText } from './util.js';
 import { beginNew, discardNew } from './cells.js';
+import { prefs } from './prefs.js';
+import { renderSortMenu, normalizeSort, SORT_COLUMNS } from './sort.js';
+import { renderColumnsMenu, normalizeHidden } from './columns.js';
+import { icon, keyGlyph } from './icons.js';
+import { renderColorsMenu } from './colors.js';
 
 const main = document.getElementById('main');
 const toolbar = document.getElementById('toolbar');
 const settingsBtn = document.getElementById('btn-settings');
+const accountSlot = document.getElementById('account');
 
 const VIEWS = ['table', 'timeline', 'matrix'];
 const LEGACY_FILTER_ROUTES = { active: 'active', backlog: 'backlog', ideas: 'ideas', all: 'all', everything: 'all', home: 'active' };
 
-// UI state for the planner page, surviving re-renders.
-const ui = { view: 'table', expanded: new Set(), collapsed: new Set(), searchFilter: null };
-let narrow = false; // table-view width constraint for very wide windows
-let flat = false;   // tasks only, with their parent's key and title as columns
-try {
-  ui.view = VIEWS.includes(localStorage.getItem('planner.view')) ? localStorage.getItem('planner.view') : 'table';
-  narrow = localStorage.getItem('planner.narrow') === '1';
-  flat = localStorage.getItem('planner.flat') === '1';
-  for (const id of JSON.parse(localStorage.getItem('planner.collapsed') || '[]')) ui.collapsed.add(Number(id));
-} catch {}
-const remember = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+// UI state for the planner page that is not a preference: open detail rows
+// and the search filter function, which survive re-renders.
+const ui = { expanded: new Set(), searchFilter: null };
+
+// Preferences read fresh on every render (they change with the account).
+const view = () => (VIEWS.includes(prefs.get('view')) ? prefs.get('view') : 'table');
+const flag = (key) => prefs.get(key) === '1';
+const collapsedSet = () => new Set((prefs.getJSON('collapsed') || []).map(Number));
 
 // A filter route (#/active, #/backlog, #/ideas, #/all) applies its template
 // once, when first seen; the hash is kept so a reload returns to that view.
@@ -43,6 +52,7 @@ function route() {
   if (hash === 'settings' || hash === 'users') return { page: 'settings' };
   if (Object.prototype.hasOwnProperty.call(LEGACY_FILTER_ROUTES, hash) && hash !== appliedRoute) {
     applyPreset(LEGACY_FILTER_ROUTES[hash]);
+    persistFilters();
     appliedRoute = hash;
   }
   return { page: 'main' };
@@ -55,7 +65,42 @@ async function reload() {
     toast(`Failed to load: ${e.message}`);
     return;
   }
+  let prefsLoaded = !accountLoaded; // filters are restored once, when the preferences first load
+  try {
+    prefsLoaded = (await syncAccount()) || prefsLoaded;
+  } catch (e) {
+    // The items are there; fall back to this browser's preferences.
+    toast(`Could not load your preferences: ${e.message}`);
+    await prefs.load(null);
+    accountLoaded = true;
+    prefsLoaded = true;
+  }
+  if (prefsLoaded) restoreFilters();
   applySettings();
+  render();
+}
+
+// The remembered account must still exist (users can be deleted in Settings);
+// otherwise fall back to this browser's own preferences.
+let accountLoaded = false;
+/** Returns true when the preferences were (re)loaded. */
+async function syncAccount() {
+  const wanted = accountLoaded ? prefs.account : prefs.rememberedAccount();
+  const valid = wanted != null && state.usersById.has(wanted) ? wanted : null;
+  const load = !accountLoaded || valid !== prefs.account;
+  if (load) await prefs.load(valid);
+  accountLoaded = true;
+  return load;
+}
+
+async function switchAccount(id) {
+  try {
+    await prefs.load(id);
+  } catch (e) {
+    toast(`Could not load preferences: ${e.message}`);
+    await prefs.load(null);
+  }
+  restoreFilters(); // the filter settings follow the account too
   render();
 }
 
@@ -79,11 +124,14 @@ function applySettings() {
 // delete, and reload after any change.
 const actions = {
   onNew(type) {
-    if (beginNew({ type, status: newStatus() })) render();
+    if (!beginNew({ type, status: newStatus() })) return;
+    // Flat has no parent rows, so a new Ongoing/Project could not be seen there.
+    if (flag('flat')) { prefs.set('flat', '0'); toast('Flat turned off to show the new row'); }
+    render();
   },
   onAddTask(parent) {
-    ui.collapsed.delete(parent.id); // the new row must be visible
-    remember('planner.collapsed', JSON.stringify([...ui.collapsed]));
+    const collapsed = collapsedSet();
+    if (collapsed.delete(parent.id)) prefs.set('collapsed', [...collapsed]); // the new row must be visible
     if (beginNew({ type: 'task', parentId: parent.id, status: newStatus() })) render();
   },
   onChanged: reload,
@@ -103,62 +151,130 @@ function versionBadge() {
   return el('span', { class: 'version', id: 'app-version', title }, v.version ? `v${v.version}` : '');
 }
 
+/** The far right of the title bar: the version badge and the account menu
+ *  (who is using this browser; preferences follow the account). */
+function renderAccount() {
+  const current = prefs.account;
+  const u = current != null ? state.usersById.get(current) : null;
+  const sel = el('select', {
+    id: 'account-select', class: 'account-select', 'aria-label': 'Account',
+    title: u ? `${u.name}: your view, sort and layout preferences are saved to this account` : 'Pick who you are so your preferences follow you to any browser',
+    onChange: () => switchAccount(sel.value ? Number(sel.value) : null),
+  });
+  sel.append(el('option', { value: '', selected: current == null ? true : null }, 'No account'));
+  for (const x of state.users) sel.append(el('option', { value: String(x.id), selected: current === x.id ? true : null }, x.name));
+  if (u) Object.assign(sel.style, { background: u.color, color: contrastText(u.color), borderColor: u.color });
+  accountSlot.replaceChildren(versionBadge(), sel);
+}
+
 settingsBtn.addEventListener('click', () => { location.hash = '#/settings'; });
 
 function render() {
   const r = route();
+  renderAccount();
   settingsBtn.classList.toggle('active', r.page === 'settings');
   if (r.page === 'settings') {
     toolbar.replaceChildren(
-      el('button', { type: 'button', id: 'btn-back', title: 'Back to the items', onClick: () => { location.hash = '#/'; } }, '← Items'),
-      el('div', { class: 'spacer' }), versionBadge());
+      el('button', { type: 'button', id: 'btn-back', title: 'Back to the items', 'aria-label': 'Back to the items', onClick: () => { location.hash = '#/'; } }, icon('back')),
+      el('div', { class: 'spacer' }));
     renderSettings(main, { reload });
     return;
   }
+
+  const currentView = view();
+  const flat = flag('flat');
+  const narrow = flag('narrow');
+  const collapsed = collapsedSet();
+  // The "Ongoing / Project" column only exists in Flat; a stored sort on it
+  // is set aside (not forgotten) while Flat is off.
+  const sort = normalizeSort(prefs.getJSON('sort')).filter((k) => flat || !SORT_COLUMNS[k.key].flatOnly);
+  const blockedLast = flag('blocked_last');
+  const hidden = normalizeHidden(prefs.getJSON('hidden_cols'));
 
   // ---- toolbar ----
   toolbar.replaceChildren();
   // New Ongoing is greyed out (not hidden) while the type filter would hide a new one.
   const ongoingOk = typeAllowed('ongoing');
   toolbar.append(el('button', {
-    class: 'primary', type: 'button', id: 'btn-new-ongoing', disabled: ongoingOk ? null : true,
-    title: ongoingOk ? 'New ongoing bucket' : 'The current type filter hides Ongoing items; clear it to add one',
+    class: 'primary', type: 'button', id: 'btn-new-ongoing', disabled: ongoingOk ? null : true, 'aria-label': 'New Ongoing',
+    title: ongoingOk ? 'New Ongoing: a bucket for recurring work (key N-…)' : 'The current type filter hides Ongoing items; clear it to add one',
     onClick: () => actions.onNew('ongoing'),
-  }, '+ Ongoing'));
-  toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', title: 'New project', onClick: () => actions.onNew('project') }, '+ Project'));
+  }, keyGlyph('N')));
+  toolbar.append(el('button', { class: 'primary', type: 'button', id: 'btn-new-project', 'aria-label': 'New Project', title: 'New Project: work with a start and an end (key P-…)', onClick: () => actions.onNew('project') }, keyGlyph('P')));
 
   toolbar.append(
-    el('button', { type: 'button', id: 'btn-expand-all', title: 'Expand every row (descriptions and dependencies)', onClick: () => { for (const id of expandableIds(currentGroups)) ui.expanded.add(id); render(); } }, 'Expand'),
-    el('button', { type: 'button', id: 'btn-collapse-all', title: 'Collapse every row', onClick: () => { ui.expanded.clear(); render(); } }, 'Collapse'),
+    el('button', { type: 'button', id: 'btn-expand-all', 'aria-label': 'Expand all', title: 'Expand every row (descriptions, dependencies and attachments)', onClick: () => { for (const id of expandableIds(currentGroups)) ui.expanded.add(id); render(); } }, icon('expand-all')),
+    el('button', { type: 'button', id: 'btn-collapse-all', 'aria-label': 'Collapse all', title: 'Collapse every row', onClick: () => { ui.expanded.clear(); render(); } }, icon('collapse-all')),
   );
 
   const searchSlot = el('div', { class: 'search-slot' });
   toolbar.append(searchSlot);
   toolbar.append(el('div', { class: 'spacer' }));
 
-  toolbar.append(el('button', {
-    type: 'button', id: 'btn-flat', class: flat ? 'active' : '', 'aria-pressed': flat ? 'true' : 'false',
-    title: 'Flat: tasks only, with their Ongoing/Project as columns',
-    onClick: () => { flat = !flat; remember('planner.flat', flat ? '1' : '0'); render(); },
-  }, 'Flat'));
-  // Always present (disabled outside Table view) so the toolbar keeps the same
-  // shape in every view and the rows below do not shift.
-  const tableView = ui.view === 'table';
-  toolbar.append(el('button', {
-    type: 'button', id: 'btn-narrow', class: narrow && tableView ? 'active' : '', disabled: tableView ? null : true,
-    title: tableView ? 'Constrain the table width on wide screens' : 'Narrow applies to the Table view',
-    'aria-pressed': narrow ? 'true' : 'false',
-    onClick: () => { narrow = !narrow; remember('planner.narrow', narrow ? '1' : '0'); render(); },
-  }, 'Narrow'));
+  // Sort menu: the current column order (headers add to it) and the
+  // user-defined option; also "blocked items last".
+  const sortSlot = el('div', { class: 'sort-slot' });
+  toolbar.append(sortSlot);
+  const sortCtx = {
+    sort, blockedLast, flat,
+    setSort: (keys) => { prefs.set('sort', keys); render(); },
+    setBlockedLast: (on) => { prefs.set('blocked_last', on ? '1' : '0'); render(); },
+  };
+  renderSortMenu(sortSlot, sortCtx);
 
+  // Columns menu: which table columns show. Always present (disabled outside
+  // the Table view, like Narrow) so the toolbar keeps its shape.
+  const tableView = currentView === 'table';
+  const columnsSlot = el('div', { class: 'columns-slot' });
+  toolbar.append(columnsSlot);
+  renderColumnsMenu(columnsSlot, {
+    hidden, flat, enabled: tableView,
+    setHidden: (names) => { prefs.set('hidden_cols', names); render(); },
+  });
+
+  // Colours menu: how rows are tinted (the items' own colours or the type
+  // colours; tasks in their parent's colour or not).
+  const colorsSlot = el('div', { class: 'colors-slot' });
+  toolbar.append(colorsSlot);
+  renderColorsMenu(colorsSlot, {
+    parentColors: prefs.get('parent_colors'), taskColors: prefs.get('task_colors'),
+    setParentColors: (mode) => { prefs.set('parent_colors', mode); render(); },
+    setTaskColors: (mode) => { prefs.set('task_colors', mode); render(); },
+  });
+
+  // Two-way choices as icon groups, like the view switch: Nested | Flat and
+  // Wide | Narrow (the width only applies to the Table view).
+  const pair = (label, choices, current, enabled, onPick) => {
+    const g = el('div', { class: 'group', role: 'group', 'aria-label': label });
+    for (const [value, id, name, hint] of choices) {
+      const on = current === value;
+      g.append(el('button', {
+        type: 'button', id, class: on && enabled ? 'active' : '', disabled: enabled ? null : true,
+        'aria-pressed': on ? 'true' : 'false', 'aria-label': name, title: hint, dataset: { [label.toLowerCase()]: value },
+        onClick: () => { if (!on) onPick(value); },
+      }, icon(value)));
+    }
+    return g;
+  };
+  toolbar.append(pair('Layout', [
+    ['nested', 'btn-nested', 'Nested', 'Nested: Ongoing and Project rows with their tasks beneath them'],
+    ['flat', 'btn-flat', 'Flat', 'Flat: tasks only, with their Ongoing/Project as columns'],
+  ], flat ? 'flat' : 'nested', true, (v) => { prefs.set('flat', v === 'flat' ? '1' : '0'); render(); }));
+  toolbar.append(pair('Width', [
+    ['wide', 'btn-wide', 'Wide', tableView ? 'Wide: the table uses the full width of the window' : 'Width applies to the Table view'],
+    ['narrow', 'btn-narrow', 'Narrow', tableView ? 'Narrow: constrain the table width on wide screens' : 'Width applies to the Table view'],
+  ], narrow ? 'narrow' : 'wide', tableView, (v) => { prefs.set('narrow', v === 'narrow' ? '1' : '0'); render(); }));
+
+  const VIEW_HINT = { table: 'Table: every column, editable in place', timeline: 'Timeline: a Gantt chart beside the titles', matrix: 'Matrix: tasks plotted by urgency and importance' };
   const group = el('div', { class: 'group', role: 'group', 'aria-label': 'View' });
   for (const v of VIEWS) {
     group.append(el('button', {
-      type: 'button', class: ui.view === v ? 'active' : '', dataset: { view: v },
-      onClick: () => { ui.view = v; remember('planner.view', v); render(); },
-    }, v[0].toUpperCase() + v.slice(1)));
+      type: 'button', class: currentView === v ? 'active' : '', dataset: { view: v }, 'aria-pressed': currentView === v ? 'true' : 'false',
+      'aria-label': v[0].toUpperCase() + v.slice(1), title: VIEW_HINT[v],
+      onClick: () => { prefs.set('view', v); render(); },
+    }, icon(v)));
   }
-  toolbar.append(group, versionBadge());
+  toolbar.append(group);
 
   // ---- content: all items, narrowed by the search/filter criteria ----
   let currentGroups = allGroups();
@@ -172,24 +288,35 @@ function render() {
         'Welcome. Start by adding people under ', el('a', { href: '#/settings' }, 'Settings'), ', then use New Ongoing or New Project to create your first items.')
     : null;
 
-  if (ui.view === 'table') {
+  const tableOpts = {
+    groups: currentGroups, expanded: ui.expanded, actions, collapsed, flat, sort, blockedLast, hidden,
+    onCollapse: () => prefs.set('collapsed', [...collapsed]),
+    onSort: sortCtx.setSort,
+  };
+  if (currentView === 'table') {
     const wrap = el('div', { class: `table-wrap ${narrow ? 'constrained' : ''}` });
     main.replaceChildren(...[hint, wrap].filter(Boolean));
-    renderTable(wrap, { groups: currentGroups, mode: 'full', expanded: ui.expanded, actions, collapsed: ui.collapsed, flat, onCollapse: rememberCollapsed });
+    renderTable(wrap, { ...tableOpts, mode: 'full' });
   } else {
     const wrap = el('div', { class: 'table-wrap' });
     const panel = el('div', { class: 'panel', id: 'panel' });
     main.replaceChildren(el('div', { class: 'split' }, wrap, panel));
     const draw = (handle) => {
-      const ctx = { rerender: render, onChanged: reload };
-      if (ui.view === 'timeline') renderTimeline(panel, handle, ctx);
+      const ctx = {
+        rerender: render, onChanged: reload,
+        // Timeline bar colouring (a preference): assignee | owner | importance | urgency | combo | parent.
+        barColor: prefs.get('bar_color'),
+        setBarColor: (mode) => { prefs.set('bar_color', mode); render(); },
+        // Matrix point colouring (a preference): assignee | owner | parent.
+        pointColor: prefs.get('point_color'),
+        setPointColor: (mode) => { prefs.set('point_color', mode); render(); },
+      };
+      if (currentView === 'timeline') renderTimeline(panel, handle, ctx);
       else renderMatrix(panel, handle, ctx);
     };
-    renderTable(wrap, { groups: currentGroups, mode: 'title-only', expanded: ui.expanded, actions, collapsed: ui.collapsed, flat, onCollapse: rememberCollapsed, onRendered: draw });
+    renderTable(wrap, { ...tableOpts, mode: 'title-only', onRendered: draw });
   }
 }
-
-const rememberCollapsed = () => remember('planner.collapsed', JSON.stringify([...ui.collapsed]));
 
 // Ctrl+Z / Cmd+Z undoes the last change made in this browser session, unless
 // the focus is in a text field (where the browser's own undo applies).

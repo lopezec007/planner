@@ -64,11 +64,11 @@
 /* Dates: tilde = approximate (not firm); the text becomes an input on click. */
 .date-cell { gap: 2px; }
 .firm-toggle {
-  flex: 0 0 auto; width: 14px; padding: 0; border: none; background: transparent;
+  flex: 0 0 auto; width: 16px; padding: 0; border: none; background: transparent;
   font-weight: 700; font-size: 14px; line-height: 1; cursor: pointer; color: var(--fg-muted);
 }
 .firm-toggle.approx { color: var(--fg); }
-.firm-toggle.firm { opacity: 0.22; }
+.firm-toggle.firm { font-size: 10px; opacity: 0.85; }
 .firm-toggle:hover { opacity: 1; color: var(--accent); }
 .date-text { cursor: text; padding: 2px 4px; border: 1px solid transparent; border-radius: 4px; white-space: nowrap; }
 .date-text:hover { border-color: var(--border); }
@@ -81,26 +81,37 @@
 .row.new { background: color-mix(in srgb, var(--accent) 8%, var(--bg)) !important; }
 .new-key { font-style: italic; }
 
-/* Owner / assignee chip picker */
-.user-pick { display: flex; flex-wrap: wrap; gap: 4px; padding: 0; }
+/* Owner / assignee chip picker: every user's chip on one line (cells.js
+   falls back to a dropdown when they would overflow the cell). */
+.user-pick { display: flex; flex-wrap: nowrap; gap: 3px; padding: 0; overflow: hidden; }
 .user-pick { outline: none; }
 .user-pick .chip {
-  cursor: pointer; border: 2px solid transparent; opacity: 0.45;
-  padding: 0 8px; line-height: 18px; font: inherit; font-size: 12px; font-weight: 500;
+  cursor: pointer; border: 2px solid transparent; opacity: 0.45; flex: 0 0 auto;
+  padding: 0 5px; line-height: 18px; font: inherit; font-size: 12px; font-weight: 500;
 }
 .user-pick .chip:hover { opacity: 0.75; }
 .user-pick .chip[aria-pressed="true"] { opacity: 1; border-color: var(--fg); }
 
 /* ---------- expanded row: description + dependencies ---------- */
 .desc-main { width: 100%; min-width: 0; }
-.row.description > .deps-cell { grid-column: 4 / -1; align-self: start; padding-top: 0; padding-bottom: 10px; white-space: normal; overflow: visible; }
-.table.title-only .row.description > .deps-cell { grid-column: 3 / -1; }
+/* Dependencies on the left, attachments on the right (the grid column is set
+   inline from the visible columns). */
+.row.description > .deps-cell { align-self: start; padding-top: 0; padding-bottom: 10px; white-space: normal; overflow: visible; display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: flex-start; }
+/* Dependencies and attachments share the space to the right of the
+   description; each is a left-aligned block in a subtle frame. */
+.deps-cell > .deps { flex: 1 1 260px; }
+.deps-cell > .attachments { flex: 1 1 220px; }
+.deps-cell > .deps, .deps-cell > .attachments {
+  box-sizing: border-box; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-alt) 55%, var(--bg));
+}
 .desc-main .md { cursor: text; border: 1px solid transparent; border-radius: 4px; padding: 2px 4px; margin: -2px -4px; }
 .desc-main .md:hover { border-color: var(--border); }
 .desc-main .md.placeholder { color: var(--fg-muted); font-style: italic; }
 .desc-textarea { width: 100%; min-height: 84px; resize: vertical; font-family: var(--mono); font-size: 12.5px; }
-.deps { font-size: 12.5px; width: 100%; }
-.deps-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 0 6px; }
+.deps { font-size: 12.5px; flex: 1 1 260px; min-width: 0; }
+.deps-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 0 6px; min-height: 22px; }
+.deps-row:last-child { margin-bottom: 0; }
 .deps-label { min-width: 78px; color: var(--fg-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; }
 .deps-note { color: var(--fg-muted); font-style: italic; }
 .dep-chip {
@@ -109,12 +120,71 @@
 }
 .dep-chip.open { border-color: var(--hl-alert); }
 .dep-chip.closed { opacity: 0.6; }
-.dep-chip .dep-key { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); }
-.dep-chip .dep-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.dep-chip { cursor: default; }
+.dep-chip .dep-key { font-family: var(--mono); font-size: 11.5px; color: var(--fg); }
+.dep-chip.closed .dep-key { color: var(--fg-muted); text-decoration: line-through; }
 .dep-remove { border: none; background: transparent; padding: 0 3px; cursor: pointer; color: var(--fg-muted); line-height: 1; font-size: 14px; }
 .dep-remove:hover { color: var(--hl-alert); background: transparent; }
 .dep-add { font-size: 12px; padding: 1px 4px; max-width: 220px; }
+/* The small round "+" that opens the add dropdown (dependencies) or the file
+   picker (attachments). */
+.dep-add-btn, .attach-add {
+  flex: 0 0 auto; width: 20px; height: 20px; padding: 0; border-radius: 50%; line-height: 1;
+  font-size: 15px; font-weight: 600; color: var(--fg-muted); background: transparent; border: 1px solid var(--border);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.dep-add-btn:hover, .attach-add:hover { color: var(--accent); border-color: var(--accent); background: var(--bg-hover); }
 .chip-pick { cursor: pointer; }
 .chip-pick.empty { background: transparent; min-width: 36px; min-height: 18px; border: 1px dashed transparent; }
 .chip-pick.empty:hover { border-color: var(--border); }
 .chip-pick:hover { outline: 2px solid var(--border); }
+
+/* ---------- sortable column headers (see js/sort.js, table.js headerRow) ---------- */
+.row.header .sortable { cursor: pointer; user-select: none; gap: 3px; }
+.row.header .sortable:hover { color: var(--fg); }
+.row.header .sortable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.row.header .sorted { color: var(--fg); }
+/* The arrow carries the sort position as a tiny badge on its lower corner, so
+   even the 44px Urg/Imp columns keep their label. */
+.row.header .sort-arrow { position: relative; font-size: 12px; line-height: 1; padding-right: 3px; }
+.row.header .sort-index {
+  position: absolute; right: -4px; bottom: -4px;
+  font-size: 7px; line-height: 9px; min-width: 9px; height: 9px; padding: 0 1px;
+  border-radius: 5px; background: var(--accent); color: var(--accent-fg);
+  text-align: center; font-weight: 700; font-family: var(--font);
+}
+.row.header .num.sortable { justify-content: center; }
+.row.header .blocked-cell.sortable { justify-content: center; }
+.drag-handle.disabled { cursor: not-allowed; opacity: 0.2; }
+.row:hover .drag-handle.disabled { opacity: 0.35; }
+
+/* ---------- parent boundaries ----------
+   A heavier rule above every Ongoing/Project row (and, in Flat, above the
+   first task of each parent) makes it clear which tasks belong to which. */
+.row.parent { border-top: 2px solid var(--border-strong); }
+.table.flat .row.task.group-start { border-top: 2px solid var(--border-strong); }
+
+/* ---------- reparent (move a task to another Ongoing/Project) ---------- */
+.reparent-select { width: auto; max-width: 100%; font-size: 12px; padding: 1px 2px; }
+
+/* ---------- attachments (expanded row): a header with the "+" button, the
+   chips below it, everything left-aligned ---------- */
+.attachments { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; max-width: 100%; margin: 0; font-size: 12.5px; }
+.attachments.drop-files { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.attach-head { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.attach-label { color: var(--fg-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; }
+.attach-status { color: var(--fg-muted); font-style: italic; }
+.attach-list { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 6px; max-width: 100%; }
+.attach-list:empty { display: none; }
+.attach-item { display: inline-flex; align-items: center; max-width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-alt); padding-right: 2px; }
+.attach-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 4px 1px 7px; color: var(--fg); text-decoration: none; max-width: 320px; min-width: 0; }
+.attach-chip:hover .attach-name { text-decoration: underline; }
+.attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-size { color: var(--fg-muted); font-size: 11px; white-space: nowrap; }
+.attach-remove { border: none; background: transparent; padding: 0 4px; cursor: pointer; color: var(--fg-muted); line-height: 1; font-size: 14px; }
+.attach-remove:hover { color: var(--hl-alert); background: transparent; }
+.attach-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.attach-badge { border: none; background: transparent; padding: 0 4px; margin-left: 4px; cursor: pointer; color: var(--fg-muted); font-size: 12px; line-height: 1; display: inline-flex; align-items: center; gap: 1px; flex: 0 0 auto; }
+.attach-badge:hover { color: var(--fg); background: transparent; }
+.attach-count { font-size: 11px; font-weight: 600; }
+.row.closed .attach-badge { opacity: 0.7; }

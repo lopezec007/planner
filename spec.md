@@ -19,9 +19,15 @@ The technology stack (language, framework, libraries, etc.) is at the implemente
 
 ### Users
 - Users are managed in-app.  There is no authentication.
+- Each user is also an "account": a menu in the title bar selects who is using the browser (no password).  Per-user
+  preferences (view, Flat, Narrow, collapsed parents, sort, blocked-last, hidden columns, the filter settings,
+  timeline bar and matrix point colouring, and the row colour-coding choices) are stored on the server with the
+  user so they follow them to any browser.  With no account selected the browser keeps its own.
 - All users have full CRUD access to everything.
 - Each user is auto-assigned a color (used for categorical highlighting of the Owner and Assignee columns).  The color
-  can be changed by the user.
+  can be changed by the user.  Each user also has a chip label of at most 3 characters (initials, or the start of
+  the name, by default; editable in Settings) which is what the Owner/Assignee chips display, with the full name on
+  mouseover.  Clicking a chip offers every user's chip when they all fit within the cell, else a dropdown.
 
 ### Item Types
 There are only 3:
@@ -84,13 +90,21 @@ Any Project or Task can be blocked by any number of other Projects or Tasks, and
 (Ongoing items take no part).  Two items cannot block each other, directly or through a chain of dependencies.
 An item that is blocked by another item whose status is not "Done" or "Cancelled" has its "Blocked" state locked
 to true.  Dependencies are viewed and edited to the right of the description in the expanded row, with dropdowns
-listing item key and title.  The Timeline draws a line from the blocking item's end to the blocked item's start;
+listing item key and title; the lists show only item keys, with the full item (title, status, description) in a
+tooltip on mouseover as in the Matrix.  Attachments sit to the right of the dependencies.  The Timeline draws a line from the blocking item's end to the blocked item's start;
 the Matrix draws subtle lines with arrows pointing from blocker to blocked.
+
+### Attachments
+Files of any type can be attached to any item (Ongoing, Project or Task).  They are stored in the SQLite file.  The
+expanded row lists them; clicking one opens it in a new browser tab when the browser can render the type (images,
+PDF, text, audio, video) and downloads it otherwise.  The tool does no rendering of its own.  Removing an attachment
+is undoable; like deleted items, removed files stay in the database (so the file grows until it is compacted by
+hand).  Each file is limited to 64 MiB.
 
 ### Undo
 Ctrl+Z (Cmd+Z) undoes the most recent change made in the current browser session, up to the last 20 changes:
-field edits, creations, deletions (restored with their cascaded tasks), reorders and moves, and dependency
-changes.  Inside a text field the browser's own undo applies instead.
+field edits, creations, deletions (restored with their cascaded tasks), reorders and moves, dependency
+changes, and attachment uploads and removals.  Inside a text field the browser's own undo applies instead.
 
 ### Backups
 Before a schema migration of an existing database, the application writes a copy of the database file next to it
@@ -134,18 +148,39 @@ row, including "Ongoing" rows.  Any number of items may be expanded at once and 
 expansion and collapse of all at once.  Independently, a caret on each "Ongoing"/"Project" row collapses its
 tasks (remembered across reloads).
 
-A "Flat" toggle next to "Narrow" removes the "Ongoing"/"Project" rows and shows that information within each task
-row instead, in the column order: Ongoing/Project key, task key, Ongoing/Project title, task title, and then the
-remaining task columns.
+A "Nested / Flat" icon pair (next to the "Wide / Narrow" pair, both like the view switch) chooses the layout:
+"Flat" removes the "Ongoing"/"Project" rows and shows that information within each task row instead, in the column
+order: Ongoing/Project key, task key, Ongoing/Project title, task title, and then the remaining task columns.
 
-The order of items is user-specified via drag-and-drop, and the order is persisted.
+Dependencies ("Blocked by" / "Blocks") and attachments in the expanded row each have a small "+" button: for
+dependencies it opens the dropdown of items, for attachments the file picker.  Attachment chips sit below the
+"Attachments" header, left-aligned, to the right of the dependencies; each section sits in a subtle frame.  A rejected cyclic dependency is reported in a
+snack that stays up longer than usual.
+
+The border above each "Ongoing"/"Project" row is heavier than the one between tasks, so it is clear which tasks
+belong to which parent; in Flat the same rule sits above the first task of each parent while tasks are grouped.
+
+The order of items is user-specified via drag-and-drop, and the order is persisted.  In Flat, dragging only
+reorders a task among its own parent's tasks and never changes its parent.
+
+Sorting: clicking a column header sorts by that column (ascending, then descending on a second click, removed on a
+third); clicking further headers appends them, so the order in which headers are clicked is the multi-column sort
+order.  "User-defined" (the drag order) remains available and is the default; a Sort menu lists the columns in
+effect.  An option pushes blocked items to the bottom regardless of the sort.  While a sort is in effect rows
+cannot be dragged.
+
+Each task row has a "reassign parent" button that moves it to another "Ongoing"/"Project".
+
+Every column except the title can be hidden from a Columns menu (a per-user preference).  The toolbar buttons
+are icons with mouseover descriptions.
 
 ##### Creating, editing, and deleting
 - "New Ongoing" and "New Project" buttons at the top add a blank row to the table for the user to fill in, with its
   description pre-expanded.  The row is created when the title is confirmed with Enter or the ✓ button.
 - Every "Ongoing" and "Project" row has an "Add task" button that adds a blank child task row in the same manner.
 - There is no separate edit mode: to edit a field the user simply clicks into it, and the change is saved
-  immediately.  Firm dates are toggled with a clickable "~" before the date ("~" shown = approximate).
+  immediately.  The toggle before a date shows "~" while the date is approximate and a pin icon once it is firm;
+  clicking it switches between the two.
 - Each row offers a "Delete" option (see Deletion above).
 
 ##### Views
@@ -161,12 +196,21 @@ right-hand side of the screen.
   - Non-firm date: soft but tight edge
   - No date: a very long fade-out extending from the other end of the bar
 - Items with neither a start nor an end date are not rendered on the timeline.
+- Bars are coloured by assignee by default; an option (per user) colours them instead by owner, importance,
+  urgency, or a combination of importance and urgency.
 
 "Matrix" view should plot all visible tasks (tasks only, since parents have no urgency/importance) in an X-Y scatter
 with "Importance" plotted on the y-axis and "Urgency" plotted on the x-axis.  Points should be jittered so that tasks
 with identical values are all visible.  Mousing-over a point should display its title and description.
 
 ##### Highlighting
+Every "Ongoing" and "Project" may be given a colour of its own (a swatch before its title opens a palette, a custom
+colour, or back to none); the colour is stored with the item and shared by everyone.  How it shows is per user, in a
+"Colours" menu in the toolbar: "Ongoing"/"Project" rows tinted with their own colour when they have one (otherwise,
+or when the user prefers it, the per-type colour from Settings, which is the default look), and task rows tinted
+either with the Task colour from Settings (default) or with their "Ongoing"/"Project" colour.  The Timeline's bar
+colouring and the Matrix's point colouring each offer an "Ongoing / Project" mode using the same colours.
+
 The "Owner" and "Assignee" fields should be highlighted categorically using each user's color.  "Urgency" and
 "Importance" should each be highlighted individually as follows:
 - 0-5: no color

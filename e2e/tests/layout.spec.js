@@ -4,6 +4,27 @@ import { test, expect } from '@playwright/test';
 
 const byTitle = async (request, title) => (await (await request.get('/api/items')).json()).find((i) => i.title === title);
 
+// HTML5 drag of a row handle onto a target row with a stepped pointer path.
+// Chromium does not always start a drag from locator.dragTo's single move
+// (depending on what was edited before), while a few real moves are reliable.
+export async function dragRow(page, handle, target, { x = 200, y = 4 } = {}) {
+  // Both rows must be on screen and clear of the sticky title bar, which
+  // would otherwise swallow the drop.
+  const bar = await page.evaluate(() => document.querySelector('.topbar').getBoundingClientRect().bottom);
+  let t = await target.boundingBox();
+  let h = await handle.boundingBox();
+  const top = Math.min(t.y, h.y), bottom = Math.max(t.y + t.height, h.y + h.height);
+  if (top < bar + 8) { await page.evaluate((dy) => window.scrollBy(0, dy), top - bar - 40); }
+  else if (bottom > await page.evaluate(() => window.innerHeight)) { await page.evaluate((dy) => window.scrollBy(0, dy), bottom - await page.evaluate(() => window.innerHeight) + 40); }
+  t = await target.boundingBox();
+  h = await handle.boundingBox();
+  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(h.x + h.width / 2 + 10, h.y + h.height / 2 + 5);
+  await page.mouse.move(t.x + x, t.y + y, { steps: 5 });
+  await page.mouse.up();
+}
+
 test('parents collapse their tasks with the caret, and the state survives a reload', async ({ page }) => {
   await page.goto('/#/all');
   const kitchen = page.locator('.row.parent', { hasText: 'Kitchen remodel' });
@@ -49,7 +70,7 @@ test('Flat shows tasks only, with the parent key and title as leading columns', 
   await expect(page.locator('.table.flat.title-only')).toBeVisible();
   await expect(page.locator('.timeline-bar.parent')).toHaveCount(0);
   await page.locator('button[data-view=table]').click();
-  await page.locator('#btn-flat').click();
+  await page.locator('#btn-nested').click();
   await expect(page.locator('.row.parent').first()).toBeVisible();
 });
 
@@ -89,9 +110,10 @@ test('Ctrl+Z undoes edits, deletions, creations, reorders and dependency changes
   // Add a dependency, undo removes it.
   const budget = await byTitle(request, 'Review budget');
   await page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.toggle button').click();
+  await page.locator('.row.description[data-desc-for] [data-deps=blocked_by] .dep-add-btn').click();
   await page.locator('.row.description[data-desc-for] [data-deps=blocked_by] select.dep-add').selectOption(String(budget.id));
   await expect.poll(async () => (await byTitle(request, 'Clean gutters')).blocked_by).toEqual([budget.id]);
-  await expect(page.locator('.row.description[data-desc-for] [data-deps=blocked_by] .dep-chip', { hasText: 'Review budget' })).toBeVisible();
+  await expect(page.locator(`.row.description[data-desc-for] [data-deps=blocked_by] .dep-chip[data-id="${budget.id}"]`)).toBeVisible();
   await settled();
   await page.keyboard.press('Control+z');
   await expect.poll(async () => (await byTitle(request, 'Clean gutters')).blocked_by).toEqual([]);
@@ -99,7 +121,7 @@ test('Ctrl+Z undoes edits, deletions, creations, reorders and dependency changes
   const maint = await byTitle(request, 'Maintenance');
   const order = async () => (await (await request.get('/api/items')).json()).filter((i) => i.parent_id === maint.id).map((i) => i.title);
   const before = await order();
-  await page.locator('.row.task', { hasText: 'Replace HVAC filter' }).locator('.drag-handle').dragTo(page.locator('.row.task', { hasText: 'Clean gutters' }), { targetPosition: { x: 200, y: 4 } });
+  await dragRow(page, page.locator('.row.task', { hasText: 'Replace HVAC filter' }).locator('.drag-handle'), page.locator('.row.task', { hasText: 'Clean gutters' }));
   await expect.poll(order).not.toEqual(before);
   await settled();
   await page.keyboard.press('Control+z');
@@ -133,4 +155,47 @@ test('switching views does not move the rows (the toolbar keeps its height)', as
     await page.locator('button[data-view=table]').click();
     await expect(page.locator('#btn-narrow')).toBeEnabled();
   }
+});
+
+test('in Flat a drag reorders within the parent only and never moves the task elsewhere', async ({ page, request }) => {
+  const maint = await byTitle(request, 'Maintenance');
+  const order = async () => (await (await request.get('/api/items')).json()).filter((i) => i.parent_id === maint.id).map((i) => i.title);
+  const before = await order();
+  const gutters = await byTitle(request, 'Clean gutters');
+  await page.goto('/#/all');
+  await page.locator('#btn-flat').click();
+  await expect(page.locator('.table')).toHaveClass(/flat/);
+  // Onto another parent's task: refused (no drop marker, nothing changes).
+  await dragRow(page, page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.drag-handle'), page.locator('.row.task', { hasText: 'Pay insurance' }));
+  await page.waitForTimeout(400);
+  expect((await byTitle(request, 'Clean gutters')).parent_id).toBe(gutters.parent_id);
+  expect(await order()).toEqual(before);
+  // Among its own parent's tasks: reorders.
+  await dragRow(page, page.locator('.row.task', { hasText: 'Replace HVAC filter' }).locator('.drag-handle'), page.locator('.row.task', { hasText: 'Clean gutters' }));
+  await expect.poll(order).toEqual(['Replace HVAC filter', 'Clean gutters', 'Service lawnmower', 'Fix fence post', 'Install smart thermostat']);
+  expect((await byTitle(request, 'Replace HVAC filter')).parent_id).toBe(maint.id);
+  await page.waitForTimeout(350);
+  await page.keyboard.press('Control+z');
+  await expect.poll(order).toEqual(before);
+  await page.locator('#btn-nested').click();
+});
+
+test('a heavier rule separates each parent from the previous group, in the table and in Flat', async ({ page }) => {
+  await page.goto('/#/all');
+  const width = (loc) => loc.evaluate((e) => getComputedStyle(e).borderTopWidth);
+  expect(await width(page.locator('.row.parent', { hasText: 'Finance' }))).toBe('2px');
+  expect(await width(page.locator('.row.task', { hasText: 'Review budget' }))).toBe('1px');
+  expect(await page.locator('.row.parent', { hasText: 'Finance' }).evaluate((e) => e.getBoundingClientRect().height)).toBe(36);
+  await page.locator('#btn-flat').click();
+  const first = page.locator('.row.task', { hasText: 'Pay insurance' }); // first task of the second parent
+  await expect(first).toHaveClass(/group-start/);
+  expect(await width(first)).toBe('2px');
+  expect(await width(page.locator('.row.task', { hasText: 'Review budget' }))).toBe('1px');
+  await page.locator('button[data-view=timeline]').click();
+  expect(await width(page.locator('.timeline-row.task').first())).toBe('1px');
+  await page.locator('button[data-view=table]').click();
+  await page.locator('#btn-nested').click();
+  await page.locator('button[data-view=timeline]').click();
+  expect(await width(page.locator('.timeline-row.parent').first())).toBe('2px');
+  await page.locator('button[data-view=table]').click();
 });

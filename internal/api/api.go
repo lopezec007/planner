@@ -11,9 +11,13 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"planner/internal/store"
 )
@@ -30,6 +34,8 @@ func Handler(st *store.Store) http.Handler {
 	mux.HandleFunc("POST /api/users", s.createUser)
 	mux.HandleFunc("PATCH /api/users/{id}", s.updateUser)
 	mux.HandleFunc("DELETE /api/users/{id}", s.deleteUser)
+	mux.HandleFunc("GET /api/users/{id}/prefs", s.getPrefs)
+	mux.HandleFunc("PATCH /api/users/{id}/prefs", s.updatePrefs)
 
 	mux.HandleFunc("GET /api/items", s.listItems)
 	mux.HandleFunc("POST /api/items", s.createItem)
@@ -38,6 +44,11 @@ func Handler(st *store.Store) http.Handler {
 	mux.HandleFunc("DELETE /api/items/{id}", s.deleteItem)
 	mux.HandleFunc("GET /api/items/{id}/history", s.history)
 	mux.HandleFunc("POST /api/items/{id}/restore", s.restoreItem)
+	mux.HandleFunc("GET /api/items/{id}/attachments", s.listAttachments)
+	mux.HandleFunc("POST /api/items/{id}/attachments", s.uploadAttachments)
+	mux.HandleFunc("GET /api/attachments/{id}", s.getAttachment)
+	mux.HandleFunc("DELETE /api/attachments/{id}", s.deleteAttachment)
+	mux.HandleFunc("POST /api/attachments/{id}/restore", s.restoreAttachment)
 	mux.HandleFunc("PUT /api/order", s.reorder)
 	mux.HandleFunc("POST /api/dependencies", s.addDependency)
 	mux.HandleFunc("DELETE /api/dependencies/{blocker}/{blocked}", s.removeDependency)
@@ -101,12 +112,13 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name  string `json:"name"`
 		Color string `json:"color"`
+		Short string `json:"short"`
 	}
 	if err := decode(r, &in); err != nil {
 		writeErr(w, err)
 		return
 	}
-	u, err := s.st.CreateUser(in.Name, in.Color)
+	u, err := s.st.CreateUser(in.Name, in.Color, in.Short)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -123,12 +135,13 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name  *string `json:"name"`
 		Color *string `json:"color"`
+		Short *string `json:"short"`
 	}
 	if err := decode(r, &in); err != nil {
 		writeErr(w, err)
 		return
 	}
-	u, err := s.st.UpdateUser(id, in.Name, in.Color)
+	u, err := s.st.UpdateUser(id, in.Name, in.Color, in.Short)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -147,6 +160,41 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// getPrefs returns the user's preferences with defaults applied.
+func (s *Server) getPrefs(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	prefs, err := s.st.UserPrefs(id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, prefs)
+}
+
+// updatePrefs takes a partial {key: value} map and returns the full map.
+func (s *Server) updatePrefs(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var in map[string]string
+	if err := decode(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	prefs, err := s.st.UpdateUserPrefs(id, in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, prefs)
 }
 
 // ---------------------------------------------------------------- items
@@ -188,6 +236,7 @@ type itemBody struct {
 	Urgency     *int        `json:"urgency"`
 	Importance  *int        `json:"importance"`
 	Blocked     *bool       `json:"blocked"`
+	Color       *string     `json:"color"`
 }
 
 func (b *itemBody) patch() (store.Patch, error) {
@@ -200,6 +249,7 @@ func (b *itemBody) patch() (store.Patch, error) {
 	p.Urgency = b.Urgency
 	p.Importance = b.Importance
 	p.Blocked = b.Blocked
+	p.Color = b.Color
 	if b.ParentID.Set {
 		if b.ParentID.Val == nil {
 			return p, &store.ValidationError{Msg: "parent_id cannot be null"}
@@ -426,4 +476,226 @@ func (s *Server) reorder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ---------------------------------------------------------------- attachments
+
+// maxUploadBody bounds a whole upload request: a few files at the limit plus
+// multipart framing. Larger bodies are cut off with a 413.
+const maxUploadBody = 4*store.MaxAttachmentSize + 1<<20
+
+// Renderable reports whether a browser can be allowed to show the content
+// type inline rather than download it.
+func Renderable(contentType string) bool {
+	mt, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(mt, "image/"), strings.HasPrefix(mt, "video/"),
+		strings.HasPrefix(mt, "audio/"), strings.HasPrefix(mt, "text/"):
+		return true
+	}
+	return mt == "application/pdf" || mt == "application/json"
+}
+
+// sandboxed reports whether the content type can carry scripts (or load
+// them) when rendered, so that it must be served under a CSP sandbox.
+func sandboxed(contentType string) bool {
+	mt, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	return mt == "text/html" || mt == "image/svg+xml" || mt == "text/xml"
+}
+
+// contentTypeFor picks the stored content type of an upload: the part's own
+// header when it is a valid, specific media type; else the extension; else a
+// sniff of the first bytes.
+func contentTypeFor(given, name string, data []byte) string {
+	given = strings.TrimSpace(given)
+	if mt, _, err := mime.ParseMediaType(given); err == nil && mt != "application/octet-stream" {
+		return given
+	}
+	if ct := mime.TypeByExtension(filepath.Ext(name)); ct != "" {
+		return ct
+	}
+	if len(data) > 512 {
+		data = data[:512]
+	}
+	return http.DetectContentType(data)
+}
+
+// writeTooLarge answers 413. The remaining body (bounded by MaxBytesReader)
+// is drained first so the client sees the response rather than a reset.
+func writeTooLarge(w http.ResponseWriter, r *http.Request) {
+	io.Copy(io.Discard, r.Body)
+	writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+		"error": "file is larger than the " + strconv.Itoa(store.MaxAttachmentSize>>20) + " MiB limit",
+	})
+}
+
+// listAttachments returns the live attachments of an item.
+func (s *Server) listAttachments(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	as, err := s.st.ListAttachments(id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, as)
+}
+
+// uploadAttachments stores every multipart/form-data part named "file" on
+// the item and returns the created metadata (201). A part over
+// store.MaxAttachmentSize is a 413; a body with no file parts is a 400.
+func (s *Server) uploadAttachments(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	// Reject an unknown item before reading the body.
+	if _, err := s.st.ListAttachments(id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBody)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeErr(w, &store.ValidationError{Msg: "expected a multipart/form-data body: " + err.Error()})
+		return
+	}
+	type upload struct {
+		name, contentType string
+		data              []byte
+	}
+	var ups []upload
+	var tooBig *http.MaxBytesError
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if errors.As(err, &tooBig) {
+			writeTooLarge(w, r)
+			return
+		}
+		if err != nil {
+			writeErr(w, &store.ValidationError{Msg: "malformed multipart body: " + err.Error()})
+			return
+		}
+		if part.FormName() != "file" {
+			part.Close()
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(part, store.MaxAttachmentSize+1))
+		part.Close()
+		if errors.As(err, &tooBig) || (err == nil && len(data) > store.MaxAttachmentSize) {
+			writeTooLarge(w, r)
+			return
+		}
+		if err != nil {
+			writeErr(w, &store.ValidationError{Msg: "malformed multipart body: " + err.Error()})
+			return
+		}
+		name := part.FileName()
+		ups = append(ups, upload{name, contentTypeFor(part.Header.Get("Content-Type"), name, data), data})
+	}
+	if len(ups) == 0 {
+		writeErr(w, &store.ValidationError{Msg: `the upload has no "file" parts`})
+		return
+	}
+	// All or nothing: a bad part (no name, empty) rejects the batch before
+	// any file is stored.
+	for _, u := range ups {
+		if _, err := store.CheckAttachment(u.name, len(u.data)); err != nil {
+			writeErr(w, err)
+			return
+		}
+	}
+	out := []store.Attachment{}
+	for _, u := range ups {
+		a, err := s.st.AddAttachment(id, u.name, u.contentType, u.data)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		out = append(out, *a)
+	}
+	writeJSON(w, 201, out)
+}
+
+// getAttachment serves the file. Browser-renderable types are sent inline
+// (unless ?download=1), everything else as a download; HTML and SVG are
+// additionally sandboxed so embedded scripts cannot touch the app origin.
+func (s *Server) getAttachment(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	a, data, err := s.st.GetAttachment(id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	disp := "attachment"
+	if dl := r.URL.Query().Get("download"); Renderable(a.ContentType) && (dl == "" || dl == "0") {
+		disp = "inline"
+	}
+	h := w.Header()
+	h.Set("Content-Type", a.ContentType)
+	h.Set("Content-Length", strconv.Itoa(len(data)))
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cache-Control", "private, max-age=0")
+	if cd := mime.FormatMediaType(disp, map[string]string{"filename": a.Name}); cd != "" {
+		h.Set("Content-Disposition", cd)
+	} else {
+		h.Set("Content-Disposition", disp)
+	}
+	if sandboxed(a.ContentType) {
+		h.Set("Content-Security-Policy", "sandbox")
+	}
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(data); err != nil {
+		log.Printf("write attachment %d: %v", id, err)
+	}
+}
+
+// deleteAttachment soft-deletes an attachment (204).
+func (s *Server) deleteAttachment(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := s.st.DeleteAttachment(id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// restoreAttachment undoes a soft delete and returns the metadata (200).
+func (s *Server) restoreAttachment(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := s.st.RestoreAttachment(id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	a, err := s.st.GetAttachmentMeta(id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, a)
 }

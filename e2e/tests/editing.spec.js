@@ -33,7 +33,7 @@ const titleInput = (page) => page.locator('input[name=title]');
 // (clicking the pressed one clears).
 const pickUser = async (row, which, name) => {
   await row.locator(`.chip-pick[data-name=${which}]`).click();
-  await row.locator(`.user-pick[data-name=${which}] .chip`, { hasText: name }).click();
+  await row.locator(`.user-pick[data-name=${which}] .chip[data-user-name="${name}"]`).click();
 };
 const editTitle = async (page, row, value) => {
   await row.locator('.title-text').click();
@@ -51,7 +51,7 @@ test('New project: a blank row with the title focused; Enter saves with the page
   // The detail row (description) is open beneath it.
   await expect(page.locator('.row.description[data-editing="new"]')).toBeVisible();
   await pickUser(newRow(page), 'owner', 'Evan');
-  await expect(newRow(page).locator('.chip-pick[data-name=owner]')).toHaveText('Evan'); // the choice is visible before saving
+  await expect(newRow(page).locator('.chip-pick[data-name=owner]')).toHaveText('Eva'); // the choice is visible before saving
   await newRow(page).locator('input[name=title]').fill('E2E Project');
   await newRow(page).locator('input[name=title]').press('Enter');
   await expect(newRow(page)).toHaveCount(0);
@@ -138,7 +138,7 @@ test('Click-to-edit every field type on a task', async ({ page, request }) => {
   await pickUser(r2, 'owner', 'Sam');
   await expect(r2.locator('.chip-pick[data-name=owner]')).toHaveText('Sam');
   await pickUser(r2, 'assignee', 'Evan');
-  await expect(r2.locator('.chip-pick[data-name=assignee]')).toHaveText('Evan');
+  await expect(r2.locator('.chip-pick[data-name=assignee]')).toHaveText('Eva');
   // Dates: click the text, type into the input (change saves); the tilde marks it approximate until clicked.
   await r2.locator('.date-text[data-field=start_date]').click();
   await r2.locator('input[name=start_date]').fill(ymd(-1));
@@ -169,6 +169,7 @@ test('Click-to-edit every field type on a task', async ({ page, request }) => {
   // Blocked.
   await r2.locator('input[name=blocked]').check();
   await expect(r2).toHaveClass(/blocked/);
+  await saved('blocked', true); // the row class comes from the re-render; the API may still be a step behind
 
   const it = await byTitle(request, 'E2E Task A2');
   expect(it.status).toBe('in-progress');
@@ -195,7 +196,7 @@ test('Clearing fields, Escape reverts, and an empty title is rejected', async ({
   await pickUser(row, 'owner', 'Sam');
   await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('');
   await pickUser(row, 'assignee', 'Alex');
-  await expect(row.locator('.chip-pick[data-name=assignee]')).toHaveText('Alex');
+  await expect(row.locator('.chip-pick[data-name=assignee]')).toHaveText('Ale');
   // Escape in the title reverts without saving.
   await row.locator('.title-text').click();
   await titleInput(page).fill('Not saved');
@@ -244,8 +245,14 @@ test('Dependencies: add, lock Blocked, reject cycles, remove', async ({ page, re
   let detail = detailOf(page, a2);
   // Clean gutters (todo, open) blocks E2E Task A2.
   const gutters = await byTitle(request, 'Clean gutters');
+  await detail.locator('[data-deps=blocked_by] .dep-add-btn').click();
   await detail.locator('[data-deps=blocked_by] select.dep-add').selectOption(String(gutters.id));
-  await expect(detailOf(page, taskRow(page, 'E2E Task A2')).locator('[data-deps=blocked_by] .dep-chip.open', { hasText: 'Clean gutters' })).toBeVisible();
+  const chip = detailOf(page, taskRow(page, 'E2E Task A2')).locator(`[data-deps=blocked_by] .dep-chip.open[data-id="${gutters.id}"]`);
+  await expect(chip.locator('.dep-key')).toHaveText(gutters.key); // key only; the rest is in the tooltip
+  await chip.hover();
+  await expect(page.locator('.item-tip')).toBeVisible();
+  await expect(page.locator('.item-tip')).toContainText('Clean gutters');
+  await page.mouse.move(5, 500);
   const locked = taskRow(page, 'E2E Task A2');
   await expect(locked).toHaveClass(/blocked/);
   await expect(locked.locator('input[name=blocked]')).toBeChecked();
@@ -257,21 +264,23 @@ test('Dependencies: add, lock Blocked, reject cycles, remove', async ({ page, re
   const g = taskRow(page, 'Clean gutters');
   await g.locator('.toggle button').click();
   const gd = detailOf(page, g);
-  await expect(gd.locator('[data-deps=blocks] .dep-chip', { hasText: 'E2E Task A2' })).toBeVisible();
+  await expect(gd.locator(`[data-deps=blocks] .dep-chip[data-id="${(await byTitle(request, 'E2E Task A2')).id}"]`)).toBeVisible();
   const a2id = (await byTitle(request, 'E2E Task A2')).id;
+  await gd.locator('[data-deps=blocked_by] .dep-add-btn').click();
   await gd.locator('[data-deps=blocked_by] select.dep-add').selectOption(String(a2id));
-  await expect(page.locator('#toast')).toContainText('cycle');
+  await expect(page.locator('#toast')).toContainText('That would create a cycle');
 
   // A closed blocker does not lock: E2E Task B (done) blocks A2 too.
   const b = taskRow(page, 'E2E Task B');
   await b.locator('select[name=status]').selectOption('done');
   const bid = (await byTitle(request, 'E2E Task B')).id;
   detail = detailOf(page, taskRow(page, 'E2E Task A2'));
+  await detail.locator('[data-deps=blocked_by] .dep-add-btn').click();
   await detail.locator('[data-deps=blocked_by] select.dep-add').selectOption(String(bid));
-  await expect(detailOf(page, taskRow(page, 'E2E Task A2')).locator('[data-deps=blocked_by] .dep-chip.closed', { hasText: 'E2E Task B' })).toBeVisible();
+  await expect(detailOf(page, taskRow(page, 'E2E Task A2')).locator(`[data-deps=blocked_by] .dep-chip.closed[data-id="${(await byTitle(request, 'E2E Task B')).id}"]`)).toBeVisible();
   // Remove the open blocker: unlocked again (the closed one remains).
   detail = detailOf(page, taskRow(page, 'E2E Task A2'));
-  await detail.locator('.dep-chip', { hasText: 'Clean gutters' }).locator('.dep-remove').click();
+  await detail.locator(`.dep-chip[data-id="${gutters.id}"]`).locator('.dep-remove').click();
   const free = taskRow(page, 'E2E Task A2');
   await expect(free).not.toHaveClass(/blocked/);
   await expect(free.locator('input[name=blocked]')).toBeEnabled();
@@ -308,13 +317,13 @@ test('With more than three users the picker is a dropdown', async ({ page, reque
   try {
     await page.goto('/#/all');
     const row = taskRow(page, 'Clean gutters');
-    await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('Evan');
+    await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('Eva');
     await row.locator('.chip-pick[data-name=owner]').click();
     await expect(row.locator('select[name=owner]')).toBeVisible();
     await expect(row.locator('select[name=owner] option')).toHaveCount(5); // blank + 4 users
     await expect(row.locator('.user-pick')).toHaveCount(0);
     await row.locator('select[name=owner]').evaluate((e) => e.blur()); // closes without a change
-    await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('Evan');
+    await expect(row.locator('.chip-pick[data-name=owner]')).toHaveText('Eva');
   } finally {
     await request.delete(`/api/users/${u.id}`);
   }

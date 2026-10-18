@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 )
@@ -59,9 +60,12 @@ var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("conflict")
 
 type User struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Color     string `json:"color"`
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+	// Short is the chip label (1-3 characters) shown in the Owner and
+	// Assignee columns; it defaults to initials or the start of the name.
+	Short     string `json:"short"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -85,9 +89,12 @@ type Item struct {
 	Urgency     *int    `json:"urgency"`
 	Importance  *int    `json:"importance"`
 	Blocked     bool    `json:"blocked"`
-	SortOrder   int64   `json:"sort_order"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	// Color is an Ongoing's or Project's own colour ("#rrggbb"), shared by
+	// everyone, or "" to use the type colour from Settings. Tasks have none.
+	Color     string `json:"color"`
+	SortOrder int64  `json:"sort_order"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 	// ClosedAt is the timestamp the item most recently entered a closed
 	// status (done/cancelled), or nil if its current status is not closed.
 	ClosedAt *string `json:"closed_at"`
@@ -95,6 +102,9 @@ type Item struct {
 	// depend on it (projects and tasks only).
 	BlockedBy []int64 `json:"blocked_by"`
 	Blocks    []int64 `json:"blocks"`
+	// Attachments lists the live files attached to the item (metadata only;
+	// the bytes are served separately).
+	Attachments []Attachment `json:"attachments"`
 }
 
 type StatusChange struct {
@@ -124,6 +134,7 @@ type Patch struct {
 	Urgency       *int
 	Importance    *int
 	Blocked       *bool
+	Color         *string // "" clears it
 }
 
 type Store struct {
@@ -135,7 +146,7 @@ type Store struct {
 
 // schemaVersion is stored in PRAGMA user_version. Bump it whenever migrate()
 // gains a step; an existing database below it is backed up before migrating.
-const schemaVersion = 1
+const schemaVersion = 4
 
 // Open opens (creating if necessary) the SQLite database at path and applies
 // the schema. An existing database whose schema is behind is first copied to
@@ -189,6 +200,7 @@ CREATE TABLE IF NOT EXISTS users (
 	id         INTEGER PRIMARY KEY,
 	name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
 	color      TEXT NOT NULL,
+	short      TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL
 );
 
@@ -215,6 +227,7 @@ CREATE TABLE IF NOT EXISTS items (
 	urgency         INTEGER CHECK (urgency IS NULL OR (urgency BETWEEN 0 AND 10)),
 	importance      INTEGER CHECK (importance IS NULL OR (importance BETWEEN 0 AND 10)),
 	blocked         INTEGER NOT NULL DEFAULT 0,
+	color           TEXT NOT NULL DEFAULT '',
 	sort_order      INTEGER NOT NULL DEFAULT 0,
 	created_at      TEXT NOT NULL,
 	updated_at      TEXT NOT NULL,
@@ -243,6 +256,27 @@ CREATE TABLE IF NOT EXISTS status_history (
 	changed_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS status_history_item ON status_history(item_id, id);
+
+CREATE TABLE IF NOT EXISTS user_prefs (
+	user_id INTEGER NOT NULL REFERENCES users(id),
+	key     TEXT NOT NULL,
+	value   TEXT NOT NULL,
+	PRIMARY KEY (user_id, key)
+);
+
+-- File contents live in the database on purpose: the single SQLite file is
+-- the whole of the planner's data.
+CREATE TABLE IF NOT EXISTS attachments (
+	id           INTEGER PRIMARY KEY,
+	item_id      INTEGER NOT NULL REFERENCES items(id),
+	name         TEXT NOT NULL,
+	content_type TEXT NOT NULL,
+	size         INTEGER NOT NULL,
+	data         BLOB NOT NULL,
+	created_at   TEXT NOT NULL,
+	deleted_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS attachments_item ON attachments(item_id);
 `
 
 func (s *Store) migrate() error {
@@ -270,6 +304,48 @@ func (s *Store) migrate() error {
 	}
 	if n > 0 {
 		if _, err := s.db.Exec(`ALTER TABLE items DROP COLUMN assignee_shared`); err != nil {
+			return err
+		}
+	}
+	// Ongoing and Project items gained their own colour (schema version 3).
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name = 'color'`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE items ADD COLUMN color TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	// Users gained a chip label (schema version 4); existing users get the
+	// default derived from their name.
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'short'`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN short TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	rows, err := s.db.Query(`SELECT id, name FROM users WHERE short = ''`)
+	if err != nil {
+		return err
+	}
+	type idName struct {
+		id   int64
+		name string
+	}
+	var blank []idName
+	for rows.Next() {
+		var r idName
+		if err := rows.Scan(&r.id, &r.name); err != nil {
+			rows.Close()
+			return err
+		}
+		blank = append(blank, r)
+	}
+	rows.Close()
+	for _, r := range blank {
+		if _, err := s.db.Exec(`UPDATE users SET short = ? WHERE id = ?`, defaultShort(r.name), r.id); err != nil {
 			return err
 		}
 	}
@@ -385,6 +461,238 @@ func (s *Store) UpdateSettings(vals map[string]string) (map[string]string, error
 	return s.Settings()
 }
 
+// ---------------------------------------------------------------- user prefs
+
+// PrefDefaults lists every known per-user preference with its default value.
+// Unknown keys are rejected by UpdateUserPrefs.
+var PrefDefaults = map[string]string{
+	"view":         "table", // table | timeline | matrix
+	"narrow":       "0",
+	"flat":         "0",
+	"collapsed":    "[]", // JSON array of collapsed parent item ids
+	"sort":         "[]", // JSON array of {"key": ..., "dir": "asc"|"desc"}
+	"blocked_last": "0",
+	"bar_color":    "assignee", // assignee | owner | importance | urgency | combo | parent
+	"hidden_cols":  "[]",       // JSON array of hidden table columns (see validColumns)
+	// Colour-coding by Ongoing/Project (the items' own colours are shared;
+	// whether and where they show is per user):
+	"parent_colors": "custom",   // custom: a parent row shows its own colour when set | type: always the type colour
+	"task_colors":   "type",     // type: task rows take the Task tint from Settings | parent: their Ongoing/Project colour
+	"point_color":   "assignee", // Matrix points: assignee | owner | parent
+	// The Filters panel criteria, as JSON (see validFilters), or "" for the
+	// default Active template. The search text is not kept.
+	"filters": "",
+}
+
+// MaxCollapsed caps the number of ids kept in the "collapsed" preference.
+const MaxCollapsed = 10000
+
+// MaxSortKeys caps the number of entries in the "sort" preference.
+const MaxSortKeys = 12
+
+// validColumns are the table columns that can be hidden (title and the
+// action buttons always show).
+var validColumns = map[string]bool{
+	"key": true, "parent": true, "status": true, "owner": true, "assignee": true,
+	"start": true, "end": true, "urgency": true, "importance": true, "blocked": true,
+}
+
+var validSortKeys = map[string]bool{
+	"parent": true, "key": true, "title": true, "status": true, "owner": true, "assignee": true,
+	"start": true, "end": true, "urgency": true, "importance": true, "blocked": true,
+}
+
+func oneOf(v string, opts ...string) bool {
+	for _, o := range opts {
+		if v == o {
+			return true
+		}
+	}
+	return false
+}
+
+func validPref(k, v string) error {
+	switch k {
+	case "view":
+		if !oneOf(v, "table", "timeline", "matrix") {
+			return verr("view must be one of table, timeline, matrix")
+		}
+	case "narrow", "flat", "blocked_last":
+		if v != "0" && v != "1" {
+			return verr("%s must be \"0\" or \"1\"", k)
+		}
+	case "collapsed":
+		var ids []int64
+		if err := json.Unmarshal([]byte(v), &ids); err != nil {
+			return verr("collapsed must be a JSON array of integers")
+		}
+		if len(ids) > MaxCollapsed {
+			return verr("collapsed may hold at most %d ids", MaxCollapsed)
+		}
+	case "sort":
+		var keys []struct {
+			Key string `json:"key"`
+			Dir string `json:"dir"`
+		}
+		dec := json.NewDecoder(strings.NewReader(v))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&keys); err != nil || dec.More() {
+			return verr(`sort must be a JSON array of {"key": ..., "dir": "asc"|"desc"}`)
+		}
+		if len(keys) > MaxSortKeys {
+			return verr("sort may hold at most %d entries", MaxSortKeys)
+		}
+		for _, sk := range keys {
+			if !validSortKeys[sk.Key] {
+				return verr("unknown sort key %q", sk.Key)
+			}
+			if sk.Dir != "asc" && sk.Dir != "desc" {
+				return verr("sort dir must be asc or desc")
+			}
+		}
+	case "hidden_cols":
+		var cols []string
+		if err := json.Unmarshal([]byte(v), &cols); err != nil {
+			return verr("hidden_cols must be a JSON array of column names")
+		}
+		for _, c := range cols {
+			if !validColumns[c] {
+				return verr("unknown column %q", c)
+			}
+		}
+	case "bar_color":
+		if !oneOf(v, "assignee", "owner", "importance", "urgency", "combo", "parent") {
+			return verr("bar_color must be one of assignee, owner, importance, urgency, combo, parent")
+		}
+	case "parent_colors":
+		if !oneOf(v, "custom", "type") {
+			return verr("parent_colors must be custom or type")
+		}
+	case "task_colors":
+		if !oneOf(v, "type", "parent") {
+			return verr("task_colors must be type or parent")
+		}
+	case "point_color":
+		if !oneOf(v, "assignee", "owner", "parent") {
+			return verr("point_color must be one of assignee, owner, parent")
+		}
+	case "filters":
+		if v != "" {
+			return validFilters(v)
+		}
+	default:
+		return verr("unknown preference %q", k)
+	}
+	return nil
+}
+
+// validFilters checks the "filters" preference: a JSON object with the
+// Filters panel criteria.
+func validFilters(v string) error {
+	var f struct {
+		Types            []string `json:"types"`
+		Statuses         []string `json:"statuses"`
+		RecentDays       int      `json:"recent_days"`
+		HideEmptyParents bool     `json:"hide_empty_parents"`
+		Owner            string   `json:"owner"`
+		Assignee         string   `json:"assignee"`
+		Blocked          string   `json:"blocked"`
+		EndAfter         string   `json:"end_after"`
+		EndBefore        string   `json:"end_before"`
+	}
+	dec := json.NewDecoder(strings.NewReader(v))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&f); err != nil || dec.More() {
+		return verr("filters must be a JSON object of filter criteria")
+	}
+	for _, t := range f.Types {
+		if _, ok := keyPrefix[t]; !ok {
+			return verr("filters: unknown type %q", t)
+		}
+	}
+	for _, st := range f.Statuses {
+		if !validStatuses[st] {
+			return verr("filters: unknown status %q", st)
+		}
+	}
+	if f.RecentDays < 0 || f.RecentDays > 365 {
+		return verr("filters: recent_days must be 0 to 365")
+	}
+	isUserRef := func(v string) bool {
+		if v == "" || v == "none" {
+			return true
+		}
+		_, err := strconv.ParseInt(v, 10, 64)
+		return err == nil
+	}
+	if !isUserRef(f.Owner) || !isUserRef(f.Assignee) {
+		return verr("filters: owner and assignee must be \"\", \"none\" or a user id")
+	}
+	if !oneOf(f.Blocked, "", "yes", "no") {
+		return verr("filters: blocked must be \"\", yes or no")
+	}
+	for _, d := range []string{f.EndAfter, f.EndBefore} {
+		if d != "" && !validDate(d) {
+			return verr("filters: end dates must be YYYY-MM-DD")
+		}
+	}
+	return nil
+}
+
+// UserPrefs returns the user's preferences with defaults applied.
+func (s *Store) UserPrefs(userID int64) (map[string]string, error) {
+	if _, err := s.GetUser(userID); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(PrefDefaults))
+	for k, v := range PrefDefaults {
+		out[k] = v
+	}
+	rows, err := s.db.Query(`SELECT key, value FROM user_prefs WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		if _, known := PrefDefaults[k]; known {
+			out[k] = v
+		}
+	}
+	return out, rows.Err()
+}
+
+// UpdateUserPrefs stores the given values for the user and returns the full
+// preference map. Every value is validated before anything is written.
+func (s *Store) UpdateUserPrefs(userID int64, vals map[string]string) (map[string]string, error) {
+	if _, err := s.GetUser(userID); err != nil {
+		return nil, err
+	}
+	for k, v := range vals {
+		if err := validPref(k, v); err != nil {
+			return nil, err
+		}
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	for k, v := range vals {
+		if _, err := tx.Exec(`INSERT INTO user_prefs (user_id, key, value) VALUES (?, ?, ?)
+			ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value`, userID, k, v); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.UserPrefs(userID)
+}
+
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 // ---------------------------------------------------------------- users
@@ -397,7 +705,7 @@ var palette = []string{
 }
 
 func (s *Store) ListUsers() ([]User, error) {
-	rows, err := s.db.Query(`SELECT id, name, color, created_at FROM users ORDER BY name COLLATE NOCASE`)
+	rows, err := s.db.Query(`SELECT id, name, color, short, created_at FROM users ORDER BY name COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +713,7 @@ func (s *Store) ListUsers() ([]User, error) {
 	out := []User{}
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &u.Short, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -415,8 +723,8 @@ func (s *Store) ListUsers() ([]User, error) {
 
 func (s *Store) GetUser(id int64) (*User, error) {
 	var u User
-	err := s.db.QueryRow(`SELECT id, name, color, created_at FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Name, &u.Color, &u.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, name, color, short, created_at FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Name, &u.Color, &u.Short, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -435,12 +743,52 @@ func validColor(c string) bool {
 	return true
 }
 
+// MaxShort is the length of a user's chip label in characters.
+const MaxShort = 3
+
+// defaultShort derives a chip label from a name: the initials of a
+// multi-word name (up to MaxShort), else the first MaxShort characters.
+func defaultShort(name string) string {
+	words := strings.Fields(name)
+	if len(words) >= 2 {
+		var b strings.Builder
+		for i, w := range words {
+			if i == MaxShort {
+				break
+			}
+			r, _ := utf8.DecodeRuneInString(w)
+			b.WriteString(strings.ToUpper(string(r)))
+		}
+		return b.String()
+	}
+	rs := []rune(name)
+	if len(rs) > MaxShort {
+		rs = rs[:MaxShort]
+	}
+	return string(rs)
+}
+
+func validShort(v string) error {
+	n := utf8.RuneCountInString(v)
+	if n == 0 || n > MaxShort {
+		return verr("short must be 1 to %d characters", MaxShort)
+	}
+	return nil
+}
+
 // CreateUser creates a user. If color is empty a palette colour is chosen
-// that is least used among existing users.
-func (s *Store) CreateUser(name, color string) (*User, error) {
+// that is least used among existing users; if short is empty the chip label
+// is derived from the name.
+func (s *Store) CreateUser(name, color, short string) (*User, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, verr("name is required")
+	}
+	short = strings.TrimSpace(short)
+	if short == "" {
+		short = defaultShort(name)
+	} else if err := validShort(short); err != nil {
+		return nil, err
 	}
 	if color == "" {
 		var n int
@@ -451,7 +799,7 @@ func (s *Store) CreateUser(name, color string) (*User, error) {
 	} else if !validColor(color) {
 		return nil, verr("color must be a #rrggbb hex string")
 	}
-	res, err := s.db.Exec(`INSERT INTO users (name, color, created_at) VALUES (?, ?, ?)`, name, color, now())
+	res, err := s.db.Exec(`INSERT INTO users (name, color, short, created_at) VALUES (?, ?, ?, ?)`, name, color, short, now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, verr("a user named %q already exists", name)
@@ -462,7 +810,7 @@ func (s *Store) CreateUser(name, color string) (*User, error) {
 	return s.GetUser(id)
 }
 
-func (s *Store) UpdateUser(id int64, name, color *string) (*User, error) {
+func (s *Store) UpdateUser(id int64, name, color, short *string) (*User, error) {
 	if _, err := s.GetUser(id); err != nil {
 		return nil, err
 	}
@@ -483,6 +831,15 @@ func (s *Store) UpdateUser(id int64, name, color *string) (*User, error) {
 			return nil, verr("color must be a #rrggbb hex string")
 		}
 		if _, err := s.db.Exec(`UPDATE users SET color = ? WHERE id = ?`, *color, id); err != nil {
+			return nil, err
+		}
+	}
+	if short != nil {
+		v := strings.TrimSpace(*short)
+		if err := validShort(v); err != nil {
+			return nil, err
+		}
+		if _, err := s.db.Exec(`UPDATE users SET short = ? WHERE id = ?`, v, id); err != nil {
 			return nil, err
 		}
 	}
@@ -510,6 +867,9 @@ func (s *Store) DeleteUser(id int64) error {
 	if _, err := s.db.Exec(`UPDATE items SET assignee_id = NULL WHERE assignee_id = ?`, id); err != nil {
 		return err
 	}
+	if _, err := s.db.Exec(`DELETE FROM user_prefs WHERE user_id = ?`, id); err != nil {
+		return err
+	}
 	_, err = s.db.Exec(`DELETE FROM users WHERE id = ?`, id)
 	return err
 }
@@ -518,7 +878,7 @@ func (s *Store) DeleteUser(id int64) error {
 
 const itemCols = `i.id, i.type, i.key, i.num, i.parent_id, i.title, i.description, i.owner_id,
 	i.assignee_id, i.status, i.start_date, i.start_firm, i.end_date, i.end_firm,
-	i.urgency, i.importance, i.blocked, i.sort_order, i.created_at, i.updated_at,
+	i.urgency, i.importance, i.blocked, i.color, i.sort_order, i.created_at, i.updated_at,
 	CASE WHEN i.status IN ('done','cancelled') THEN
 		(SELECT h.changed_at FROM status_history h WHERE h.item_id = i.id ORDER BY h.id DESC LIMIT 1)
 	END AS closed_at`
@@ -530,7 +890,7 @@ func scanItem(r scanner) (*Item, error) {
 	var sfirm, efirm, blocked int
 	err := r.Scan(&it.ID, &it.Type, &it.Key, &it.Num, &it.ParentID, &it.Title, &it.Description, &it.OwnerID,
 		&it.AssigneeID, &it.Status, &it.StartDate, &sfirm, &it.EndDate, &efirm,
-		&it.Urgency, &it.Importance, &blocked, &it.SortOrder, &it.CreatedAt, &it.UpdatedAt, &it.ClosedAt)
+		&it.Urgency, &it.Importance, &blocked, &it.Color, &it.SortOrder, &it.CreatedAt, &it.UpdatedAt, &it.ClosedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -539,6 +899,7 @@ func scanItem(r scanner) (*Item, error) {
 	it.Blocked = blocked != 0
 	it.BlockedBy = []int64{}
 	it.Blocks = []int64{}
+	it.Attachments = []Attachment{}
 	return &it, nil
 }
 
@@ -590,7 +951,10 @@ func (s *Store) ListItems() ([]Item, error) {
 	for i := range out {
 		byID[out[i].ID] = &out[i]
 	}
-	return out, s.fillDeps(byID)
+	if err := s.fillDeps(byID); err != nil {
+		return nil, err
+	}
+	return out, s.fillAttachments(byID)
 }
 
 func (s *Store) GetItem(id int64) (*Item, error) {
@@ -601,7 +965,11 @@ func (s *Store) GetItem(id int64) (*Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	return it, s.fillDeps(map[int64]*Item{it.ID: it})
+	byID := map[int64]*Item{it.ID: it}
+	if err := s.fillDeps(byID); err != nil {
+		return nil, err
+	}
+	return it, s.fillAttachments(byID)
 }
 
 // ---------------------------------------------------------------- dependencies
@@ -653,7 +1021,7 @@ func (s *Store) AddDependency(blocker, blocked int64) error {
 		cur := queue[0]
 		queue = queue[1:]
 		if cur == blocker {
-			return verr("that would create a cycle: the blocked item already blocks the blocker (directly or indirectly)")
+			return verr("That would create a cycle: the blocked item already blocks the blocker (directly or indirectly)")
 		}
 		for _, n := range next[cur] {
 			if !seen[n] {
@@ -760,12 +1128,12 @@ func (s *Store) CreateItem(in NewItem) (*Item, error) {
 
 	ts := now()
 	res, err := tx.Exec(`INSERT INTO items (type, num, key, parent_id, title, description, owner_id, assignee_id,
-		status, start_date, start_firm, end_date, end_firm, urgency, importance, blocked,
+		status, start_date, start_firm, end_date, end_firm, urgency, importance, blocked, color,
 		sort_order, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		in.Type, num, key, base.ParentID, base.Title, base.Description, base.OwnerID, base.AssigneeID,
 		base.Status, base.StartDate, base.StartFirm, base.EndDate, base.EndFirm,
-		base.Urgency, base.Importance, base.Blocked, order, ts, ts)
+		base.Urgency, base.Importance, base.Blocked, base.Color, order, ts, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -901,6 +1269,15 @@ func applyPatch(tx *sql.Tx, it *Item, p Patch) error {
 			it.Blocked = *p.Blocked
 		}
 	}
+	if p.Color != nil {
+		if isTask {
+			return verr("only Ongoing and Project items have a colour")
+		}
+		if *p.Color != "" && !validColor(*p.Color) {
+			return verr("color must be a #rrggbb hex string or empty")
+		}
+		it.Color = *p.Color
+	}
 	return nil
 }
 
@@ -932,10 +1309,10 @@ func (s *Store) UpdateItem(id int64, p Patch) (*Item, error) {
 	}
 	ts := now()
 	_, err = tx.Exec(`UPDATE items SET parent_id=?, title=?, description=?, owner_id=?, assignee_id=?,
-		status=?, start_date=?, start_firm=?, end_date=?, end_firm=?, urgency=?, importance=?, blocked=?,
+		status=?, start_date=?, start_firm=?, end_date=?, end_firm=?, urgency=?, importance=?, blocked=?, color=?,
 		sort_order=?, updated_at=? WHERE id = ?`,
 		cur.ParentID, cur.Title, cur.Description, cur.OwnerID, cur.AssigneeID,
-		cur.Status, cur.StartDate, cur.StartFirm, cur.EndDate, cur.EndFirm, cur.Urgency, cur.Importance, cur.Blocked,
+		cur.Status, cur.StartDate, cur.StartFirm, cur.EndDate, cur.EndFirm, cur.Urgency, cur.Importance, cur.Blocked, cur.Color,
 		order, ts, id)
 	if err != nil {
 		return nil, err
@@ -1095,4 +1472,221 @@ func (s *Store) History(id int64) ([]StatusChange, error) {
 		out = append(out, h)
 	}
 	return out, rows.Err()
+}
+
+// ---------------------------------------------------------------- attachments
+
+// MaxAttachmentSize is the largest file that can be attached to an item.
+const MaxAttachmentSize = 64 << 20
+
+// Attachment is the metadata of a file attached to an item; the bytes are
+// fetched separately with GetAttachment.
+type Attachment struct {
+	ID          int64  `json:"id"`
+	ItemID      int64  `json:"item_id"`
+	Name        string `json:"name"`
+	ContentType string `json:"content_type"`
+	Size        int64  `json:"size"`
+	CreatedAt   string `json:"created_at"`
+}
+
+const attachmentCols = `a.id, a.item_id, a.name, a.content_type, a.size, a.created_at`
+
+func scanAttachment(r scanner, extra ...any) (*Attachment, error) {
+	var a Attachment
+	dest := append([]any{&a.ID, &a.ItemID, &a.Name, &a.ContentType, &a.Size, &a.CreatedAt}, extra...)
+	if err := r.Scan(dest...); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+// fillAttachments attaches live attachment metadata to the items, oldest
+// first. A single item is looked up directly; a set is filled from one scan.
+func (s *Store) fillAttachments(items map[int64]*Item) error {
+	q := `SELECT ` + attachmentCols + ` FROM attachments a WHERE a.deleted_at IS NULL`
+	var args []any
+	if len(items) == 1 {
+		for id := range items {
+			q += ` AND a.item_id = ?`
+			args = append(args, id)
+		}
+	}
+	rows, err := s.db.Query(q+` ORDER BY a.id`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		a, err := scanAttachment(rows)
+		if err != nil {
+			return err
+		}
+		if it, ok := items[a.ItemID]; ok {
+			it.Attachments = append(it.Attachments, *a)
+		}
+	}
+	return rows.Err()
+}
+
+// baseName strips any directory components (either separator) from a file
+// name supplied by a client.
+func baseName(name string) string {
+	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
+		name = name[i+1:]
+	}
+	return strings.TrimSpace(name)
+}
+
+func itemLive(q scanner) error {
+	var n int
+	if err := q.Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CheckAttachment applies the validation AddAttachment performs on a file's
+// name and size, returning the stored form of the name (its base name,
+// trimmed). Callers with several files use it to reject the whole batch
+// before anything is stored.
+func CheckAttachment(name string, size int) (string, error) {
+	name = baseName(strings.TrimSpace(name))
+	if name == "" {
+		return "", verr("file name is required")
+	}
+	if len(name) > 255 {
+		return "", verr("file name must be at most 255 characters")
+	}
+	if size == 0 {
+		return "", verr("empty file: %s", name)
+	}
+	if size > MaxAttachmentSize {
+		return "", verr("file is larger than the %d MiB limit", MaxAttachmentSize>>20)
+	}
+	return name, nil
+}
+
+// GetAttachmentMeta returns an attachment's metadata without its bytes,
+// under the same visibility rules as GetAttachment.
+func (s *Store) GetAttachmentMeta(id int64) (*Attachment, error) {
+	a, err := scanAttachment(s.db.QueryRow(`SELECT `+attachmentCols+` FROM attachments a
+		JOIN items i ON i.id = a.item_id AND i.deleted_at IS NULL
+		WHERE a.id = ? AND a.deleted_at IS NULL`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return a, err
+}
+
+// AddAttachment stores data as a file attached to a live item. Only the base
+// name of name is kept; an empty contentType is stored as
+// application/octet-stream.
+func (s *Store) AddAttachment(itemID int64, name, contentType string, data []byte) (*Attachment, error) {
+	name, err := CheckAttachment(name, len(data))
+	if err != nil {
+		return nil, err
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := itemLive(tx.QueryRow(`SELECT COUNT(*) FROM items WHERE id = ? AND deleted_at IS NULL`, itemID)); err != nil {
+		return nil, err
+	}
+	res, err := tx.Exec(`INSERT INTO attachments (item_id, name, content_type, size, data, created_at) VALUES (?,?,?,?,?,?)`,
+		itemID, name, contentType, len(data), data, now())
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	a, err := scanAttachment(tx.QueryRow(`SELECT `+attachmentCols+` FROM attachments a WHERE a.id = ?`, id))
+	if err != nil {
+		return nil, err
+	}
+	return a, tx.Commit()
+}
+
+// GetAttachment returns an attachment's metadata and bytes. Soft-deleted
+// attachments and attachments of soft-deleted items are not found.
+func (s *Store) GetAttachment(id int64) (*Attachment, []byte, error) {
+	var data []byte
+	a, err := scanAttachment(s.db.QueryRow(`SELECT `+attachmentCols+`, a.data FROM attachments a
+		JOIN items i ON i.id = a.item_id AND i.deleted_at IS NULL
+		WHERE a.id = ? AND a.deleted_at IS NULL`, id), &data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return a, data, nil
+}
+
+// ListAttachments returns the live attachments of a live item, oldest first.
+func (s *Store) ListAttachments(itemID int64) ([]Attachment, error) {
+	if err := itemLive(s.db.QueryRow(`SELECT COUNT(*) FROM items WHERE id = ? AND deleted_at IS NULL`, itemID)); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`SELECT `+attachmentCols+` FROM attachments a WHERE a.item_id = ? AND a.deleted_at IS NULL ORDER BY a.id`, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Attachment{}
+	for rows.Next() {
+		a, err := scanAttachment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *a)
+	}
+	return out, rows.Err()
+}
+
+// DeleteAttachment soft-deletes an attachment.
+func (s *Store) DeleteAttachment(id int64) error {
+	res, err := s.db.Exec(`UPDATE attachments SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`, now(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// RestoreAttachment undoes a soft delete. Restoring an attachment whose item
+// is deleted is rejected; restoring a live attachment is a no-op.
+func (s *Store) RestoreAttachment(id int64) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var deletedAt, itemDeleted sql.NullString
+	err = tx.QueryRow(`SELECT a.deleted_at, i.deleted_at FROM attachments a JOIN items i ON i.id = a.item_id WHERE a.id = ?`, id).
+		Scan(&deletedAt, &itemDeleted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if !deletedAt.Valid {
+		return nil
+	}
+	if itemDeleted.Valid {
+		return verr("cannot restore: its item is deleted")
+	}
+	if _, err := tx.Exec(`UPDATE attachments SET deleted_at = NULL WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

@@ -21,12 +21,16 @@ the single SQLite file. The directory containing it must already exist.
 ## Using it
 
 1. Open **Settings** and add the people who will own or be assigned work. Each gets a colour (click the swatch to change it) that highlights
-   the Owner and Assignee columns everywhere.
+   the Owner and Assignee columns everywhere, and a chip label of up to
+   three characters (initials, or the start of the name) that is what the
+   chips show; the full name is in the tooltip.
 2. The planner is a single page. **Active**, **Backlog** and **Ideas** beside
    the search box are filter templates: Active sets To-Do and In-Progress
    plus anything closed in the last 14 days, the other two set that status
    for projects and tasks. They fill the Filters panel, where you can adjust
-   them; Clear removes every filter and shows everything. The gear at the
+   them; Clear removes every filter and shows everything. The filter
+   settings are remembered (per account, or per browser) like the other
+   preferences; the search text is not. The gear at the
    far left opens Settings, which has an Items button to come back.
    Active hides Ongoing and Project rows without active tasks; Backlog and
    Ideas keep every Ongoing row so items can be added to them. Filters apply
@@ -39,39 +43,80 @@ the single SQLite file. The directory containing it must already exist.
    Titles, dates and the description become inputs when clicked (Enter or
    leaving the field saves, Escape reverts; Ctrl+Enter in the description).
    Owner and Assignee show the current user's chip; click it to pick another
-   (chips with three or fewer users, a dropdown otherwise; click the pressed
-   chip to clear). The `~` before a date marks it approximate; click it to
-   toggle firm. In the urgency and importance fields a single key sets the
+   (a row of every user's chip when they fit in the cell, a dropdown
+   otherwise; click the pressed chip to clear). The `~` before a date marks it approximate; click it to
+   pin it firm (the `~` becomes a 📌; click again to make it approximate).
+   In the urgency and importance fields a single key sets the
    value: 1 to 9, 0 for 10 and ` for 0.
-4. Expand a row (▸) for its description and, for projects and tasks, its
-   dependencies. The caret before an Ongoing or Project title hides its
-   tasks (remembered across reloads). **Flat** shows tasks only, with the
-   parent's key and title as the first columns. Dependencies: "Blocked by" and "Blocks" lists with a dropdown to add more.
+4. Expand a row (▸) for its description, its attachments and, for projects
+   and tasks, its dependencies. The description is markdown, rendered
+   densely (a single newline is a line break, a blank line a new paragraph). The caret before an Ongoing or Project title
+   hides its tasks (remembered across reloads). **Flat** shows tasks only,
+   with the parent's key and title as the first columns; a heavier rule marks
+   where one parent's tasks end and the next begin (parent rows in the
+   normal layout carry the same rule). Dependencies: "Blocked by" and
+   "Blocks" lists of item keys with a dropdown to add more; hover a key for
+   the item's title, status and description.
    An item blocked by anything still open has its Blocked box locked on. Two
    items cannot block each other, directly or through a chain. The Timeline
    draws lines from a blocker's end to the blocked item's start; the Matrix
-   draws arrows between tasks.
+   draws arrows between tasks. Attachments: **Attach…** (or drop files on
+   the strip) stores files of any type with the item; a 📎 after the title
+   shows how many. Clicking a file opens it in a new tab when the browser can
+   show it (images, PDF, text, audio, video) and downloads it otherwise; × removes it.
 5. Drag the ⠿ handle to reorder: Ongoing/Project rows among themselves, tasks
    among any tasks. Dropping a task among another parent's tasks, or onto a
-   parent row, moves it to that parent. The **Narrow** toggle caps the table
-   width on very wide screens.
+   parent row, moves it to that parent (in Flat a task only moves among its
+   own parent's tasks). The ⇄ button on a task row moves it to another
+   Ongoing or Project (it goes last there). The **Wide / Narrow** icon pair
+   caps the table width on very wide screens, and **Nested / Flat** next to
+   it switches the layout (see Flat above).
+   **Sort**: click a column header to sort by it (again for descending, a
+   third time to remove it); headers clicked in sequence build a
+   multi-column sort, numbered in the header. The Sort menu shows the
+   columns in effect, flips or removes them, returns to **User-defined** (the
+   drag order) and has **Blocked items last**, which sinks blocked items
+   whatever the sort. While sorted, rows cannot be dragged. The **Columns**
+   menu next to it hides or shows any column (the title always shows).
+   Dependencies and attachments in the expanded row each have a small **+**
+   (the dropdown of items, or the file picker).
+   The toolbar buttons are icons; hover one for what it does.
 6. **Timeline** shows a Gantt chart beside the titles (zoom with the +/−
    buttons or Ctrl+wheel, wheel or drag to pan, Today recentres). Drag a bar
    to move its dates or an end to resize; drag or click in a bar's faded
    tail to pin the missing date; click or drag on an empty row to create
-   dates; hover a bar for × buttons that remove a date. **Matrix**
+   dates; hover a bar for × buttons that remove a date. The dropdown in the
+   Timeline's corner colours the bars by assignee, owner, importance, urgency
+   or importance × urgency (a blend: red = urgent and important, blue =
+   important, amber = urgent, grey = neither), with a legend. **Matrix**
    plots tasks by urgency and importance; hover a point for its description.
    Settings has the first day of the week, the row tint colours for
    Ongoing, Project and Task rows, the end-date highlight colours and
    windows, and a colour for each urgency and importance value (two ramps,
    with presets).
+   **Item colours**: every Ongoing and Project can have a colour of its own.
+   Click the swatch before its title for a palette, a custom colour, or back
+   to the type colour; the colour is stored on the item, so everyone sees
+   it. The **Colours** menu in the toolbar is your own choice of what shows:
+   Ongoing/Project rows in their own colour (when set) or always the type
+   colour from Settings, and task rows in the Task tint or in their
+   Ongoing/Project's colour. The Timeline's colour dropdown and a matching
+   one above the Matrix have an **Ongoing / Project** mode that colours bars
+   and points the same way.
 7. Table, Timeline and Matrix show the same filtered items.
 8. Deleting hides an item (and its tasks) from the UI; the rows stay in the
    database and keys are never reused. Each item's status history is kept and
    available at `/api/items/{id}/history`.
 9. **Ctrl+Z** (Cmd+Z) undoes the last change made in this browser session,
-   up to 20 steps: edits, new items, deletions, moves and dependency changes.
-   Inside a text field the browser's own undo applies.
+   up to 20 steps: edits, new items, deletions, moves, dependency changes
+   and attachment uploads and removals. Inside a text field the browser's
+   own undo applies.
+10. **Accounts**: the menu at the far right of the title bar says who you
+   are (one of the users from Settings; there is no password). The view,
+   Flat, Narrow, collapsed parents, sort, hidden columns, filters, Timeline
+   and Matrix colouring and the Colours menu are saved with the account, so they
+   follow you to any browser; with **No account** they are kept in the
+   browser only.
 
 "Today" and all date highlighting use the browser's timezone, not the
 server's. A project's status decides under which filter its tasks appear.
@@ -181,11 +226,18 @@ Layout:
     internal/store        SQLite persistence, validation, soft delete, status history
     internal/api          JSON API handlers (see package doc for conventions)
     static/               Frontend: vanilla ES modules, no build step
-      js/app.js           hash router, toolbar, page rendering
+      js/app.js           hash router, toolbar, account menu, page rendering
+      js/prefs.js         per-account preferences (server) or per-browser (localStorage)
+      js/sort.js          column sort: comparator, header-click rule, Sort menu
+      js/columns.js       column definitions, widths, hidden columns and the Columns menu
+      js/icons.js         inline SVG icons for the toolbar
+      js/tooltip.js       the item tooltip shared by the Matrix and the dependency chips
+      js/colors.js        colour-coding: bar/point modes, Ongoing/Project colours, the Colours menu
+      js/swatch.js        the colour swatch and palette popover on Ongoing/Project rows
       js/state.js         client cache + local-timezone date helpers
       js/filters.js       grouping of items and the Active/Backlog/Ideas filter templates
       js/table.js         hierarchical table renderer, drag reordering, expanded rows
-      js/cells.js         inline-editable cells, new-row draft, dependency panel
+      js/cells.js         inline-editable cells, new-row draft, dependency and attachment panels
       js/timeline.js      Timeline (Gantt) view
       js/matrix.js        Matrix (scatter) view
       js/settings.js      Settings page (week start, row colours)
@@ -206,14 +258,21 @@ Commands:
 
 API summary (all JSON):
 
-    GET    /api/users                 PATCH /api/users/{id}  {name?, color?}
-    POST   /api/users {name, color?}  DELETE /api/users/{id}   (409 if referenced)
+    GET    /api/users                 PATCH /api/users/{id}  {name?, color?, short?}
+    POST   /api/users {name, color?, short?}  DELETE /api/users/{id}   (409 if referenced)
+    GET    /api/users/{id}/prefs      PATCH /api/users/{id}/prefs {key: value}
+                                      (view, narrow, flat, collapsed, sort, blocked_last, bar_color, hidden_cols,
+                                       parent_colors, task_colors, point_color, filters)
     GET    /api/items                 all live items, ordered by parent then sort_order
     POST   /api/items {type, title, parent_id?, ...}
     GET    /api/items/{id}            PATCH /api/items/{id}  partial; null clears
     DELETE /api/items/{id}            soft delete (cascades to tasks)
     GET    /api/items/{id}/history    status changes, oldest first
     POST   /api/items/{id}/restore    undo a soft delete (and its cascaded tasks)
+    GET    /api/items/{id}/attachments           metadata of the item's files
+    POST   /api/items/{id}/attachments           multipart/form-data, "file" parts (64 MiB each)
+    GET    /api/attachments/{id}[?download=1]    the bytes (inline if the browser can show the type)
+    DELETE /api/attachments/{id}                 soft delete; POST /api/attachments/{id}/restore undoes it
     PUT    /api/order {ids: [...]}    reorder siblings
     POST   /api/dependencies {blocker_id, blocked_id}   400 on self/ongoing/cycle
     DELETE /api/dependencies/{blocker}/{blocked}
@@ -221,6 +280,9 @@ API summary (all JSON):
 
 Item JSON fields: id, type (ongoing|project|task), key, num, parent_id, title,
 description, owner_id, assignee_id, status, start_date,
-start_firm, end_date, end_firm, urgency, importance, blocked, sort_order,
+start_firm, end_date, end_firm, urgency, importance, blocked, color (an
+Ongoing's or Project's own "#rrggbb", or "" for the type colour), sort_order,
 created_at, updated_at, closed_at (set while status is done/cancelled),
-blocked_by and blocks (ids of live projects/tasks).
+blocked_by and blocks (ids of live projects/tasks), attachments (metadata:
+id, name, content_type, size, created_at). Attachment bytes are stored in the
+SQLite file, so the single-file backup story still holds.

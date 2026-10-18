@@ -20,8 +20,8 @@ export function allGroups() {
 // closed within that many days, `types` restricts item types, and
 // `hideEmptyParents` drops Ongoing/Project rows with no matching tasks.
 export const PRESETS = {
-  active: { title: 'Active', statuses: ['todo', 'in-progress'], recentDays: 14, types: [], hideEmptyParents: true },
-  backlog: { title: 'Backlog', statuses: ['backlog'], recentDays: 0, types: [], hideEmptyParents: false },
-  ideas: { title: 'Ideas', statuses: ['idea'], recentDays: 0, types: [], hideEmptyParents: false },
+  active: { title: 'Active', hint: 'To-Do and In-Progress items, plus anything closed in the last 14 days', statuses: ['todo', 'in-progress'], recentDays: 14, types: [], hideEmptyParents: true },
+  backlog: { title: 'Backlog', hint: 'Backlog projects and tasks', statuses: ['backlog'], recentDays: 0, types: [], hideEmptyParents: false },
+  ideas: { title: 'Ideas', hint: 'Idea projects and tasks', statuses: ['idea'], recentDays: 0, types: [], hideEmptyParents: false },
 };
 export const PRESET_ORDER = ['active', 'backlog', 'ideas'];

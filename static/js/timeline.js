@@ -5,7 +5,9 @@
 //   handle  the table handle from renderTable: rows [{ item, el, kind }] in
 //           display order; bars are aligned to each row's actual bounding box
 //           (so expanded description rows are accounted for).
-//   ctx     { rerender() } to redraw after data changes
+//   ctx     { rerender(), onChanged(), barColor, setBarColor(mode) }
+//           barColor is the bar colouring mode (see colors.js) and
+//           setBarColor persists a new one and re-renders.
 //
 // Layout: a horizontally scrollable canvas (native scrollbar, shift+wheel,
 // drag to pan) covering a wide date range; zoom (ctrl+wheel or the +/- buttons)
@@ -23,6 +25,7 @@
 import { el, toast } from './util.js';
 import { api } from './api.js';
 import { state, isClosed, isBlocked, dependencyEdges, parseYMD, today, daysFromToday, addDays } from './state.js';
+import { BAR_COLOR_MODES, barColor, barLegend, rowTint } from './colors.js';
 
 const DAY_MS = 86400000;
 const MAX_PPD = 80;        // max pixels per day
@@ -188,6 +191,22 @@ function drawDependencies(geom, width, height) {
   return node;
 }
 
+// ---------------------------------------------------------------- legend
+
+/** Compact legend for the bar colouring mode (swatches with the value for a
+ *  ramp, the four corner labels for combo), or null when none is needed. */
+function legendFor(mode) {
+  const data = barLegend(mode);
+  if (!data) return null;
+  const legend = el('div', { class: `timeline-legend ${mode}`, 'aria-label': `Bar colours: ${BAR_COLOR_MODES.find(([m]) => m === mode)?.[1] || mode}` });
+  for (const d of data) {
+    legend.append(el('span', { class: 'timeline-legend-item', dataset: d.value != null ? { value: String(d.value) } : {} },
+      el('span', { class: 'timeline-legend-swatch', style: { background: d.color } }),
+      el('span', { class: 'timeline-legend-label' }, d.value != null ? String(d.value) : d.label)));
+  }
+  return legend;
+}
+
 // ---------------------------------------------------------------- render
 
 export function renderTimeline(panel, handle, ctx) {
@@ -222,13 +241,20 @@ export function renderTimeline(panel, handle, ctx) {
   const scroll = el('div', { class: 'timeline-scroll' });
   const canvas = el('div', { class: 'timeline-canvas' });
   const tooltip = el('div', { class: 'timeline-tooltip', hidden: true });
-  const controls = el('div', { class: 'timeline-controls', role: 'group', 'aria-label': 'Timeline zoom' });
+  const controls = el('div', { class: 'timeline-controls', role: 'group', 'aria-label': 'Timeline controls' });
+  // Bar colouring mode (a preference): the select sits left of the zoom buttons.
+  const colorMode = BAR_COLOR_MODES.some(([m]) => m === ctx.barColor) ? ctx.barColor : 'assignee';
+  const colorSel = el('select', { id: 'timeline-color', class: 'timeline-color', 'aria-label': 'Colour bars by', title: 'Colour bars by' });
+  for (const [m, label] of BAR_COLOR_MODES) colorSel.append(el('option', { value: m, selected: m === colorMode ? true : null }, label));
+  colorSel.addEventListener('pointerdown', (ev) => ev.stopPropagation()); // not a pan
+  colorSel.addEventListener('change', () => ctx.setBarColor?.(colorSel.value));
   const btnOut = el('button', { type: 'button', class: 'icon', title: 'Zoom out', 'aria-label': 'Zoom out', dataset: { plan: 'zoom-out' } }, '−');
   const btnIn = el('button', { type: 'button', class: 'icon', title: 'Zoom in', 'aria-label': 'Zoom in', dataset: { plan: 'zoom-in' } }, '+');
   const btnToday = el('button', { type: 'button', title: 'Scroll to today', dataset: { plan: 'today' } }, 'Today');
-  controls.append(btnOut, btnIn, btnToday);
+  controls.append(colorSel, btnOut, btnIn, btnToday);
   scroll.append(canvas);
-  plan.append(scroll, controls, tooltip);
+  const legend = legendFor(colorMode);
+  plan.append(scroll, controls, ...(legend ? [legend] : []), tooltip);
   panel.replaceChildren(plan);
 
   const viewportW = () => Math.max(scroll.clientWidth, 50);
@@ -278,6 +304,8 @@ export function renderTimeline(panel, handle, ctx) {
         dataset: { id: it.id },
         style: { top: `${top}px`, height: `${h}px` },
       });
+      const tint = rowTint(it, r.kind); // same tint rule as the table rows
+      if (tint) band.style.setProperty('--row-color', tint);
       bands.push(band);
       const barH = Math.max(8, Math.round(Math.min(r.kind === 'parent' ? 18 : 14, h * 0.55)));
 
@@ -318,7 +346,6 @@ export function renderTimeline(panel, handle, ctx) {
       if (x1 > W) { clipR = x1 - W; x1 = W; }
       if (x1 <= x0) continue;
       const mask = `linear-gradient(to right, transparent ${-clipL}px, #000 ${fadeL - clipL}px, #000 calc(100% - ${fadeR - clipR}px), transparent calc(100% + ${clipR}px))`;
-      const user = it.assignee_id != null ? state.usersById.get(it.assignee_id) : null;
       const cls = ['timeline-bar', r.kind];
       if (isClosed(it.status)) cls.push('closed');
       if (isBlocked(it)) cls.push('blocked');
@@ -336,7 +363,7 @@ export function renderTimeline(panel, handle, ctx) {
         class: cls.join(' '),
         dataset: { id: it.id, key: it.key, fadeL: fadeL.toFixed(1), fadeR: fadeR.toFixed(1) },
         style: {
-          background: user ? user.color : (state.settings?.color_unassigned || 'var(--accent)'),
+          background: barColor(it, colorMode),
           maskImage: mask, webkitMaskImage: mask,
         },
       });
@@ -354,7 +381,7 @@ export function renderTimeline(panel, handle, ctx) {
         });
         wrap.append(btn);
       }
-      bar.addEventListener('mouseenter', () => { if (!barDrag) showTip(it, user); });
+      bar.addEventListener('mouseenter', () => { if (!barDrag) showTip(it); });
       bar.addEventListener('mousemove', (e) => { if (!barDrag) { const z = zoneFor(bar, it, e); bar.style.cursor = cursorFor(z); setTipHint(hintFor(z, it)); moveTip(e); } });
       bar.addEventListener('mouseleave', hideTip);
       bar.addEventListener('pointerdown', (e) => startBarDrag(e, wrap, bar, it));
@@ -542,12 +569,20 @@ export function renderTimeline(panel, handle, ctx) {
     if (!d) return 'none';
     return firm ? `${d} (firm)` : d;
   }
-  function showTip(it, user) {
+  function showTip(it) {
     tooltip.replaceChildren(
       el('div', { class: 'timeline-tip-title' }, el('span', { class: 'key' }, it.key), ' ', it.title),
       el('div', { class: 'timeline-tip-dates' }, `Start: ${fmtDate(it.start_date, it.start_firm)}  ·  End: ${fmtDate(it.end_date, it.end_firm)}`),
     );
-    if (user) tooltip.append(el('div', { class: 'timeline-tip-who' }, `Assignee: ${user.name}`));
+    const assignee = it.assignee_id != null ? state.usersById.get(it.assignee_id) : null;
+    const owner = it.owner_id != null ? state.usersById.get(it.owner_id) : null;
+    if (assignee) tooltip.append(el('div', { class: 'timeline-tip-who' }, `Assignee: ${assignee.name}`));
+    if (owner) tooltip.append(el('div', { class: 'timeline-tip-who' }, `Owner: ${owner.name}`));
+    if (it.type === 'task' && (colorMode === 'importance' || colorMode === 'urgency' || colorMode === 'combo')) {
+      tooltip.append(el('div', { class: 'timeline-tip-who' }, `Importance: ${it.importance ?? '—'}  ·  Urgency: ${it.urgency ?? '—'}`));
+    }
+    const parent = it.type === 'task' && it.parent_id != null ? state.itemsById.get(it.parent_id) : null;
+    if (parent && colorMode === 'parent') tooltip.append(el('div', { class: 'timeline-tip-who' }, `${parent.type === 'ongoing' ? 'Ongoing' : 'Project'}: ${parent.key} ${parent.title}`));
     tooltip.append(el('div', { class: 'timeline-tip-hint' }));
     tooltip.hidden = false;
   }

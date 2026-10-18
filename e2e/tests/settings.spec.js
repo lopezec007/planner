@@ -9,7 +9,7 @@ test.afterEach(async ({ request }) => {
 test('settings page hosts the users list and the old #/users route still works', async ({ page }) => {
   await page.goto('/#/settings');
   await expect(page.locator('h1')).toHaveText('Settings');
-  await expect(page.locator('#settings-users .chip', { hasText: 'Evan' })).toBeVisible();
+  await expect(page.locator('#settings-users .chip', { hasText: 'Eva' })).toBeVisible();
   await page.goto('/#/users');
   await expect(page.locator('h1')).toHaveText('Settings');
   // The gear opens Settings directly and the toolbar offers a way back.
@@ -21,7 +21,7 @@ test('settings page hosts the users list and the old #/users route still works',
   await page.locator('#btn-back').click();
   // The filter templates sit beside the Filters button and set the filters.
   await page.locator('.search-preset[data-preset=backlog]').click();
-  await expect(page.locator('.search-preset.active')).toHaveText('Backlog');
+  await expect(page.locator('.search-preset.active')).toHaveAttribute('data-preset', 'backlog');
   await expect(page.locator('#btn-filters .search-badge')).toHaveText('1'); // status
 });
 

@@ -191,7 +191,7 @@ test('the Active / Backlog / Ideas templates set the filters; other criteria sta
   await expect(tasks(page)).toHaveCount(1);
   // Active template: status To-Do/In-Progress (+ recently closed); the search still applies.
   await page.locator('.search-preset[data-preset=active]').click();
-  await expect(page.locator('.search-preset.active')).toHaveText('Active');
+  await expect(page.locator('.search-preset.active')).toHaveAttribute('data-preset', 'active');
   await expect(page.locator('#search-text')).toHaveValue('gutters');
   await expect(tasks(page)).toHaveCount(1);
   await expect(task(page, 'Clean gutters')).toBeVisible();

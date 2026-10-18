@@ -9,9 +9,10 @@ test('users page lists seeded users with colour chips', async ({ page }) => {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/#/settings');
   await expect(page.locator('.user-row:not(.header)')).toHaveCount(3);
-  for (const name of ['Alex', 'Evan', 'Sam']) {
-    const r = page.locator('.user-row', { hasText: name });
-    await expect(r.locator('.chip')).toHaveText(name);
+  for (const [name, short] of [['Alex', 'Ale'], ['Evan', 'Eva'], ['Sam', 'Sam']]) {
+    const r = row(page, name);
+    await expect(r.locator('.chip')).toHaveText(short); // the chip label, up to 3 characters
+    await expect(r.locator('.user-short')).toHaveValue(short);
     const bg = await r.locator('.chip').evaluate((n) => getComputedStyle(n).backgroundColor);
     expect(bg).toMatch(/^rgb\(/);
     await expect(r.locator('input[type="color"]')).toHaveValue(/^#[0-9a-f]{6}$/);
@@ -27,7 +28,7 @@ test('add, rename, recolour and delete a user', async ({ page }) => {
   // Add: colour is auto-assigned by the server.
   await page.locator('#new-user-name').fill('Robin');
   await page.locator('#btn-add-user').click();
-  const robin = page.locator('.user-row', { hasText: 'Robin' });
+  const robin = row(page, 'Robin');
   await expect(robin).toHaveCount(1);
   await expect(robin.locator('input[type="color"]')).toHaveValue(/^#[0-9a-f]{6}$/);
   await expect(page.locator('#new-user-name')).toHaveValue('');
@@ -35,7 +36,8 @@ test('add, rename, recolour and delete a user', async ({ page }) => {
   // Rename inline: edit the name field and press Enter.
   await robin.locator('.user-name').fill('Robin Lee');
   await robin.locator('.user-name').press('Enter');
-  await expect(page.locator('.user-row .chip', { hasText: 'Robin Lee' })).toBeVisible();
+  await expect(row(page, 'Robin Lee')).toHaveCount(1);
+  await expect(row(page, 'Robin Lee').locator('.chip')).toHaveText('Rob'); // the label stays as it was
   await expect(page.locator('.user-row:not(.header)')).toHaveCount(4);
 
   // Recolour Evan and verify the chip colour changes here and on the homepage.
@@ -45,7 +47,7 @@ test('add, rename, recolour and delete a user', async ({ page }) => {
   await expect(evan.locator('.user-hex')).toHaveText('#123456');
   await page.goto('/#/');
   const maint = page.locator('.row.parent', { hasText: 'Maintenance' });
-  await expect(maint.locator('.chip', { hasText: 'Evan' })).toHaveCSS('background-color', 'rgb(18, 52, 86)');
+  await expect(maint.locator('.chip', { hasText: 'Eva' })).toHaveCSS('background-color', 'rgb(18, 52, 86)');
 
   // Deleting a referenced user fails with the server's 409 message and the user stays.
   await page.goto('/#/settings');

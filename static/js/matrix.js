@@ -3,7 +3,10 @@
 // renderMatrix(panel, handle, ctx)
 //   panel   the right-hand container element
 //   handle  the table handle from renderTable: rows [{ item, el, kind }]
-//   ctx     { rerender() }
+//   ctx     { rerender(), onChanged(), pointColor, setPointColor(mode) }
+//           pointColor is the point colouring mode (a preference: assignee,
+//           owner or the task's Ongoing/Project, see colors.js) picked with
+//           the dropdown above the plot; setPointColor persists a new one.
 //
 // Classic Eisenhower orientation: urgency runs 10 on the left to 0 on the
 // right, importance 0 at the bottom to 10 at the top, so the urgent-and-
@@ -16,19 +19,20 @@
 // grid point, ordered by id, so the layout is deterministic and every point
 // stays visibly attached to its integer value.
 //
-// Hovering a point shows a tooltip (title + rendered markdown description) and
-// toggles .matrix-hover on the matching table row; hovering a table row
-// highlights its point in return.
+// Hovering a point shows the shared item tooltip (tooltip.js: title, values
+// and the rendered description) and toggles .matrix-hover on the matching
+// table row; hovering a table row highlights its point in return.
 //
 // Dependencies between two plotted tasks are drawn as a thin straight line
 // from the blocker's dot to the blocked dot (shortened to the dots' edges,
 // arrowhead at the blocked end) in a group beneath the points. Lines from an
 // open blocker use the alert colour; hovering a point lights up its lines.
 
-import { state, isClosed, isBlocked, openBlockers, dependencyEdges, STATUS_LABEL } from './state.js';
-import { renderMarkdown } from './markdown.js';
+import { state, isClosed, isBlocked, dependencyEdges } from './state.js';
 import { api } from './api.js';
 import { el, toast } from './util.js';
+import { itemTooltip } from './tooltip.js';
+import { POINT_COLOR_MODES, parentColor } from './colors.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const MAX = 10;
@@ -123,81 +127,16 @@ function pointClass(item) {
   return cls.join(' ');
 }
 
-function pointColor(item) {
-  if (isClosed(item.status)) return null; // no highlighting on closed items
-  const u = item.assignee_id != null ? state.usersById.get(item.assignee_id) : null;
-  if (u) return u.color;
-  return state.settings?.color_unassigned || null; // grey for no assignee (a setting)
-}
-
-function assigneeName(item) {
-  if (item.assignee_id == null) return null;
-  return state.usersById.get(item.assignee_id)?.name ?? `#${item.assignee_id}`;
-}
-
-// ---------------------------------------------------------------- tooltip
-
-function createTooltip(panel) {
-  const tip = el('div', { class: 'matrix-tip', role: 'tooltip', hidden: true });
-  panel.append(tip);
-  let hideTimer = null;
-  let current = null;
-
-  function fill(item) {
-    const header = el('div', { class: 'tip-head' },
-      el('span', { class: 'tip-key' }, item.key),
-      el('span', { class: 'tip-title' }, item.title));
-    const meta = el('div', { class: 'tip-meta' },
-      el('span', {}, el('b', {}, String(level(item.urgency))), ' urgency'),
-      el('span', {}, el('b', {}, String(level(item.importance))), ' importance'),
-      el('span', {}, STATUS_LABEL[item.status] || item.status));
-    const who = assigneeName(item);
-    if (who) meta.append(el('span', {}, who));
-    if (isBlocked(item)) {
-      const by = openBlockers(item).map((b) => b.key);
-      meta.append(el('span', { class: 'tip-blocked' }, by.length ? `Blocked by ${by.join(', ')}` : 'Blocked'));
-    }
-    tip.replaceChildren(header, meta);
-    if (item.description && item.description.trim()) {
-      const md = el('div', { class: 'md tip-desc' });
-      md.innerHTML = renderMarkdown(item.description);
-      tip.append(md);
-    }
-  }
-
-  function place(anchor) {
-    const pad = 8;
-    const r = anchor.getBoundingClientRect();
-    const vw = window.innerWidth, vh = window.innerHeight;
-    tip.style.left = '0px';
-    tip.style.top = '0px';
-    tip.style.maxHeight = `${Math.max(120, vh - 2 * pad)}px`;
-    const tw = tip.offsetWidth, th = tip.offsetHeight;
-    let left = r.right + 10;
-    if (left + tw > vw - pad) left = r.left - 10 - tw; // flip to the left
-    if (left < pad) left = Math.max(pad, Math.min(vw - pad - tw, r.left));
-    let top = r.top + r.height / 2 - th / 2;
-    top = Math.max(pad, Math.min(vh - pad - th, top));
-    tip.style.left = `${Math.round(left)}px`;
-    tip.style.top = `${Math.round(top)}px`;
-  }
-
-  return {
-    show(item, anchor) {
-      clearTimeout(hideTimer);
-      hideTimer = null;
-      if (current !== item) { fill(item); current = item; }
-      tip.hidden = false;
-      place(anchor);
-    },
-    // Deferred so that moving across the gap between two nearby points does
-    // not blink the tooltip off and on.
-    hide() {
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => { tip.hidden = true; current = null; }, 120);
-    },
-    el: tip,
-  };
+/** The dot colour in `mode`: the assignee's or owner's colour, or the
+ *  task's Ongoing/Project colour; grey (the "unassigned" setting) when there
+ *  is none. Closed items are not highlighted. */
+function pointColor(item, mode) {
+  if (isClosed(item.status)) return null;
+  const neutral = state.settings?.color_unassigned || null;
+  if (mode === 'parent') return parentColor(item) || neutral;
+  const field = mode === 'owner' ? 'owner_id' : 'assignee_id';
+  const u = item[field] != null ? state.usersById.get(item[field]) : null;
+  return u ? u.color : neutral;
 }
 
 // ---------------------------------------------------------------- dependencies
@@ -240,7 +179,7 @@ function drawDependencies(pts) {
 
 // ---------------------------------------------------------------- plot
 
-function drawPlot(root, rows, width, height) {
+function drawPlot(root, rows, width, height, colorMode) {
   const plotW = Math.max(MIN_PLOT, width - MARGIN.left - MARGIN.right);
   const plotH = Math.max(MIN_PLOT, height - MARGIN.top - MARGIN.bottom);
   const W = plotW + MARGIN.left + MARGIN.right;
@@ -285,7 +224,7 @@ function drawPlot(root, rows, width, height) {
 
   const points = svg('g', { class: 'points' });
   for (const p of pts) {
-    const color = pointColor(p.item);
+    const color = pointColor(p.item, colorMode);
     const g = svg('g', {
       class: pointClass(p.item),
       dataset: { id: p.item.id, key: p.item.key },
@@ -330,9 +269,15 @@ export function renderMatrix(panel, handle, ctx) {
   const wrap = el('div', { class: 'matrix' });
   panel.replaceChildren(wrap);
 
+  // Point colouring mode (a preference), in a strip above the plot.
+  const colorMode = POINT_COLOR_MODES.some(([m]) => m === ctx.pointColor) ? ctx.pointColor : 'assignee';
+  const colorSel = el('select', { id: 'matrix-color', class: 'matrix-color', 'aria-label': 'Colour points by', title: 'Colour points by' });
+  for (const [m, label] of POINT_COLOR_MODES) colorSel.append(el('option', { value: m, selected: m === colorMode ? true : null }, label));
+  colorSel.addEventListener('change', () => ctx.setPointColor?.(colorSel.value));
+  const controls = el('div', { class: 'matrix-controls', role: 'group', 'aria-label': 'Matrix controls' }, colorSel);
   const plotRoot = el('div', { class: 'matrix-plot-wrap' });
-  wrap.append(plotRoot);
-  const tip = createTooltip(panel);
+  wrap.append(controls, plotRoot);
+  const tip = itemTooltip();
 
   let drawnW = -1, drawnH = -1;
   let dragging = false;
@@ -343,7 +288,7 @@ export function renderMatrix(panel, handle, ctx) {
    *  coordinates, so scrolling does not change it) to the viewport bottom. */
   function availableHeight() {
     const top = panel.getBoundingClientRect().top + window.scrollY;
-    return Math.round(window.innerHeight - top - BOTTOM_GAP);
+    return Math.round(window.innerHeight - top - BOTTOM_GAP - controls.offsetHeight);
   }
 
   /** Highlight a point and the dependency lines attached to it. */
@@ -359,7 +304,7 @@ export function renderMatrix(panel, handle, ctx) {
     if (width === drawnW && height === drawnH) return;
     drawnW = width;
     drawnH = height;
-    const res = drawPlot(plotRoot, rows, width, height);
+    const res = drawPlot(plotRoot, rows, width, height, colorMode);
     pts = res.pts;
     const { ux, iy } = res.inv;
     const svgNode = res.svg;
