@@ -19,6 +19,10 @@ test('Nested/Flat and Wide/Narrow are icon groups like the view switch', async (
     expect((await b.textContent()).trim()).toBe('');
   }
   await expect(page.locator('.group[aria-label=Layout] button')).toHaveCount(2);
+  // Each pair's two icons are different drawings.
+  const svg = (id) => page.locator(`#${id} svg`).evaluate((e) => e.innerHTML);
+  expect(await svg('btn-wide')).not.toBe(await svg('btn-narrow'));
+  expect(await svg('btn-nested')).not.toBe(await svg('btn-flat'));
   await expect(page.locator('.group[aria-label=Width] button')).toHaveCount(2);
   await expect(page.locator('#btn-nested')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#btn-flat')).toHaveAttribute('aria-pressed', 'false');
