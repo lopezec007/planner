@@ -10,3 +10,15 @@ e2e/playwright-report/
 /dist/
 /.claude/worktrees/
 dev.db.bak-*
+
+# Android app
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+android/*.jks
+android/.kotlin/
+android/.idea/
+*.apk
+*.aab

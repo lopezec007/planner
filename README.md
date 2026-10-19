@@ -122,6 +122,15 @@ the single SQLite file. The directory containing it must already exist.
 "Today" and all date highlighting use the browser's timezone, not the
 server's. A project's status decides under which filter its tasks appear.
 
+## Android app
+
+A phone client lives in [android/](android/): Kotlin and Jetpack Compose,
+built for GrapheneOS first, offline-tolerant, talking to the same API over the
+LAN or a WireGuard tunnel. See [android/README.md](android/README.md) for the
+design and [android/SETUP.md](android/SETUP.md) for the toolchain;
+`make android`, `make android-test` and `make android-release` wrap the Gradle
+build.
+
 ## Deploying on Debian
 
 The app runs as a systemd service on a Debian 13 host; see `deploy/`. It

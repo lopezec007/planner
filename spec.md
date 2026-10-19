@@ -15,7 +15,7 @@ The technology stack (language, framework, libraries, etc.) is at the implemente
 - It will be entirely self-hosted on a private network with no public access.  Security is not a major concern.
 - All data should be stored in a single SQLite file.  Backups are out of scope; the end user will back up the SQLite
   file as they see fit (e.g. with restic).
-- Target desktop browsers only.  An Android app with a mobile-bespoke UI will be built separately later.
+- Target desktop browsers only.  An Android app with a mobile-bespoke UI is specified at the end of this document.
 
 ### Users
 - Users are managed in-app.  There is no authentication.
@@ -236,3 +236,36 @@ Same as the Backlog filter but for ideas.
 Free text over key, title and description; type, status (with an optional "or closed within N days"), owner,
 assignee, blocked and end-date filters.  The status filter follows the "project status supersedes its tasks" rule
 and never excludes Ongoing rows.  Filters also apply to the "Plan" (Timeline) and "Matrix" views.
+
+## Android app
+A phone client for the same server, kept in `android/` of this repository and built against the same JSON API
+(the server is not changed for it).  See `android/README.md` for the design.
+
+### Platforms and access
+- Android 16 and 17, and the current GrapheneOS.  Portrait only; no landscape layouts.
+- Built for GrapheneOS first: no Google Play Services and no third-party services of any kind.  Installation is
+  by signed APK from the repository's GitHub releases (Obtainium); sideloading is the secondary path.
+- The server is reached on the LAN or through the user's WireGuard tunnel, over plain HTTP.  The tunnel is not
+  always on, so the app must send user data only when it can see the server: it talks to the configured server
+  address and to nothing else, and checks reachability before sending queued changes.
+
+### Offline tolerance
+- The app keeps a local copy of the data and reads only from it; no screen waits on the network.
+- Changes made while offline are queued and replayed in order when the server is reachable; conflicts resolve
+  last-writer-wins per field, as in the web UI.  Items created offline show a placeholder key until the server
+  assigns one, and cannot be given dependencies or reordered until then.
+- Attachment bytes are fetched on demand; uploads are queued like other changes.
+
+### Screens
+- Setup: server address and account (one of the server's users; no password), both changeable in Settings.
+- List: the Active / Backlog / Ideas templates, search and filters with the same semantics as the web UI;
+  Nested (parents with their tasks) or Flat; the same highlighting rules.  A detail screen edits every field in
+  place with no edit mode, and shows dependencies, attachments and the status history.
+- Timeline and Matrix: full-screen versions of the web views (no adjacent table), with the same drawing rules,
+  colouring modes, zoom/pan, and drag editing.
+- Attachments: files and photos from the device, and photos taken with the camera.
+- Settings: server and account, sync status and errors, notification time, users, app settings.
+
+### Notifications
+A daily local notification at a configurable time lists the account's open items that are overdue, due today
+or due within the next 7 days.  It needs no network.

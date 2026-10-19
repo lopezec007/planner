@@ -1,4 +1,4 @@
-.PHONY: build test e2e run clean dist install
+.PHONY: build test e2e run clean dist install android android-test android-release android-install
 
 # Git description baked into the binary as the build id (see `planner -version`);
 # the semantic version itself lives in main.go.
@@ -28,6 +28,25 @@ dist:
 # if Go is available; otherwise pass a prebuilt one: make install BIN=dist/planner
 install:
 	./deploy/install.sh $(BIN)
+
+# Android app (android/): needs a JDK and the Android SDK, see android/SETUP.md.
+android:
+	cd android && ./gradlew assembleDebug
+	@echo "built android/app/build/outputs/apk/debug/app-debug.apk"
+
+android-test:
+	cd android && ./gradlew test
+
+# Signed release APK (android/keystore.properties must exist) copied to dist/.
+android-release:
+	cd android && ./gradlew assembleRelease
+	mkdir -p dist
+	cp android/app/build/outputs/apk/release/app-release.apk dist/planner-$(VERSION).apk
+	@echo "built dist/planner-$(VERSION).apk"
+
+# Install the debug build on the phone on adb.
+android-install:
+	cd android && ./gradlew installDebug
 
 clean:
 	rm -f planner dev.db dev.db-*
