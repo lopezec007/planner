@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Downloaded attachments, handed to the system viewer. -->
+    <cache-path name="attachments" path="attachments/" />
+    <!-- Camera captures and queued uploads. -->
+    <files-path name="outbox" path="outbox/" />
+</paths>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Planner</string>
+    <string name="notification_channel_due">Due dates</string>
+    <string name="notification_channel_due_desc">Daily summary of overdue and upcoming items</string>
+</resources>

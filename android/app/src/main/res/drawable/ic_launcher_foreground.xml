@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Three Gantt bars of different lengths, the planner's mark. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,36 h30 a5,5 0 0 1 0,10 h-30 a5,5 0 0 1 0,-10 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,49 h38 a5,5 0 0 1 0,10 h-38 a5,5 0 0 1 0,-10 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,62 h20 a5,5 0 0 1 0,10 h-20 a5,5 0 0 1 0,-10 z" />
+</vector>
