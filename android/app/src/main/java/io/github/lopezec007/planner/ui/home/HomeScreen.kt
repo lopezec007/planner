@@ -181,7 +181,7 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
                 snackbar = snackbar,
                 modifier = content,
             )
-            View.TIMELINE -> TimelineScreen(vm, groups, onOpen = { nav.push(Screen.Detail(it)) }, modifier = content)
+            View.TIMELINE -> TimelineScreen(vm, groups, flat = p.flat, onOpen = { nav.push(Screen.Detail(it)) }, modifier = content)
             View.MATRIX -> MatrixScreen(vm, groups, onOpen = { nav.push(Screen.Detail(it)) }, modifier = content)
         }
     }

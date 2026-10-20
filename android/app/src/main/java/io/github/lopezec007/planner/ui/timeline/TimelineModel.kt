@@ -59,6 +59,8 @@ internal class TimelineRow(
     val index: Int,
     val bar: Bar?,
     val tintHex: String,   // a parent's own colour ("" for tasks)
+    val parent: Item? = null,          // Flat only: the task's Ongoing/Project, named on the row
+    val firstOfParent: Boolean = false, // Flat only: first task of its parent (heavier rule above)
 )
 
 /** A dependency between two rows that both have a bar; `open` while the blocker is not closed. */
@@ -71,22 +73,30 @@ internal class TimelineModel(val rows: List<TimelineRow>, val edges: List<Edge>)
 /** Dates just committed from a drag, shown until the snapshot catches up (avoids a snap-back flicker). */
 internal data class PendingDates(val id: Long, val start: LocalDate?, val end: LocalDate?)
 
-internal fun buildTimelineModel(snap: Snapshot, groups: List<Group>, mode: ColorMode, pending: PendingDates?): TimelineModel {
+/**
+ * Rows in display order. Nested: every parent, then its dated tasks. Flat
+ * (as in the list): dated tasks only, each naming its parent, with the
+ * heavier rule above the first task of each parent.
+ */
+internal fun buildTimelineModel(snap: Snapshot, groups: List<Group>, mode: ColorMode, pending: PendingDates?, flat: Boolean = false): TimelineModel {
     val rows = ArrayList<TimelineRow>()
     val rowOf = HashMap<Long, Int>()
-    fun add(stored: Item, kind: RowKind) {
+    fun add(stored: Item, kind: RowKind, parent: Item? = null, firstOfParent: Boolean = false) {
         val item = if (pending != null && pending.id == stored.id) stored.copy(startDate = pending.start, endDate = pending.end) else stored
         val bar = barFor(snap, item, mode)
         val tint = if (kind == RowKind.PARENT) snap.colors.ownColor(item) else ""
         val index = rows.size
-        rows.add(TimelineRow(item, kind, index, bar, tint))
+        rows.add(TimelineRow(item, kind, index, bar, tint, parent, firstOfParent))
         if (bar != null) rowOf[item.id] = index
     }
     for (g in groups) {
-        add(g.parent, RowKind.PARENT)
+        if (!flat) add(g.parent, RowKind.PARENT)
+        var first = true
         for (t in g.tasks) {
             val dated = t.startDate != null || t.endDate != null || pending?.id == t.id
-            if (dated) add(t, RowKind.TASK)
+            if (!dated) continue
+            if (flat) add(t, RowKind.TASK, parent = g.parent, firstOfParent = first) else add(t, RowKind.TASK)
+            first = false
         }
     }
     val edges = snap.dependencyEdges.mapNotNull { (blocker, blocked) ->

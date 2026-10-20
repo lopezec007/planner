@@ -207,6 +207,8 @@ internal fun DrawScope.drawTimelineRows(
             val tint = hexColor(row.tintHex, c.neutral)
             drawRect(color = tint, topLeft = Offset(0f, top), size = Size(w, m.rowPx), alpha = 0.16f)
             drawLine(color = c.parentBorder, start = Offset(0f, top), end = Offset(w, top), strokeWidth = m.todayStroke)
+        } else if (row.firstOfParent) {
+            drawLine(color = c.parentBorder, start = Offset(0f, top), end = Offset(w, top), strokeWidth = m.todayStroke)
         } else {
             drawLine(color = c.rowBorder, start = Offset(0f, top), end = Offset(w, top), strokeWidth = m.hairline)
         }

@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -100,7 +101,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 @Composable
-fun TimelineScreen(vm: PlannerViewModel, groups: List<Group>, onOpen: (Long) -> Unit, modifier: Modifier = Modifier) {
+fun TimelineScreen(vm: PlannerViewModel, groups: List<Group>, flat: Boolean, onOpen: (Long) -> Unit, modifier: Modifier = Modifier) {
     val snap by vm.snapshot.collectAsStateWithLifecycle()
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val barMode = prefs?.barColor ?: ColorMode.ASSIGNEE
@@ -113,7 +114,7 @@ fun TimelineScreen(vm: PlannerViewModel, groups: List<Group>, onOpen: (Long) -> 
         if (item == null || (item.startDate == p.start && item.endDate == p.end)) pending = null
     }
 
-    val model = remember(snap, groups, barMode, pending) { buildTimelineModel(snap, groups, barMode, pending) }
+    val model = remember(snap, groups, barMode, pending, flat) { buildTimelineModel(snap, groups, barMode, pending, flat) }
     val view = remember { TimelineView() }
     val today = remember(snap) { Dates.today() }
     val commit: (Item, LocalDate?, LocalDate?) -> Unit = { item, start, end ->
@@ -355,9 +356,23 @@ private fun RowTitle(row: TimelineRow) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(TITLE_LINE)
-                .padding(start = if (parent) 6.dp else 18.dp, end = 8.dp),
+                .padding(start = if (parent || row.parent != null) 6.dp else 18.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            row.parent?.let { p ->
+                // Flat: the parent's key and title lead the row, as in the list.
+                KeyText(p.key)
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    p.title,
+                    modifier = Modifier.widthIn(max = 110.dp),
+                    fontSize = 12.sp,
+                    color = subtle,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(8.dp))
+            }
             KeyText(row.item.key)
             Spacer(Modifier.width(5.dp))
             Text(

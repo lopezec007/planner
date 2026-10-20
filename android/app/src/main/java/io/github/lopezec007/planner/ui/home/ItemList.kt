@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import io.github.lopezec007.planner.data.model.Group
 import io.github.lopezec007.planner.data.model.Item
 import io.github.lopezec007.planner.data.model.ItemType
@@ -215,9 +216,9 @@ private fun TaskRow(row: ListRow.Task, snapshot: Snapshot, onOpen: () -> Unit) {
     ) {
         Column(Modifier.weight(1f)) {
             if (row.flat && row.parent != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     KeyText(row.parent.key)
-                    Text(row.parent.title, style = MaterialTheme.typography.labelSmall, color = palette.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(row.parent.title, fontSize = 12.sp, color = palette.subtle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
