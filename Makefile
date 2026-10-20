@@ -30,6 +30,10 @@ install:
 	./deploy/install.sh $(BIN)
 
 # Android app (android/): needs a JDK and the Android SDK, see android/SETUP.md.
+# Non-login shells may not have sourced /etc/profile.d/android.sh, so fall
+# back to the standard location.
+export ANDROID_HOME ?= /opt/android-sdk
+
 android:
 	cd android && ./gradlew assembleDebug
 	@echo "built android/app/build/outputs/apk/debug/app-debug.apk"

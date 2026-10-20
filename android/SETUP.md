@@ -49,6 +49,15 @@ The `default` image has no Google services, which matches GrapheneOS.
 
     --sdk=/opt/android-sdk
 
+`/etc/profile.d` is read by login shells only; a terminal inside an editor
+usually is not one, so also add to `~/.bashrc`:
+
+    . /etc/profile.d/android.sh
+
+(The `make android*` targets default `ANDROID_HOME` to `/opt/android-sdk`
+anyway, and Gradle also reads `android/local.properties`, gitignored,
+containing `sdk.dir=/opt/android-sdk`.)
+
 Gradle needs no install: the project's wrapper (`android/gradlew`) fetches
 it.
 
