@@ -66,8 +66,20 @@ it.
     apt install android-sdk-platform-tools-common
 
 That package is only for the udev rules; use the `adb` from the SDK's
-`platform-tools`. On the phone, enable USB debugging under Developer
-options.
+`platform-tools`.
+
+On the phone, once:
+
+1. Unlock Developer options: Settings → About phone (on some phones: → Software
+   information) → tap **Build number** seven times.
+2. Settings → System → Developer options → turn on **USB debugging**.
+3. Plug the phone in and accept "Allow USB debugging?" from this computer,
+   ticking "Always allow". Until then `adb devices` lists it as
+   `unauthorized`; if it does not appear at all, switch the USB mode in the
+   notification shade from "Charging only" to File transfer.
+
+`make android-install` then pushes the debug build over `adb`; no
+sideloading prompt is involved.
 
 ## 5. Publishing (optional)
 
