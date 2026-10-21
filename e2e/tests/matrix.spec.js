@@ -380,3 +380,104 @@ test('dependency lines run between the dots of blocking tasks, beneath the point
     await page.request.delete(`/api/dependencies/${extra.blocker_id}/${extra.blocked_id}`);
   }
 });
+
+// ---- labels ----
+
+test('points can be labelled with task titles instead of keys; long titles are cut and flip sides at the frame edge', async ({ page, request }) => {
+  const items = await (await request.get('/api/items')).json();
+  const parent = items.find((i) => i.title === 'Maintenance');
+  const longTitle = 'A deliberately long task title that will not fit beside its point';
+  // One long-titled task at the far right (urgency 0) and one at the far left (urgency 10).
+  const right = await (await request.post('/api/items', { data: { type: 'task', parent_id: parent.id, title: longTitle, status: 'todo', urgency: 0, importance: 2 } })).json();
+  const left = await (await request.post('/api/items', { data: { type: 'task', parent_id: parent.id, title: `${longTitle} (left)`, status: 'todo', urgency: 10, importance: 2 } })).json();
+  try {
+    await openMatrix(page);
+    const keys = page.locator('.matrix-labels button[data-labels="key"]');
+    const titles = page.locator('.matrix-labels button[data-labels="title"]');
+    await expect(keys).toHaveAttribute('aria-pressed', 'true');
+    await expect(titles).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('.matrix-plot .pt[data-key="T-9"] .label')).toHaveText('T-9');
+
+    await titles.click();
+    await expect(titles).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('.matrix-plot .pt[data-key="T-9"] .label')).toHaveText('Order countertops');
+    // Cut at about 28 characters with an ellipsis; the tooltip has the full title.
+    const lbl = page.locator(`.matrix-plot .pt[data-id="${right.id}"] .label`);
+    const text = await lbl.textContent();
+    expect(text.endsWith('…')).toBe(true);
+    expect(text.length).toBeLessThanOrEqual(28);
+    expect(longTitle.startsWith(text.slice(0, -1).trimEnd())).toBe(true);
+    // (Hover the dot: the group's box is mostly the label now.)
+    await page.locator(`.matrix-plot .pt[data-id="${right.id}"] .dot`).hover();
+    await expect(page.locator('.item-tip')).toContainText(longTitle);
+    // Edge flipping follows the label's length: the long label at the right
+    // edge is drawn to the left of its point, the one at the left edge to the right.
+    const geom = async (id) => page.locator(`.matrix-plot .pt[data-id="${id}"]`).evaluate((g) => {
+      const d = g.querySelector('.dot'), t = g.querySelector('.label');
+      const svg = g.ownerSVGElement, frame = svg.querySelector('.plot-bg').getBBox(), box = t.getBBox();
+      return { cx: +d.getAttribute('cx'), lx: +t.getAttribute('x'), anchor: t.getAttribute('text-anchor'), left: box.x, right: box.x + box.width, frameL: frame.x, frameR: frame.x + frame.width };
+    });
+    const r = await geom(right.id);
+    expect(r.anchor).toBe('end');
+    expect(r.lx).toBeLessThan(r.cx);
+    expect(r.right).toBeLessThanOrEqual(r.frameR + 1);
+    const l = await geom(left.id);
+    expect(l.anchor).toBe('start');
+    expect(l.lx).toBeGreaterThan(l.cx);
+    expect(l.left).toBeGreaterThanOrEqual(l.frameL - 1);
+
+    // The choice is a preference: it survives a reload, and Keys restores it.
+    await page.reload();
+    await expect(page.locator('.matrix-plot')).toBeVisible();
+    await expect(page.locator('.matrix-plot .pt[data-key="T-9"] .label')).toHaveText('Order countertops');
+    await page.locator('.matrix-labels button[data-labels="key"]').click();
+    await expect(page.locator('.matrix-plot .pt[data-key="T-9"] .label')).toHaveText('T-9');
+  } finally {
+    await page.locator('.matrix-labels button[data-labels="key"]').click().catch(() => {});
+    await request.delete(`/api/items/${right.id}`);
+    await request.delete(`/api/items/${left.id}`);
+  }
+});
+
+test('the point tooltip names the task\'s Ongoing/Project above its title', async ({ page }) => {
+  await openMatrix(page);
+  await page.locator('.matrix-plot .pt[data-key="T-9"]').hover();
+  const tip = page.locator('.item-tip');
+  await expect(tip).toBeVisible();
+  const parent = tip.locator('.tip-parent');
+  await expect(parent).toHaveText(/P-1\s+Kitchen remodel/);
+  expect(await tip.evaluate((t) => t.firstElementChild.className)).toBe('tip-parent');
+  await expect(tip.locator('.tip-head')).toContainText('Order countertops');
+});
+
+// ---- sticky panel ----
+
+test('the plot stays in view while the list scrolls and fits the viewport below the sticky top', async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 600 }); // shorter than the list: the page scrolls
+  await openMatrix(page);
+  const panel = page.locator('.split .panel');
+  await expect(panel).toHaveClass(/sticky/);
+  const measure = () => page.evaluate(() => {
+    const p = document.querySelector('.split .panel').getBoundingClientRect();
+    const s = document.querySelector('.matrix-plot').getBoundingClientRect();
+    return { panelTop: p.top, svgTop: s.top, svgBottom: s.bottom, scrollY: window.scrollY, vh: window.innerHeight, attrH: +document.querySelector('.matrix-plot').getAttribute('height') };
+  });
+  const before = await measure();
+  expect(before.scrollY).toBe(0);
+  expect(before.svgTop).toBeGreaterThanOrEqual(0);
+  expect(before.svgBottom).toBeLessThanOrEqual(before.vh);
+  expect(Math.abs(before.svgBottom - (before.vh - 16))).toBeLessThanOrEqual(1);
+
+  await page.evaluate(() => window.scrollTo(0, 250));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
+  const after = await measure();
+  expect(Math.abs(after.panelTop - before.panelTop)).toBeLessThanOrEqual(1);
+  expect(after.attrH).toBe(before.attrH);
+  expect(after.svgTop).toBeGreaterThanOrEqual(0);
+  expect(after.svgBottom).toBeLessThanOrEqual(after.vh);
+  // A shorter window redraws the plot (a window resize alone) and it still fits.
+  await page.setViewportSize({ width: 1500, height: 500 });
+  await expect.poll(async () => (await measure()).attrH).toBeLessThan(before.attrH - 50);
+  const shorter = await measure();
+  expect(shorter.svgBottom).toBeLessThanOrEqual(shorter.vh);
+});

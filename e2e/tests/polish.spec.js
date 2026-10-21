@@ -124,17 +124,31 @@ test('the cycle message is capitalised and stays up longer', async ({ page, requ
   expect((await byTitle(request, 'Review budget')).blocked_by).toEqual([]);
 });
 
-test('an Ongoing or Project gets a colour of its own from the swatch; rows, bars and points can follow it', async ({ page, request }) => {
+test('an Ongoing or Project gets a colour of its own from the Colour box of its expanded row; rows, bars and points can follow it', async ({ page, request }) => {
   const kitchen = await byTitle(request, 'Kitchen remodel');
+  const garden = await byTitle(request, 'Spring garden');
   const settings = await (await request.get('/api/settings')).json();
   try {
     await page.goto('/#/all');
     const kRow = () => page.locator('.row.parent', { hasText: 'Kitchen remodel' });
     const gRow = () => page.locator('.row.parent', { hasText: 'Spring garden' });
     const tRow = () => page.locator('.row.task', { hasText: 'Order countertops' });
-    await expect(page.locator('.row.parent .color-swatch')).toHaveCount(await page.locator('.row.parent').count());
-    await expect(page.locator('.row.task .color-swatch')).toHaveCount(0);
-    const swatch = kRow().locator('.color-swatch');
+    const kDetail = () => page.locator(`.row.description[data-desc-for="${kitchen.id}"]`);
+    const gDetail = () => page.locator(`.row.description[data-desc-for="${garden.id}"]`);
+    // No swatch in the rows themselves; the expanded parent has a framed Colour box beside Attachments.
+    await expect(page.locator('.row.parent .color-swatch, .row.task .color-swatch')).toHaveCount(0);
+    await kRow().locator('.toggle button').click();
+    await gRow().locator('.toggle button').click();
+    const block = kDetail().locator('.deps-cell > .color-block');
+    await expect(block).toBeVisible();
+    await expect(block.locator('.color-label')).toHaveText('Colour');
+    await expect(block.locator('.color-hex')).toHaveText('Project colour');
+    expect(await block.evaluate((e) => getComputedStyle(e).borderTopWidth)).toBe(await kDetail().locator('.attachments').evaluate((e) => getComputedStyle(e).borderTopWidth));
+    expect((await block.boundingBox()).x).toBeGreaterThan((await kDetail().locator('.attachments').boundingBox()).x); // beside, to the right
+    await tRow().locator('.toggle button').click();
+    await expect(page.locator('.row.description .color-block')).toHaveCount(2); // tasks have none
+    await tRow().locator('.toggle button').click();
+    const swatch = kDetail().locator('.color-swatch');
     await expect(swatch).toHaveClass(/type/);
     await expect(swatch).toHaveCSS('background-color', rgb(settings.color_project));
     await expect(swatch).toHaveAttribute('title', /Project colour from Settings/);
@@ -152,14 +166,17 @@ test('an Ongoing or Project gets a colour of its own from the swatch; rows, bars
     await pop.locator('.color-opt[data-color="#e15759"]').click();
     await expect(pop).toBeHidden();
     await expect.poll(async () => (await byTitle(request, 'Kitchen remodel')).color).toBe('#e15759');
-    await expect(kRow().locator('.color-swatch')).toHaveClass(/own/);
-    await expect(kRow().locator('.color-swatch')).toHaveCSS('background-color', rgb('#e15759'));
+    await expect(kDetail().locator('.color-swatch')).toHaveClass(/own/);
+    await expect(kDetail().locator('.color-swatch')).toHaveCSS('background-color', rgb('#e15759'));
+    await expect(kDetail().locator('.color-hex')).toHaveText('#e15759');
     expect(await rowVar(kRow())).toBe('#e15759');
+    expect(await rowVar(kDetail())).toBe('#e15759');      // the detail row is tinted like its row
     expect(await bg(kRow())).not.toBe(before);
+    expect(await bg(kDetail())).toBe(await bg(kRow()));
     expect(await bg(gRow())).toBe(before);              // other projects keep the type colour
     expect(await rowVar(tRow())).toBe('');              // tasks: the Task tint, by default
     // A click on the swatch of another row moves the popover; Escape closes it.
-    await gRow().locator('.color-swatch').click();
+    await gDetail().locator('.color-swatch').click();
     await expect(page.locator('.color-pop')).toHaveAttribute('data-color-for', String((await byTitle(request, 'Spring garden')).id));
     await page.keyboard.press('Escape');
     await expect(page.locator('.color-pop')).toHaveCount(0);
@@ -167,20 +184,32 @@ test('an Ongoing or Project gets a colour of its own from the swatch; rows, bars
     // Colours menu (per user): tasks in their parent's colour.
     await page.locator('#btn-colors').click();
     await expect(page.locator('#colors-panel')).toBeVisible();
+    const tintVars = () => page.evaluate(() => { const c = getComputedStyle(document.body); return [c.getPropertyValue('--tint-parent').trim(), c.getPropertyValue('--tint-task').trim()]; });
+    expect(await tintVars()).toEqual(['16%', '12%']);
+    await expect(page.locator('body')).not.toHaveClass(/tasks-by-parent/);
     await page.locator('#colors-panel input[name=task-colors][value=parent]').check();
     expect(await rowVar(tRow())).toBe('#e15759');
     expect(await rowVar(page.locator('.row.task', { hasText: 'Buy seeds' }))).toBe(settings.color_project); // its project has no own colour
     await expect(page.locator('#btn-colors')).toHaveClass(/active/);
+    // Parents and their tasks now mix the same hue in clearly different amounts.
+    await expect(page.locator('body')).toHaveClass(/tasks-by-parent/);
+    const [tp, tt] = await tintVars();
+    expect(parseFloat(tp)).toBeGreaterThanOrEqual(30);
+    expect(parseFloat(tt)).toBeLessThanOrEqual(10);
+    expect(await bg(kRow())).not.toBe(await bg(tRow()));
+    expect(await bg(kDetail())).toBe(await bg(kRow()));
     // ...and the type colours instead of the items' own (the menu stays open, like Sort and Columns).
     await expect(page.locator('#colors-panel')).toBeVisible();
     await page.locator('#colors-panel input[name=parent-colors][value=type]').check();
     expect(await rowVar(kRow())).toBe(settings.color_project);
     expect(await rowVar(tRow())).toBe(settings.color_project);
-    await expect(kRow().locator('.color-swatch')).toHaveCSS('background-color', rgb(settings.color_project));
-    await expect(kRow().locator('.color-swatch')).toHaveAttribute('title', /shows the type colour instead/);
+    await expect(kDetail().locator('.color-swatch')).toHaveCSS('background-color', rgb(settings.color_project));
+    await expect(kDetail().locator('.color-swatch')).toHaveAttribute('title', /shows the type colour instead/);
+    await expect(kDetail().locator('.color-hex')).toHaveText('#e15759'); // the item's own colour is still named
     await page.reload(); // preferences
     await expect(page.locator('.row.parent', { hasText: 'Kitchen remodel' })).toBeVisible();
     expect(await rowVar(kRow())).toBe(settings.color_project);
+    await kRow().locator('.toggle button').click(); // the reload closed the details
     await page.locator('#btn-colors').click();
     await page.locator('#colors-panel input[name=parent-colors][value=custom]').check();
     expect(await rowVar(kRow())).toBe('#e15759');
@@ -198,10 +227,10 @@ test('an Ongoing or Project gets a colour of its own from the swatch; rows, bars
     expect(await rowVar(page.locator(`.timeline-row[data-id="${kitchen.id}"]`))).toBe('#e15759');
     expect(await rowVar(page.locator(`.timeline-row[data-id="${(await byTitle(request, 'Order countertops')).id}"]`))).toBe('#e15759'); // task_colors = parent
     await bar.hover();
-    await expect(page.locator('.timeline-tooltip')).toContainText('Project: P-1 Kitchen remodel');
+    await expect(page.locator('.timeline-tooltip .timeline-tip-parent')).toHaveText(/P-1\s+Kitchen remodel/); // the parent line (shown for every task)
     await page.mouse.move(5, 5);
-    // The swatch is on the title-only table too.
-    await expect(page.locator('.table.title-only .row.parent', { hasText: 'Kitchen remodel' }).locator('.color-swatch')).toBeVisible();
+    // The Colour box is in the expanded row of the title-only table too.
+    await expect(page.locator(`.table.title-only .row.description[data-desc-for="${kitchen.id}"] .color-block .color-swatch`)).toBeVisible();
 
     // Matrix: points by Ongoing / Project.
     await page.locator('button[data-view=matrix]').click();
@@ -223,11 +252,57 @@ test('an Ongoing or Project gets a colour of its own from the swatch; rows, bars
 
     // Back to the type colour from the popover.
     await page.locator('button[data-view=table]').click();
-    await kRow().locator('.color-swatch').click();
+    await kDetail().locator('.color-swatch').click();
     await page.locator('.color-pop .color-none').click();
     await expect.poll(async () => (await byTitle(request, 'Kitchen remodel')).color).toBe('');
-    await expect(kRow().locator('.color-swatch')).toHaveClass(/type/);
+    await expect(kDetail().locator('.color-swatch')).toHaveClass(/type/);
+    await expect(kDetail().locator('.color-hex')).toHaveText('Project colour');
+    await page.locator('#btn-colors').click();
+    await page.locator('#colors-panel input[name=task-colors][value=type]').check();
+    await page.keyboard.press('Escape');
     expect(await bg(kRow())).toBe(before);
+    await kRow().locator('.toggle button').click();
+  } finally {
+    await request.patch(`/api/items/${kitchen.id}`, { data: { color: kitchen.color || '' } });
+  }
+});
+
+test('a new row takes the tint of the rows around it and is marked by an accent bar', async ({ page, request }) => {
+  const kitchen = await byTitle(request, 'Kitchen remodel');
+  const settings = await (await request.get('/api/settings')).json();
+  try {
+    await request.patch(`/api/items/${kitchen.id}`, { data: { color: '#e15759' } });
+    await page.goto('/#/all');
+    await page.locator('#btn-colors').click();
+    await page.locator('#colors-panel input[name=task-colors][value=parent]').check();
+    await page.keyboard.press('Escape');
+    const kRow = page.locator('.row.parent', { hasText: 'Kitchen remodel' });
+    const sibling = page.locator('.row.task', { hasText: 'Order countertops' });
+    await kRow.locator('button[title="Add task"]').click();
+    const draft = page.locator('.row[data-editing="new"]:not(.description)');
+    const draftDetail = page.locator('.row.description[data-editing="new"]');
+    await expect(draft).toHaveClass(/new/);
+    await page.mouse.move(5, 5);
+    expect(await rowVar(draft)).toBe('#e15759');            // the parent's colour, like a saved sibling
+    expect(await bg(draft)).toBe(await bg(sibling));
+    expect(await bg(draftDetail)).toBe(await bg(sibling));
+    expect(await draft.evaluate((e) => getComputedStyle(e).boxShadow)).not.toBe('none'); // the "unsaved" mark
+    await page.locator('button[title=Discard]').click();
+    // Task tint instead: the draft follows that too.
+    await page.locator('#btn-colors').click();
+    await page.locator('#colors-panel input[name=task-colors][value=type]').check();
+    await page.keyboard.press('Escape');
+    await kRow.locator('button[title="Add task"]').click();
+    await page.mouse.move(5, 5);
+    expect(await rowVar(draft)).toBe('');
+    expect(await bg(draft)).toBe(await bg(sibling));
+    await page.locator('button[title=Discard]').click();
+    // A new Project is tinted like the other Projects.
+    await page.locator('#btn-new-project').click();
+    await page.mouse.move(5, 5);
+    expect(await rowVar(draft)).toBe(settings.color_project);
+    expect(await bg(draft)).toBe(await bg(page.locator('.row.parent', { hasText: 'Spring garden' })));
+    await page.locator('button[title=Discard]').click();
   } finally {
     await request.patch(`/api/items/${kitchen.id}`, { data: { color: kitchen.color || '' } });
   }
@@ -342,7 +417,8 @@ test('filter settings persist across reloads and follow the account', async ({ p
   try {
     await page.goto('/#/');
     await expect(page.locator('.search-preset[data-preset=active]')).toHaveAttribute('aria-pressed', 'true');
-    // Browser (no account): pick Backlog and an owner filter, reload.
+    // Browser (no account): Backlog instead of Active, plus an owner filter, then reload.
+    await page.locator('.search-preset[data-preset=active]').click();
     await page.locator('.search-preset[data-preset=backlog]').click();
     await page.locator('#btn-filters').click();
     await page.locator('#search-panel select[aria-label=Owner]').selectOption(String(sam.id));
@@ -362,6 +438,7 @@ test('filter settings persist across reloads and follow the account', async ({ p
     // Sam's account starts from its own (default) filters; a change is saved to the server.
     await page.locator('#account-select').selectOption(String(sam.id));
     await expect(page.locator('.search-preset[data-preset=active]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('.search-preset[data-preset=active]').click();
     await page.locator('.search-preset[data-preset=backlog]').click();
     await expect.poll(async () => JSON.parse((await (await request.get(`/api/users/${sam.id}/prefs`)).json()).filters).statuses).toEqual(['backlog']);
     const other = await browser.newContext({ baseURL: process.env.PLANNER_E2E_BASE });
@@ -370,12 +447,10 @@ test('filter settings persist across reloads and follow the account', async ({ p
     await p2.locator('#account-select').selectOption(String(sam.id));
     await expect(p2.locator('.search-preset[data-preset=backlog]')).toHaveAttribute('aria-pressed', 'true');
     await other.close();
-    // Back to no account: the browser's own filters return.
-    await page.locator('#account-select').selectOption('');
-    await expect(page.locator('.search-preset[data-preset=ideas]')).toHaveAttribute('aria-pressed', 'true');
     // Clear is remembered too.
     await page.locator('#btn-search-clear').click();
     await page.reload();
+    await expect(page.locator('#account-select')).toHaveValue(String(sam.id));
     await expect(page.locator('#btn-search-clear')).toBeDisabled();
     await expect(page.locator('.search-preset[aria-pressed=true]')).toHaveCount(0);
   } finally {

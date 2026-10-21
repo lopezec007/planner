@@ -419,6 +419,7 @@ private fun NotificationsSection(p: AppPrefs, vm: PlannerViewModel) {
     }
     var denied by remember { mutableStateOf(false) }
     var pickTime by remember { mutableStateOf(false) }
+    var pickDays by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         granted = ok
         denied = !ok
@@ -446,7 +447,30 @@ private fun NotificationsSection(p: AppPrefs, vm: PlannerViewModel) {
             color = if (p.notifyEnabled) MaterialTheme.colorScheme.onSurface else LocalPalette.current.subtle,
         )
     }
-    Hint("Lists your overdue items and those due within a week; works offline.")
+    // The look-ahead window: the notification also lists items due within this many days.
+    val enabledColor = if (p.notifyEnabled) MaterialTheme.colorScheme.onSurface else LocalPalette.current.subtle
+    Box {
+        FieldRow(label = "Look ahead", onClick = if (p.notifyEnabled) ({ pickDays = true }) else null) {
+            Text(lookAheadLabel(p.notifyDays), style = MaterialTheme.typography.bodyLarge, color = enabledColor)
+        }
+        DropdownMenu(expanded = pickDays, onDismissRequest = { pickDays = false }) {
+            // The stored value is offered too when it is not one of the presets.
+            for (d in (AppPrefs.NOTIFY_DAY_CHOICES + p.notifyDays).distinct().sorted()) {
+                DropdownMenuItem(
+                    text = { Text(lookAheadLabel(d)) },
+                    trailingIcon = if (d == p.notifyDays) ({ Icon(Icons.Default.Check, contentDescription = null) }) else null,
+                    onClick = { vm.setNotifyDays(d); pickDays = false },
+                )
+            }
+        }
+    }
+    Hint(
+        when (p.notifyDays) {
+            0 -> "Lists your overdue items and those due today; works offline."
+            1 -> "Lists your overdue items and those due today or tomorrow; works offline."
+            else -> "Lists your overdue items and those due within the next ${p.notifyDays} days; works offline."
+        },
+    )
     if (p.notifyEnabled && !granted) {
         if (denied) {
             Hint("Notifications are blocked for this app in system settings")
@@ -474,6 +498,13 @@ private fun NotificationsSection(p: AppPrefs, vm: PlannerViewModel) {
             onDismiss = { pickTime = false },
         )
     }
+}
+
+/** "Today only", "1 day", "7 days". */
+private fun lookAheadLabel(days: Int): String = when (days) {
+    0 -> "Today only"
+    1 -> "1 day"
+    else -> "$days days"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -14,8 +14,14 @@ test('a missing start fades in from the latest blocker end; a missing end fades 
   const kitchen = await byTitle(request, 'Kitchen remodel');
   const countertops = await byTitle(request, 'Order countertops'); // blocks Electrical rough-in (starts +2)
   const elec = await byTitle(request, 'Electrical rough-in');
+  // Spring garden's tasks lose their dates too: a project with a missing
+  // date otherwise takes it from its tasks (derived bars), not from blockers.
+  const seeds = await byTitle(request, 'Buy seeds');
+  const beds = await byTitle(request, 'Build raised beds');
   try {
     await request.patch(`/api/items/${garden.id}`, { data: { start_date: null } });
+    await request.patch(`/api/items/${seeds.id}`, { data: { end_date: null } });
+    await request.patch(`/api/items/${beds.id}`, { data: { start_date: null } });
     await request.patch(`/api/items/${countertops.id}`, { data: { end_date: null, start_date: ymd(-10) } });
     await page.goto('/#/all');
     await page.locator('button[data-view=timeline]').click();
@@ -29,6 +35,8 @@ test('a missing start fades in from the latest blocker end; a missing end fades 
     await expect(barFor(page, countertops.id)).toHaveClass(/no-end/);
   } finally {
     await request.patch(`/api/items/${garden.id}`, { data: { start_date: garden.start_date } });
+    await request.patch(`/api/items/${seeds.id}`, { data: { end_date: seeds.end_date } });
+    await request.patch(`/api/items/${beds.id}`, { data: { start_date: beds.start_date } });
     await request.patch(`/api/items/${countertops.id}`, { data: { end_date: countertops.end_date, start_date: countertops.start_date } });
   }
 });
@@ -59,10 +67,12 @@ test('dragging a timeline bar moves its dates; dragging an edge resizes', async 
     await page.mouse.up();
     await expect.poll(async () => (await byTitle(request, 'Electrical rough-in')).end_date).toBe(addDays(elec.end_date, 1));
     expect((await byTitle(request, 'Electrical rough-in')).start_date).toBe(addDays(elec.start_date, 3));
-    // The timeline has no visible scrollbar and the wheel scrolls it sideways.
+    // The timeline has no visible scrollbar; Shift+wheel scrolls it sideways.
     const before = await page.locator('.timeline-scroll').evaluate((s) => s.scrollLeft);
     await page.mouse.move(bb.x, bb.y - 40);
+    await page.keyboard.down('Shift');
     await page.mouse.wheel(0, 300);
+    await page.keyboard.up('Shift');
     await expect.poll(() => page.locator('.timeline-scroll').evaluate((s) => s.scrollLeft)).toBeGreaterThan(before + 100);
     expect(await page.locator('.timeline-scroll').evaluate((s) => getComputedStyle(s).scrollbarWidth)).toBe('none');
   } finally {

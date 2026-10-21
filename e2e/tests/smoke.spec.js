@@ -52,6 +52,38 @@ test('description expand and collapse', async ({ page }) => {
   await expect(page.locator('.row.description .md.placeholder')).toBeVisible();
 });
 
+test('expand and collapse all parents show or hide every task; not in Flat', async ({ page }) => {
+  await page.goto('/#/everything');
+  const parents = page.locator('.row.parent:not(.header)');
+  const tasks = page.locator('.row.task:not(.header)');
+  await expect(parents).toHaveCount(7);
+  const n = await tasks.count();
+  expect(n).toBeGreaterThanOrEqual(17);
+  await expect(page.locator('#btn-collapse-parents')).toBeEnabled();
+  await page.locator('#btn-collapse-parents').click();
+  await expect(tasks).toHaveCount(0);
+  await expect(page.locator('.row.parent.collapsed')).toHaveCount(7);
+  await expect(parents.first().locator('.caret')).toHaveAttribute('aria-expanded', 'false');
+  // The preference covers every parent, so a filter change keeps them collapsed.
+  await page.locator('.search-preset[data-preset=active]').click();
+  await expect(page.locator('.row.parent:not(.header):not(.collapsed)')).toHaveCount(0);
+  await page.locator('#btn-search-clear').click();
+  await page.reload();
+  await expect(parents).toHaveCount(7);
+  await expect(tasks).toHaveCount(0); // survives a reload
+  await page.locator('#btn-expand-parents').click();
+  await expect(tasks).toHaveCount(n);
+  await expect(page.locator('.row.parent.collapsed')).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem('planner.pref.collapsed'))).toBe('[]');
+  // Flat has no parent rows: both buttons are disabled and say so.
+  await page.locator('#btn-flat').click();
+  await expect(page.locator('#btn-expand-parents')).toBeDisabled();
+  await expect(page.locator('#btn-collapse-parents')).toBeDisabled();
+  await expect(page.locator('#btn-collapse-parents')).toHaveAttribute('title', /Flat/);
+  await page.locator('#btn-nested').click();
+  await expect(page.locator('#btn-collapse-parents')).toBeEnabled();
+});
+
 test('backlog, ideas and everything pages', async ({ page }) => {
   await page.goto('/#/backlog');
   await expect(page.locator('.row.parent', { hasText: 'File taxes' })).toBeVisible();

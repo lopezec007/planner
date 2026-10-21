@@ -366,6 +366,26 @@ test('Reorder tasks and top-level rows by drag-and-drop; drop into another paren
   expect(order.indexOf('File taxes')).toBeLessThan(order.indexOf('E2E Ongoing')); // hidden siblings keep their place
 });
 
+test('Urgency and Importance accept digits only', async ({ page, request }) => {
+  await page.goto('/#/all');
+  const row = taskRow(page, 'E2E Task C');
+  const inp = row.locator('input[name=urgency]');
+  await expect(inp).toHaveAttribute('inputmode', 'numeric');
+  const v = await inp.inputValue();
+  await inp.click();
+  for (const key of ['e', 'a', '+', '-', '.', 'x']) {
+    await inp.press(key);
+    await expect(inp).toHaveValue(v);
+  }
+  await inp.press('ArrowRight'); // navigation keys pass
+  await expect(inp).toHaveValue(v);
+  await page.keyboard.insertText('99'); // pasted text that is not a value on its own is dropped
+  await expect(inp).toHaveValue(v);
+  await inp.press('Escape');
+  await page.locator('body').click({ position: { x: 5, y: 400 } });
+  expect((await byTitle(request, 'E2E Task C')).urgency).toBe(Number(v));
+});
+
 test('Delete a task and a parent (with its tasks)', async ({ page, request }) => {
   await page.goto('/#/all');
   page.on('dialog', (d) => d.accept());

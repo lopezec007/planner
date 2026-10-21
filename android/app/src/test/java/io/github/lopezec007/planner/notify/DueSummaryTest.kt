@@ -51,8 +51,34 @@ class DueSummaryTest {
         val s = summarize(items, me, today)
         assertEquals(listOf(1L), ids(s.overdue))
         assertEquals(listOf(2L), ids(s.today))
-        assertEquals(listOf(3L, 4L), ids(s.week))
+        assertEquals(listOf(3L, 4L), ids(s.upcoming))
+        assertEquals(7, s.daysAhead)
         assertFalse(s.isEmpty)
+    }
+
+    @Test
+    fun lookAheadWindowIsConfigurable() {
+        val items = listOf(
+            item(1, today.minusDays(1)),
+            item(2, today),
+            item(3, today.plusDays(1)),
+            item(4, today.plusDays(3)),
+            item(5, today.plusDays(10)),
+            item(6, today.plusDays(14)),
+        )
+        // 0: overdue and today only.
+        val none = summarize(items, me, today, daysAhead = 0)
+        assertEquals(listOf(1L), ids(none.overdue))
+        assertEquals(listOf(2L), ids(none.today))
+        assertTrue(none.upcoming.isEmpty())
+        assertEquals(0, none.daysAhead)
+        assertEquals(listOf(3L), ids(summarize(items, me, today, daysAhead = 1).upcoming))
+        assertEquals(listOf(3L, 4L), ids(summarize(items, me, today, daysAhead = 3).upcoming))
+        assertEquals(listOf(3L, 4L, 5L, 6L), ids(summarize(items, me, today, daysAhead = 14).upcoming))
+        // A negative value is treated as 0 rather than hiding today's items.
+        assertEquals(listOf(2L), ids(summarize(items, me, today, daysAhead = -2).today))
+        // Nothing within the window means nothing to show.
+        assertTrue(summarize(listOf(item(7, today.plusDays(2))), me, today, daysAhead = 1).isEmpty)
     }
 
     @Test
@@ -103,7 +129,7 @@ class DueSummaryTest {
         val s = summarize(items, me, today)
         assertTrue(s.overdue.isEmpty())
         assertEquals(listOf(5L), ids(s.today))
-        assertEquals(listOf(4L), ids(s.week))
+        assertEquals(listOf(4L), ids(s.upcoming))
     }
 
     @Test
@@ -122,6 +148,11 @@ class DueSummaryTest {
         assertEquals("1 due today", titleFor(DueSummary(emptyList(), listOf(b), emptyList())))
         assertEquals("2 this week", titleFor(DueSummary(emptyList(), emptyList(), listOf(c, c))))
         assertEquals("1 overdue, 2 this week", titleFor(DueSummary(listOf(a), emptyList(), listOf(c, c))))
+        // The last part follows the look-ahead window.
+        assertEquals("1 due tomorrow", titleFor(DueSummary(emptyList(), emptyList(), listOf(c), daysAhead = 1)))
+        assertEquals("2 in the next 3 days", titleFor(DueSummary(emptyList(), emptyList(), listOf(c, c), daysAhead = 3)))
+        assertEquals("1 due today, 2 in the next 14 days", titleFor(DueSummary(emptyList(), listOf(b), listOf(c, c), daysAhead = 14)))
+        assertEquals("1 due today", titleFor(DueSummary(emptyList(), listOf(b), emptyList(), daysAhead = 0)))
     }
 
     @Test

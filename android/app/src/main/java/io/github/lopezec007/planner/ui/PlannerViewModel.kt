@@ -67,6 +67,7 @@ class PlannerViewModel(val graph: Graph) : ViewModel() {
     fun setPointColor(m: ColorMode) = viewModelScope.launch { prefsStore.setPointColor(m) }
     fun setAccount(id: Long?) = viewModelScope.launch { prefsStore.setAccount(id) }
     fun setNotify(enabled: Boolean, hour: Int, minute: Int) = viewModelScope.launch { prefsStore.setNotify(enabled, hour, minute) }
+    fun setNotifyDays(days: Int) = viewModelScope.launch { prefsStore.setNotifyDays(days) }
 
     /** Points the app at a server (and account). A changed address drops the local copy and the queue. */
     fun setServer(url: String, accountId: Long?) = viewModelScope.launch {

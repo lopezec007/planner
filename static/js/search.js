@@ -1,6 +1,13 @@
 // Search and filter controls, including the Active / Backlog / Ideas filter
 // templates (see filters.js PRESETS).
 //
+// The template buttons are toggles that combine: the selected ones give the
+// union of their statuses and types, the largest "closed within" window, and
+// hide empty Ongoing/Project rows only when every selected template does (so
+// Active alone hides them, Active + Backlog keeps them). Which buttons are
+// lit is derived from the criteria (currentPresets), so a change made in the
+// Filters panel lights the templates it happens to equal, and nothing else.
+//
 // renderSearch(slot, ctx) renders controls into the toolbar slot and returns
 // a function (groups) => groups that applies the current search/filter.
 // It must call ctx.rerender() whenever the criteria change.
@@ -47,39 +54,64 @@ function emptyCriteria() {
   };
 }
 
-/** Criteria for a filter template ('all' = nothing). */
-function presetCriteria(name) {
+/** Criteria for a combination of filter templates (unknown names such as
+ *  'all' are ignored; none = no status/recent/type filters at all). */
+function presetsCriteria(names) {
   const c = emptyCriteria();
-  const p = PRESETS[name];
-  if (p) {
-    c.statuses = new Set(p.statuses);
-    c.recentDays = p.recentDays;
-    c.types = new Set(p.types);
-    c.hideEmptyParents = !!p.hideEmptyParents;
+  const used = names.filter((k) => PRESETS[k]);
+  for (const k of used) {
+    const p = PRESETS[k];
+    for (const s of p.statuses) c.statuses.add(s);
+    for (const t of p.types) c.types.add(t);
+    c.recentDays = Math.max(c.recentDays, p.recentDays);
   }
+  c.hideEmptyParents = used.length > 0 && used.every((k) => !!PRESETS[k].hideEmptyParents);
   return c;
 }
 
-/** Apply a template's status/recent/type filters, keeping any other criteria. */
-export function applyPreset(name) {
+/** Apply the combined status/recent/type filters of these templates, keeping
+ *  any other criteria (owner, assignee, blocked, dates, text). */
+export function applyPresets(names) {
   pinned.clear();
-  const p = presetCriteria(name);
+  const p = presetsCriteria(names);
   criteria.statuses = p.statuses;
   criteria.recentDays = p.recentDays;
   criteria.types = p.types;
   criteria.hideEmptyParents = p.hideEmptyParents;
 }
 
+/** Apply exactly one template (the #/active, #/backlog, #/ideas routes; 'all' = none). */
+export function applyPreset(name) {
+  applyPresets([name]);
+}
+
 const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
 
-/** The template whose status/recent/type filters are exactly in effect, or null. */
-export function currentPreset() {
-  for (const k of PRESET_ORDER) {
-    const p = presetCriteria(k);
-    if (sameSet(criteria.statuses, p.statuses) && criteria.recentDays === p.recentDays && sameSet(criteria.types, p.types)
-      && criteria.hideEmptyParents === p.hideEmptyParents) return k;
+/** Every non-empty subset of PRESET_ORDER, in that order (7 for 3 templates). */
+function presetCombinations() {
+  const out = [];
+  for (let bits = 1; bits < (1 << PRESET_ORDER.length); bits++) {
+    out.push(PRESET_ORDER.filter((_, i) => bits & (1 << i)));
   }
-  return null;
+  return out;
+}
+
+/** The templates whose combination is exactly in effect (a subset of
+ *  PRESET_ORDER), or [] when the criteria match no combination. */
+export function currentPresets() {
+  for (const names of presetCombinations()) {
+    const p = presetsCriteria(names);
+    if (sameSet(criteria.statuses, p.statuses) && criteria.recentDays === p.recentDays && sameSet(criteria.types, p.types)
+      && criteria.hideEmptyParents === p.hideEmptyParents) return names;
+  }
+  return [];
+}
+
+/** Toggle one template in the lit set and apply the combination. */
+function togglePreset(name) {
+  const on = new Set(currentPresets());
+  if (on.has(name)) on.delete(name); else on.add(name);
+  applyPresets(PRESET_ORDER.filter((k) => on.has(k)));
 }
 
 /** Default status for a new project/task under the current filters. */
@@ -130,14 +162,14 @@ export function restoreFilters() {
   const stored = prefs.get('filters');
   let next = null;
   if (stored) { try { next = criteriaFromPref(JSON.parse(stored)); } catch { next = null; } }
-  if (!next) next = presetCriteria('active');
+  if (!next) next = presetsCriteria(['active']);
   next.text = criteria.text;
   criteria = next;
   pinned.clear();
 }
 
 // ---- module state (survives re-renders) ----
-let criteria = presetCriteria('active'); // the Active view is the starting point
+let criteria = presetsCriteria(['active']); // the Active view is the starting point
 // Items created in this session stay visible even when the filters would hide
 // them (a new project has no tasks yet, say). Cleared when the criteria are
 // replaced by a template or Clear.
@@ -341,14 +373,16 @@ export function renderSearch(slot, ctx) {
     onKeydown: (e) => { if (e.key === 'Escape') { text.value = ''; criteria.text = ''; rerender(); } },
   });
 
-  const cur = currentPreset();
+  const lit = new Set(currentPresets());
   const presets = el('div', { class: 'group search-presets', role: 'group', 'aria-label': 'Filter templates' });
   for (const k of PRESET_ORDER) {
+    const on = lit.has(k);
+    const others = PRESET_ORDER.filter((o) => o !== k).map((o) => PRESETS[o].title).join(' or ');
     presets.append(el('button', {
-      type: 'button', class: `search-preset${cur === k ? ' active' : ''}`, dataset: { preset: k, searchKey: `preset:${k}` },
-      'aria-pressed': cur === k ? 'true' : 'false', 'aria-label': PRESETS[k].title,
-      title: `${PRESETS[k].title}: ${PRESETS[k].hint}`,
-      onClick: () => { applyPreset(k); rerender(); },
+      type: 'button', class: `search-preset${on ? ' active' : ''}`, dataset: { preset: k, searchKey: `preset:${k}` },
+      'aria-pressed': on ? 'true' : 'false', 'aria-label': PRESETS[k].title,
+      title: `${PRESETS[k].title}: ${PRESETS[k].hint}. ${on ? 'Click to turn it off' : `Click to turn it on; combine it with ${others}`}.`,
+      onClick: () => { togglePreset(k); rerender(); },
     }, icon(k)));
   }
 

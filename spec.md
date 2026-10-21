@@ -22,7 +22,9 @@ The technology stack (language, framework, libraries, etc.) is at the implemente
 - Each user is also an "account": a menu in the title bar selects who is using the browser (no password).  Per-user
   preferences (view, Flat, Narrow, collapsed parents, sort, blocked-last, hidden columns, the filter settings,
   timeline bar and matrix point colouring, and the row colour-coding choices) are stored on the server with the
-  user so they follow them to any browser.  With no account selected the browser keeps its own.
+  user so they follow them to any browser.  The menu offers only users: a browser that has not picked one (or
+  whose user was deleted) is given the first user and remembers it; only while no user exists at all does the
+  browser keep its own preferences.
 - All users have full CRUD access to everything.
 - Each user is auto-assigned a color (used for categorical highlighting of the Owner and Assignee columns).  The color
   can be changed by the user.  Each user also has a chip label of at most 3 characters (initials, or the start of
@@ -121,9 +123,28 @@ The UI should respond to the user's system theme (light/dark).  There is no manu
 #### Navigation
 There is a single planner page showing all live items, narrowed by search and filter controls.  "Active",
 "Backlog" and "Ideas" are filter templates next to the Filters dropdown: selecting one populates the status and
-type filters that produce that view (and the search box and other filters apply on top).  With no filters the page
-shows everything.  A gear icon at the far left of the title bar opens Settings, which has a button back to the
-items.
+type filters that produce that view (and the search box and other filters apply on top).  They are toggles that
+combine: clicking a selected one clears it, and any two or all three may be selected at once, showing the union
+of their statuses (parents without matching tasks are hidden only when Active is the sole selection).  With no
+filters the page shows everything.  A gear icon at the far left of the title bar opens Settings, which has a
+button back to the items.
+
+Navigating away from an edit in progress (an unsaved new row, or an open title, date or description editor) is
+refused with a warning snack until the edit is finished or discarded; leaving the page altogether gets the
+browser's own confirmation.
+
+#### Real-time updates
+Every change is announced to all connected browsers over a server-sent event stream, and a page refreshes
+itself when another client changes something, without a manual reload.  A page in the middle of an edit waits
+until the edit is finished before refreshing.
+
+#### Scratch pad
+A button at the far left of the title bar slides out a panel on the left with two plain monospaced text panes,
+one above the other: a global one shared by everyone and one belonging to the current account.  Text is saved as
+it is typed and other browsers' changes appear live (never replacing a pane that is being edited).  The border
+between the panel and the rest of the UI is draggable, as is the border between the two panes; a toggle wraps
+long lines.  The panel's open state, width, split and wrap are per-user preferences; the text is stored on the
+server (1 MiB per pane).
 
 #### Active (default template)
 This should display:
@@ -144,9 +165,11 @@ All fields except description should be shown as columns, with the following exc
 - "Start Date Firm" and "End Date Firm" are not columns; each is shown only as an icon on its corresponding date.
 
 The description (and, for projects and tasks, the dependencies) is made available by an "expand" arrow on every
-row, including "Ongoing" rows.  Any number of items may be expanded at once and buttons at the top allow
-expansion and collapse of all at once.  Independently, a caret on each "Ongoing"/"Project" row collapses its
-tasks (remembered across reloads).
+row, including "Ongoing" rows; it is the first of the buttons at the right-hand end of the row.  Any number of
+items may be expanded at once and buttons at the top allow expansion and collapse of all at once.  Independently,
+a caret at the far left of each "Ongoing"/"Project" row collapses its tasks (remembered across reloads); the
+count shown after a collapsed parent's title is of the tasks that pass the current filters, and a second pair of
+buttons at the top collapses or expands the tasks of every parent at once.
 
 A "Nested / Flat" icon pair (next to the "Wide / Narrow" pair, both like the view switch) chooses the layout:
 "Flat" removes the "Ongoing"/"Project" rows and shows that information within each task row instead, in the column
@@ -157,11 +180,16 @@ dependencies it opens the dropdown of items, for attachments the file picker.  A
 "Attachments" header, left-aligned, to the right of the dependencies; each section sits in a subtle frame.  A rejected cyclic dependency is reported in a
 snack that stays up longer than usual.
 
-The border above each "Ongoing"/"Project" row is heavier than the one between tasks, so it is clear which tasks
-belong to which parent; in Flat the same rule sits above the first task of each parent while tasks are grouped.
+In the nested layout each "Ongoing"/"Project" row and its tasks form a framed block of their own, separated from
+the header and from the other blocks by a small gap with nothing drawn across it, so it is clear which tasks
+belong to which parent; in Flat the table is one frame and a heavier rule sits above the first task of each
+parent while tasks are grouped.  The Timeline beside the nested table is framed the same way: its date axis and
+each group are outlined separately and nothing is drawn across the gaps.
 
-The order of items is user-specified via drag-and-drop, and the order is persisted.  In Flat, dragging only
-reorders a task among its own parent's tasks and never changes its parent.
+The order of items is user-specified via drag-and-drop of a handle at the far right of the row (after the
+Delete button), and the order is persisted.  In Flat, dragging only reorders a task among its own parent's tasks
+and never changes its parent.  The row's buttons, left to right, are: expand, add task (parents) or move to
+another parent (tasks), delete, and the drag handle; they are icons, not text glyphs.
 
 Sorting: clicking a column header sorts by that column (ascending, then descending on a second click, removed on a
 third; Urgency and Importance start descending instead); clicking further headers appends them, so the order in which headers are clicked is the multi-column sort
@@ -180,7 +208,9 @@ are icons with mouseover descriptions.
 - Every "Ongoing" and "Project" row has an "Add task" button that adds a blank child task row in the same manner.
 - There is no separate edit mode: to edit a field the user simply clicks into it, and the change is saved
   immediately.  The toggle before a date shows "~" while the date is approximate and a pin icon once it is firm;
-  clicking it switches between the two.
+  clicking it switches between the two.  The urgency and importance fields accept digits only.
+- A new row is tinted exactly like its saved neighbours (including its parent's colour when tasks are coloured
+  by parent) and marked as unsaved by an accent bar at its left.
 - Each row offers a "Delete" option (see Deletion above).
 
 ##### Views
@@ -190,7 +220,15 @@ right-hand side of the screen.
 
 "Plan" view should display a timeline in Gantt style:
 - The time window defaults to one month before today through three months after today.  It must be zoomable and
-  scrollable.
+  scrollable: a plain mouse wheel scrolls the page, Shift or Alt with the wheel pans the timeline sideways, Ctrl
+  with the wheel zooms, and dragging the background pans.  The date axis stays visible under the title bar while
+  the page scrolls, as does the table's header row in every view.
+- A Project missing its own start or end, and every Ongoing (which has no dates), gets that end from its tasks:
+  the earliest task start and the latest task end.  A derived end is drawn distinctly (hatched, dashed edge),
+  is never firm, has no remove button and cannot be dragged; on a Project, clicking or dragging it pins a real
+  date.  Ongoing bars are read-only.
+- Bar tooltips (and the item tooltip used by the Matrix and the dependency chips) name a task's
+  "Ongoing"/"Project" above the task's own key and title.
 - The ends of each bar are rendered according to the corresponding date:
   - Firm date: hard edge
   - Non-firm date: soft but tight edge
@@ -201,15 +239,19 @@ right-hand side of the screen.
 
 "Matrix" view should plot all visible tasks (tasks only, since parents have no urgency/importance) in an X-Y scatter
 with "Importance" plotted on the y-axis and "Urgency" plotted on the x-axis.  Points should be jittered so that tasks
-with identical values are all visible.  Mousing-over a point should display its title and description.
+with identical values are all visible.  Mousing-over a point should display its title and description.  A toggle
+above the plot (a per-user preference) labels the points with the task key or with its title.  The plot keeps its
+place in the viewport while the list beside it scrolls.
 
 ##### Highlighting
-Every "Ongoing" and "Project" may be given a colour of its own (a swatch before its title opens a palette, a custom
-colour, or back to none); the colour is stored with the item and shared by everyone.  How it shows is per user, in a
-"Colours" menu in the toolbar: "Ongoing"/"Project" rows tinted with their own colour when they have one (otherwise,
-or when the user prefers it, the per-type colour from Settings, which is the default look), and task rows tinted
-either with the Task colour from Settings (default) or with their "Ongoing"/"Project" colour.  The Timeline's bar
-colouring and the Matrix's point colouring each offer an "Ongoing / Project" mode using the same colours.
+Every "Ongoing" and "Project" may be given a colour of its own (a "Colour" box in its expanded row opens a palette,
+a custom colour, or back to none); the colour is stored with the item and shared by everyone.  How it shows is per
+user, in a "Colours" menu in the toolbar: "Ongoing"/"Project" rows tinted with their own colour when they have one
+(otherwise, or when the user prefers it, the per-type colour from Settings, which is the default look), and task
+rows tinted either with the Task colour from Settings (default) or with their "Ongoing"/"Project" colour; in the
+latter case parent rows are tinted much more strongly than their tasks so the two remain distinct.  A row's
+expanded details carry the same tint as the row.  The Timeline's bar colouring and the Matrix's point colouring
+each offer an "Ongoing / Project" mode using the same colours.
 
 The "Owner" and "Assignee" fields should be highlighted categorically using each user's color.  "Urgency" and
 "Importance" should each be highlighted individually as follows:
@@ -258,14 +300,16 @@ A phone client for the same server, kept in `android/` of this repository and bu
 
 ### Screens
 - Setup: server address and account (one of the server's users; no password), both changeable in Settings.
-- List: the Active / Backlog / Ideas templates, search and filters with the same semantics as the web UI;
+- List: the Active / Backlog / Ideas templates, search and filters with the same semantics as the web UI (owner
+  and assignee filters accept several choices, any of which matches);
   Nested (parents with their tasks) or Flat; the same highlighting rules.  A detail screen edits every field in
   place with no edit mode, and shows dependencies, attachments and the status history.
 - Timeline and Matrix: full-screen versions of the web views (no adjacent table), with the same drawing rules,
-  colouring modes, zoom/pan, and drag editing.
+  colouring modes, zoom/pan, and drag editing.  In the Matrix, tapping the selected task's title opens it.
 - Attachments: files and photos from the device, and photos taken with the camera.
 - Settings: server and account, sync status and errors, notification time, users, app settings.
 
 ### Notifications
 A daily local notification at a configurable time lists the account's open items that are overdue, due today
-or due within the next 7 days.  It needs no network.
+or due within a configurable number of days ahead (default 7; 0 means overdue and due today only).  It needs no
+network.

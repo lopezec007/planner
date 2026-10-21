@@ -1,6 +1,7 @@
 // The Filters bottom sheet: the same criteria as the web Filters panel
 // (type, status with "or closed within N days", owner, assignee, blocked,
-// end-date range, hide empty parents) plus the phone's Flat toggle.
+// end-date range, hide empty parents) plus the phone's Flat toggle. Owner
+// and assignee are multi-select: any chosen user (or "none") matches.
 package io.github.lopezec007.planner.ui.home
 
 import androidx.compose.foundation.layout.Arrangement
@@ -121,10 +122,10 @@ fun FilterSheet(
             }
 
             Section("Owner") {
-                UserChoice(users, c.owner, noneLabel = "No owner") { onChange(c.copy(owner = it)) }
+                UserChoice(users, c.owners, noneLabel = "No owner") { onChange(c.copy(owners = it)) }
             }
             Section("Assignee") {
-                UserChoice(users, c.assignee, noneLabel = "Unassigned") { onChange(c.copy(assignee = it)) }
+                UserChoice(users, c.assignees, noneLabel = "Unassigned") { onChange(c.copy(assignees = it)) }
             }
 
             Section("Blocked") {
@@ -175,15 +176,17 @@ private fun Section(title: String, content: @Composable () -> Unit) {
     }
 }
 
+/** "Any" clears the set; the other chips toggle, and an empty set shows as "Any". */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun UserChoice(users: List<User>, value: String, noneLabel: String, onPick: (String) -> Unit) {
+private fun UserChoice(users: List<User>, chosen: Set<String>, noneLabel: String, onPick: (Set<String>) -> Unit) {
+    val toggle = { v: String -> onPick(if (v in chosen) chosen - v else chosen + v) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(selected = value == "", onClick = { onPick("") }, label = { Text("Any") })
-        FilterChip(selected = value == "none", onClick = { onPick("none") }, label = { Text(noneLabel) })
+        FilterChip(selected = chosen.isEmpty(), onClick = { onPick(emptySet()) }, label = { Text("Any") })
+        FilterChip(selected = "none" in chosen, onClick = { toggle("none") }, label = { Text(noneLabel) })
         for (u in users) {
             val id = u.id.toString()
-            FilterChip(selected = value == id, onClick = { onPick(id) }, label = { Text(u.name) })
+            FilterChip(selected = id in chosen, onClick = { toggle(id) }, label = { Text(u.name) })
         }
     }
 }

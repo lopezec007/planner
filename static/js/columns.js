@@ -8,13 +8,19 @@
 // The title (and, in Flat, the task title) and the action buttons always
 // show; everything else can be hidden from the menu. Hidden columns are a
 // preference (prefs.js "hidden_cols").
+//
+// The first column ("collapse") holds the caret that shows or hides a
+// parent's tasks; Flat has no parent rows, so it has no such column. The
+// details caret, the drag handle and the buttons live in "actions", which is
+// also the last column of the title-only table (inside the title cell there,
+// see table.js).
 
 import { el } from './util.js';
 import { icon } from './icons.js';
 
 // name -> { label, width, flat (width in Flat), title-only presence, hidable }
 export const COLUMNS = [
-  { name: 'toggle', width: '28px', titleOnly: true },
+  { name: 'collapse', width: '28px', titleOnly: true, nestedOnly: true },
   { name: 'pkey', label: 'Ongoing / Project key', width: '72px', flatOnly: true, titleOnly: true, group: 'parent' },
   { name: 'key', label: 'Key', width: '92px', flatWidth: '72px', titleOnly: true, hidable: true },
   { name: 'ptitle', label: 'Ongoing / Project', width: 'minmax(150px, 0.8fr)', titleOnlyWidth: 'minmax(140px, 0.8fr)', flatOnly: true, titleOnly: true, group: 'parent' },
@@ -27,7 +33,7 @@ export const COLUMNS = [
   { name: 'urgency', label: 'Urgency', width: '44px', hidable: true },
   { name: 'importance', label: 'Importance', width: '44px', hidable: true },
   { name: 'blocked', label: 'Blocked', width: '80px', hidable: true },
-  { name: 'actions', width: '96px' },
+  { name: 'actions', width: '124px' },
 ];
 
 /** The hidable entries as shown in the menu: Flat adds the parent columns
@@ -49,6 +55,7 @@ export function visibleColumns(mode, flat, hidden) {
   return COLUMNS.filter((c) => {
     if (mode === 'title-only' && !c.titleOnly) return false;
     if (c.flatOnly && !flat) return false;
+    if (c.nestedOnly && flat) return false;
     if (hidden.has(c.name) || (c.group && hidden.has(c.group))) return false;
     return true;
   }).map((c) => c.name);

@@ -19,9 +19,11 @@ test('settings page hosts the users list and the old #/users route still works',
   await page.locator('#btn-settings').click();
   await expect(page.locator('h1')).toHaveText('Settings');
   await page.locator('#btn-back').click();
-  // The filter templates sit beside the Filters button and set the filters.
+  // The filter templates sit beside the Filters button and toggle the
+  // filters: Backlog joins the Active template that is on by default.
   await page.locator('.search-preset[data-preset=backlog]').click();
-  await expect(page.locator('.search-preset.active')).toHaveAttribute('data-preset', 'backlog');
+  await expect(page.locator('.search-preset.active')).toHaveCount(2);
+  await expect(page.locator('.search-preset[data-preset=backlog]')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#btn-filters .search-badge')).toHaveText('1'); // status
 });
 

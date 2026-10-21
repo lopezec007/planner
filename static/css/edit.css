@@ -1,15 +1,14 @@
 /* styles for inline editing, drag-and-drop reordering, and the expanded row (see js/cells.js, js/table.js) */
 
-/* ---------- drag handle and drop indicators ---------- */
-.row .key { display: flex; align-items: center; gap: 4px; }
+/* ---------- drag handle (the last thing in the actions) and drop indicators ---------- */
 .drag-handle {
   cursor: grab;
   color: var(--fg-muted);
   opacity: 0.45;
   user-select: none;
   -webkit-user-select: none;
-  font-size: 13px;
-  line-height: 1;
+  width: 18px; height: 24px; line-height: 0;
+  display: inline-flex; align-items: center; justify-content: center;
   flex: 0 0 auto;
 }
 .row:hover .drag-handle { opacity: 1; }
@@ -20,11 +19,13 @@
 .row.drop-after { box-shadow: inset 0 -3px 0 0 var(--accent); }
 
 /* ---------- actions in the title-only table (Timeline / Matrix) ----------
-   No actions column there, so the buttons sit at the right of the title cell
-   and fade in on hover or keyboard focus. */
-.table.title-only .row:not(.editing) .title { display: flex; align-items: center; } /* no gap: the caret-to-title spacing must match the full table */
+   No actions column there, so the details caret and then the buttons sit at
+   the right of the title cell; the caret always shows, the buttons fade in
+   on hover or keyboard focus. */
+.table.title-only .row:not(.editing) .title { display: flex; align-items: center; }
 .table.title-only .title .title-text { flex: 1 1 auto; min-width: 0; }
-.table.title-only .title .actions { flex: 0 0 auto; padding: 0; margin-left: 6px; opacity: 0; transition: opacity 0.1s; }
+.table.title-only .title .toggle { margin-left: 4px; }
+.table.title-only .title .actions { flex: 0 0 auto; padding: 0; margin-left: 2px; opacity: 0; transition: opacity 0.1s; }
 .table.title-only .row:hover .title .actions,
 .table.title-only .row:focus-within .title .actions { opacity: 1; }
 
@@ -77,8 +78,11 @@
 .date-text.empty:hover { border-style: dashed; }
 .date-input { width: auto; font-size: 12px; padding: 1px 2px; }
 
-/* New (unsaved) row */
-.row.new { background: color-mix(in srgb, var(--accent) 8%, var(--bg)) !important; }
+/* New (unsaved) row and its detail row: tinted like the saved rows around
+   them (see colors.js rowTint); an accent bar down the left marks them as
+   unsaved. A drop mark on the detail row (the end of a group) adds to it. */
+.row.new { box-shadow: inset 3px 0 0 0 var(--accent); }
+.row.new.drop-after { box-shadow: inset 3px 0 0 0 var(--accent), inset 0 -3px 0 0 var(--accent); }
 .new-key { font-style: italic; }
 
 /* Owner / assignee chip picker: every user's chip on one line (cells.js
@@ -97,11 +101,12 @@
 /* Dependencies on the left, attachments on the right (the grid column is set
    inline from the visible columns). */
 .row.description > .deps-cell { align-self: start; padding-top: 0; padding-bottom: 10px; white-space: normal; overflow: visible; display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: flex-start; }
-/* Dependencies and attachments share the space to the right of the
-   description; each is a left-aligned block in a subtle frame. */
+/* Dependencies, attachments and (parents) the colour share the space to the
+   right of the description; each is a left-aligned block in a subtle frame. */
 .deps-cell > .deps { flex: 1 1 260px; }
 .deps-cell > .attachments { flex: 1 1 220px; }
-.deps-cell > .deps, .deps-cell > .attachments {
+.deps-cell > .color-block { flex: 0 1 auto; }
+.deps-cell > .deps, .deps-cell > .attachments, .deps-cell > .color-block {
   box-sizing: border-box; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius);
   background: color-mix(in srgb, var(--bg-alt) 55%, var(--bg));
 }
@@ -162,9 +167,9 @@
 .row:hover .drag-handle.disabled { opacity: 0.35; }
 
 /* ---------- parent boundaries ----------
-   A heavier rule above every Ongoing/Project row (and, in Flat, above the
-   first task of each parent) makes it clear which tasks belong to which. */
-.row.parent { border-top: 2px solid var(--border-strong); }
+   Nested separates groups with a gap above each Ongoing/Project row (see
+   app.css); Flat has no parent rows, so a heavier rule above the first task
+   of each parent shows where the next one begins. */
 .table.flat .row.task.group-start { border-top: 2px solid var(--border-strong); }
 
 /* ---------- reparent (move a task to another Ongoing/Project) ---------- */

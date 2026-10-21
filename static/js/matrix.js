@@ -3,21 +3,29 @@
 // renderMatrix(panel, handle, ctx)
 //   panel   the right-hand container element
 //   handle  the table handle from renderTable: rows [{ item, el, kind }]
-//   ctx     { rerender(), onChanged(), pointColor, setPointColor(mode) }
+//   ctx     { rerender(), onChanged(), pointColor, setPointColor(mode),
+//             labelMode, setLabelMode(mode) }
 //           pointColor is the point colouring mode (a preference: assignee,
 //           owner or the task's Ongoing/Project, see colors.js) picked with
 //           the dropdown above the plot; setPointColor persists a new one.
+//           labelMode ('key' | 'title', a preference) picks what each point
+//           is labelled with, via the Keys | Titles toggle beside it.
 //
 // Classic Eisenhower orientation: urgency runs 10 on the left to 0 on the
 // right, importance 0 at the bottom to 10 at the top, so the urgent-and-
-// important quadrant is top-left. The plot fills the panel's width and the
-// remaining viewport height, so the plot area is generally not square; each
-// axis uses its own pixel extent and is redrawn on panel or window resize.
+// important quadrant is top-left. The panel is sticky under the title bar
+// (app.css), so the plot fills the panel's width and the viewport height
+// left below that sticky position; the plot area is generally not square,
+// each axis uses its own pixel extent, and it is redrawn on panel or window
+// resize.
 //
 // Only rows of kind 'task' are plotted (parents have no urgency/importance).
 // Tasks sharing the same (urgency, importance) are spread evenly around the
 // grid point, ordered by id, so the layout is deterministic and every point
-// stays visibly attached to its integer value.
+// stays visibly attached to its integer value. Labels sit on the outward
+// side of the jitter and flip to the other side of the point when their
+// estimated width would run past the frame; titles are cut at LABEL_MAX
+// characters with an ellipsis (the tooltip has the full title).
 //
 // Hovering a point shows the shared item tooltip (tooltip.js: title, values
 // and the rendered description) and toggles .matrix-hover on the matching
@@ -42,6 +50,10 @@ const HIT_R = 13;
 const MIN_PLOT = 320;      // minimum plot-area width and height (px)
 const BOTTOM_GAP = 16;     // viewport margin kept below the plot (px)
 const MIN_DEP_LEN = 6;     // shortest dependency line worth drawing (px)
+const LABEL_MAX = 28;      // title labels longer than this are cut with an ellipsis
+const LABEL_CHAR_W = 6;    // estimated label width per character (10px font), px
+const LABEL_GAP = 4;       // space between a dot's edge and its label (px)
+const LABEL_MODES = [['key', 'Keys', 'Label the points with task keys'], ['title', 'Titles', 'Label the points with task titles']];
 
 function svg(tag, attrs = {}, ...children) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -120,6 +132,17 @@ function layout(rows, plotW, plotH) {
   return out;
 }
 
+/** The text a point is labelled with in `mode`: the key, or the title cut
+ *  at LABEL_MAX characters. */
+function labelText(item, mode) {
+  if (mode !== 'title') return item.key;
+  const t = item.title || item.key;
+  return t.length > LABEL_MAX ? `${t.slice(0, LABEL_MAX - 1).trimEnd()}…` : t;
+}
+
+/** Estimated rendered width of a label (px), for the edge-flip decision. */
+const labelWidth = (text) => text.length * LABEL_CHAR_W + LABEL_GAP;
+
 function pointClass(item) {
   const cls = ['pt'];
   if (isClosed(item.status)) cls.push('closed');
@@ -179,7 +202,7 @@ function drawDependencies(pts) {
 
 // ---------------------------------------------------------------- plot
 
-function drawPlot(root, rows, width, height, colorMode) {
+function drawPlot(root, rows, width, height, colorMode, labelMode) {
   const plotW = Math.max(MIN_PLOT, width - MARGIN.left - MARGIN.right);
   const plotH = Math.max(MIN_PLOT, height - MARGIN.top - MARGIN.bottom);
   const W = plotW + MARGIN.left + MARGIN.right;
@@ -230,24 +253,28 @@ function drawPlot(root, rows, width, height, colorMode) {
       dataset: { id: p.item.id, key: p.item.key },
       style: color ? `--pt: ${color}` : null,
     });
-    // Label sits on the outward side of the jitter so clustered keys fan
-    // out. Near the right edge (low urgency) it flips to the left of the
-    // point; near the left edge (high urgency) it is forced to the right.
+    // Label sits on the outward side of the jitter so clustered labels fan
+    // out. When it would run past the right edge (low urgency) it flips to
+    // the left of the point; when it would run past the left edge (high
+    // urgency) it is forced to the right. The reach depends on the label's
+    // length, so long titles flip where short keys would still fit.
+    const text = labelText(p.item, labelMode);
+    const reach = POINT_R + labelWidth(text);
     const vertical = p.angle !== 0 && Math.abs(Math.cos(p.angle)) <= 0.2;
-    const nearRight = p.x + POINT_R + 40 > x1;
-    const nearLeft = p.x - POINT_R - 40 < x0;
+    const nearRight = p.x + reach > x1;
+    const nearLeft = p.x - reach < x0;
     const left = nearRight || (Math.cos(p.angle) < -0.2 && !nearLeft);
-    const lx = vertical ? p.x : p.x + (left ? -(POINT_R + 4) : POINT_R + 4);
+    const lx = vertical ? p.x : p.x + (left ? -(POINT_R + LABEL_GAP) : POINT_R + LABEL_GAP);
     const ly = vertical ? p.y + (Math.sin(p.angle) < 0 ? -(POINT_R + 5) : POINT_R + 5) : p.y;
     g.append(
       svg('circle', { class: 'hit', cx: p.x, cy: p.y, r: HIT_R }),
       isBlocked(p.item) ? svg('circle', { class: 'ring', cx: p.x, cy: p.y, r: POINT_R + 3.5 }) : null,
       svg('circle', { class: 'dot', cx: p.x, cy: p.y, r: POINT_R }),
       svg('text', {
-        class: 'label', x: lx, y: ly,
+        class: `label ${labelMode === 'title' ? 'title' : 'key'}`, x: lx, y: ly,
         'text-anchor': vertical ? 'middle' : (left ? 'end' : 'start'),
         'dominant-baseline': vertical ? (Math.sin(p.angle) < 0 ? 'auto' : 'hanging') : 'middle',
-      }, p.item.key),
+      }, text),
     );
     points.append(g);
     p.g = g;
@@ -274,7 +301,17 @@ export function renderMatrix(panel, handle, ctx) {
   const colorSel = el('select', { id: 'matrix-color', class: 'matrix-color', 'aria-label': 'Colour points by', title: 'Colour points by' });
   for (const [m, label] of POINT_COLOR_MODES) colorSel.append(el('option', { value: m, selected: m === colorMode ? true : null }, label));
   colorSel.addEventListener('change', () => ctx.setPointColor?.(colorSel.value));
-  const controls = el('div', { class: 'matrix-controls', role: 'group', 'aria-label': 'Matrix controls' }, colorSel);
+  // Point labels (a preference): a Keys | Titles toggle beside the picker.
+  const labelMode = ctx.labelMode === 'title' ? 'title' : 'key';
+  const labelsGroup = el('div', { class: 'matrix-labels', role: 'group', 'aria-label': 'Point labels' });
+  for (const [m, label, title] of LABEL_MODES) {
+    labelsGroup.append(el('button', {
+      type: 'button', class: m === labelMode ? 'active' : '', dataset: { labels: m },
+      'aria-pressed': m === labelMode ? 'true' : 'false', title,
+      onClick: () => { if (m !== labelMode) ctx.setLabelMode?.(m); },
+    }, label));
+  }
+  const controls = el('div', { class: 'matrix-controls', role: 'group', 'aria-label': 'Matrix controls' }, colorSel, labelsGroup);
   const plotRoot = el('div', { class: 'matrix-plot-wrap' });
   wrap.append(controls, plotRoot);
   const tip = itemTooltip();
@@ -284,10 +321,13 @@ export function renderMatrix(panel, handle, ctx) {
   let pts = [];
   const byId = new Map();
 
-  /** Height available to the SVG: from the panel's top edge (in document
-   *  coordinates, so scrolling does not change it) to the viewport bottom. */
+  /** Height available to the SVG: from the panel's top edge to the viewport
+   *  bottom. A sticky panel sits at its CSS top offset once the page has
+   *  scrolled, so that offset is used (and scrolling does not change it); a
+   *  panel in the flow is measured in document coordinates. */
   function availableHeight() {
-    const top = panel.getBoundingClientRect().top + window.scrollY;
+    const cs = getComputedStyle(panel);
+    const top = cs.position === 'sticky' ? parseFloat(cs.top) || 0 : panel.getBoundingClientRect().top + window.scrollY;
     return Math.round(window.innerHeight - top - BOTTOM_GAP - controls.offsetHeight);
   }
 
@@ -304,7 +344,7 @@ export function renderMatrix(panel, handle, ctx) {
     if (width === drawnW && height === drawnH) return;
     drawnW = width;
     drawnH = height;
-    const res = drawPlot(plotRoot, rows, width, height, colorMode);
+    const res = drawPlot(plotRoot, rows, width, height, colorMode, labelMode);
     pts = res.pts;
     const { ux, iy } = res.inv;
     const svgNode = res.svg;

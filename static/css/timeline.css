@@ -28,6 +28,24 @@
   cursor: grab;
 }
 .timeline-scroll.dragging { cursor: grabbing; }
+/* Nested: no frame around the chart; instead each Ongoing/Project with its
+   tasks, and the axis, gets an outline of its own (timeline.js drawFrames),
+   matching the table's framed groups. The outlines sit over the chart at
+   the panel's edges; a spread shadow in the page colour masks the gap
+   between groups (grid lines, connectors and the Today line stop there, as
+   nothing crosses the gaps in the table either). */
+.timeline.nested .timeline-scroll { border: none; border-radius: 0; }
+.timeline-frames { position: absolute; inset: 0; pointer-events: none; }
+.timeline-frame {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 3px var(--bg);
+  z-index: 6;
+}
+.timeline-frame.axis { transform: translateY(var(--axis-shift, 0px)); }
 .timeline-scroll::-webkit-scrollbar { display: none; }
 
 /* No overflow clipping here: the scroll container must stay the nearest
@@ -37,7 +55,11 @@
   min-width: 100%;
 }
 
-/* ---- axis (two tiers, level with the table header row) ---- */
+/* ---- axis (two tiers, level with the table header row) ----
+   The axis band holds the tick labels and paints above the bars, so it can
+   be shifted down (--axis-shift, set by timeline.js on page scroll) to stay
+   in view under the sticky title bar. The tick columns themselves are empty
+   full-height lines behind the bars. */
 .timeline-axis {
   position: absolute;
   top: 0;
@@ -45,8 +67,9 @@
   right: 0;
   background: var(--bg-alt);
   border-bottom: 1px solid var(--border);
-  z-index: 1;
+  z-index: 5;
   pointer-events: none;
+  transform: translateY(var(--axis-shift, 0px));
 }
 
 .timeline-tick {
@@ -56,10 +79,11 @@
   pointer-events: none;
   z-index: 2;
 }
+.timeline-axis-tick { position: absolute; border-left: 1px solid var(--timeline-grid); }
 .timeline-axis-tier { border-bottom: 1px solid var(--border); }
-.timeline-tick.major { border-left-color: var(--timeline-grid-strong); }
-.timeline-tick.month { border-left-color: var(--timeline-month); z-index: 3; } /* above week lines that coincide */
-.timeline-tick.year { border-left-color: var(--timeline-year); border-left-width: 2px; z-index: 3; }
+.timeline-tick.major, .timeline-axis-tick.major { border-left-color: var(--timeline-grid-strong); }
+.timeline-tick.month, .timeline-axis-tick.month { border-left-color: var(--timeline-month); z-index: 3; } /* above week lines that coincide */
+.timeline-tick.year, .timeline-axis-tick.year { border-left-color: var(--timeline-year); border-left-width: 2px; z-index: 3; }
 .timeline-tick-label {
   display: block;
   box-sizing: border-box;
@@ -71,7 +95,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.timeline-tick.major .timeline-tick-label {
+.timeline-axis-tick.major .timeline-tick-label {
   display: inline-block;
   vertical-align: top;
   font-size: 10.5px;
@@ -81,8 +105,8 @@
   position: sticky;   /* keep the current month/year in view while scrolling */
   left: 0;
 }
-.timeline-tick.minor .timeline-tick-label { font-weight: 500; padding: 0 4px; }
-.timeline-tick.day .timeline-tick-label { text-align: center; padding: 0 2px; }
+.timeline-axis-tick.minor .timeline-tick-label { font-weight: 500; padding: 0 4px; }
+.timeline-axis-tick.day .timeline-tick-label { text-align: center; padding: 0 2px; }
 
 /* ---- row bands: mirror the table rows so bars read against them ---- */
 .timeline-rows { position: absolute; left: 0; right: 0; bottom: 0; z-index: 0; }
@@ -92,14 +116,14 @@
   right: 0;
   border-top: 1px solid var(--border);
 }
-/* Bands are tinted like the table rows (--row-color, see app.css; timeline.js
-   sets an item's own or its parent's colour inline the same way). */
+/* Bands are tinted like the table rows (--row-color and the --tint-* mix
+   percentages, see app.css; timeline.js sets an item's own or its parent's
+   colour inline the same way). The gap the table leaves above a parent row
+   shows between bands by itself, as bands follow the row rects. */
 .timeline-row.ongoing { --row-color: var(--row-ongoing); }
 .timeline-row.project { --row-color: var(--row-project); }
-.timeline-row.parent { background: color-mix(in srgb, var(--row-color, transparent) 16%, var(--bg)); }
-/* Parent bands get the same heavier top rule as the table's parent rows. */
-.timeline-row.parent { border-top: 2px solid var(--border-strong); }
-.timeline-row.task { --row-color: var(--row-task); background: color-mix(in srgb, var(--row-color) 12%, var(--bg)); }
+.timeline-row.parent { background: color-mix(in srgb, var(--row-color, transparent) var(--tint-parent, 16%), var(--bg)); }
+.timeline-row.task { --row-color: var(--row-task); background: color-mix(in srgb, var(--row-color) var(--tint-task, 12%), var(--bg)); }
 .timeline-row:hover { background: var(--bg-hover) !important; }
 
 /* ---- bars ---- */
@@ -121,6 +145,23 @@
 .timeline-barwrap::before { content: ""; position: absolute; top: -4px; bottom: -4px; left: -22px; right: -22px; }
 .timeline-barwrap .timeline-bar { left: 0; top: 0; width: 100%; height: 100%; }
 .timeline-barwrap.editing { z-index: 5; }
+/* Derived ends (a parent's missing date taken from its tasks, see
+   timeline.js): hatched fill and a dashed edge on that side, never firm. */
+.timeline-bar.derived {
+  background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--bg) 55%, transparent) 0 3px, transparent 3px 8px);
+}
+.timeline-bar.derived-start::before, .timeline-bar.derived-end::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed color-mix(in srgb, var(--fg) 60%, transparent);
+}
+.timeline-bar.derived-start::before { left: 0; }
+.timeline-bar.derived-end::after { right: 0; }
+/* An Ongoing's bar is read-only: the pointer falls through to the row band. */
+.timeline-barwrap.inert { pointer-events: none; }
 .timeline-barwrap.editing .timeline-bar { opacity: 0.9; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 0 2px var(--accent); }
 /* Remove-date buttons at the ends of a bar, shown on hover. */
 .timeline-x {
@@ -174,12 +215,13 @@
   bottom: 0;
   width: 0;
   border-left: 2px solid var(--timeline-today);
-  z-index: 4;
+  z-index: 6;
   pointer-events: none;
 }
 .timeline-today-label {
   position: absolute;
   top: 2px;
+  transform: translateY(var(--axis-shift, 0px));
   left: -1px;
   padding: 0 5px;
   font-size: 10px;
@@ -192,12 +234,14 @@
   border-radius: 0 7px 7px 0;
 }
 
-/* ---- controls (float over the axis, top-right) ---- */
+/* ---- controls (float over the axis, top-right; they follow the axis
+   when the page scrolls) ---- */
 .timeline-controls {
   position: absolute;
   top: 4px;
   right: 6px;
-  z-index: 6;
+  z-index: 7;
+  transform: translateY(var(--axis-shift, 0px));
   display: flex;
   gap: 2px;
   padding: 2px;
@@ -228,7 +272,8 @@
   position: absolute;
   top: 34px;
   right: 6px;
-  z-index: 6;
+  z-index: 7;
+  transform: translateY(var(--axis-shift, 0px));
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -258,7 +303,7 @@
 /* ---- tooltip ---- */
 .timeline-tooltip {
   position: absolute;
-  z-index: 7;
+  z-index: 8;
   max-width: 360px;
   padding: 6px 10px;
   background: var(--bg);
@@ -272,6 +317,8 @@
   white-space: pre-wrap;
 }
 .timeline-tooltip[hidden] { display: none; }
+.timeline-tip-parent { color: var(--fg-muted); font-size: 11px; }
+.timeline-tip-parent .key { font-family: var(--mono); margin-right: 2px; }
 .timeline-tip-title { font-weight: 600; font-size: 13px; }
 .timeline-tip-title .key { font-family: var(--mono); color: var(--fg-muted); font-weight: 500; margin-right: 2px; }
 .timeline-tip-dates { font-variant-numeric: tabular-nums; }

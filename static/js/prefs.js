@@ -3,9 +3,11 @@
 //
 // There is no authentication: the account is simply the user picked in the
 // account menu at the right of the title bar, remembered per browser in
-// localStorage. With an account selected, preferences live on the server
+// localStorage; a browser that has not picked anyone yet gets the first
+// user (app.js). With an account selected, preferences live on the server
 // (GET/PATCH /api/users/{id}/prefs) so they follow the user to any browser;
-// with no account they live in this browser's localStorage only.
+// with no account (there are no users yet) they live in this browser's
+// localStorage only.
 //
 //   await prefs.load(accountId)    load the account's values (null = this browser)
 //   prefs.get(key)                 current value (string; defaults applied)
@@ -35,6 +37,13 @@ export const PREF_DEFAULTS = {
   task_colors: 'type',     // type: the Task tint from Settings | parent: the task's Ongoing/Project colour
   point_color: 'assignee', // Matrix points: assignee | owner | parent
   filters: '',             // JSON of the Filters panel criteria (search.js), '' = the Active template
+  matrix_labels: 'key',    // Matrix point labels: key | title
+  // The scratch pad panel (scratch.js): open, width in px, the global pane's
+  // share of the height in percent, and line wrapping.
+  scratch_open: '0',
+  scratch_width: '320',
+  scratch_split: '50',
+  scratch_wrap: '1',
 };
 
 const ACCOUNT_KEY = 'planner.account';
@@ -65,17 +74,23 @@ export const prefs = {
   account: null,
   values: {},
 
-  /** The account remembered for this browser (a user id), or null. */
+  /** The account remembered for this browser: a user id; undefined when
+   *  nothing was remembered yet (app.js then picks the first user); null
+   *  when the browser was told to keep its preferences to itself (an empty
+   *  value, which the menu cannot set but a test harness can). */
   rememberedAccount() {
     const v = store.get(ACCOUNT_KEY);
+    if (v == null) return undefined;
     return v ? Number(v) : null;
   },
 
-  /** Load the preferences of `accountId` (null: this browser's) and make it current. */
+  /** Load the preferences of `accountId` (null: this browser's) and make it
+   *  current. The remembered account is left as it was when loading the
+   *  browser's own values, so a user who no longer exists (or none yet) is
+   *  replaced by the first one next time. */
   async load(accountId) {
     this.account = accountId ?? null;
     if (this.account == null) {
-      store.remove(ACCOUNT_KEY);
       this.values = localValues();
       return;
     }

@@ -11,7 +11,8 @@
 //   renderColorsMenu(slot, ctx)  the toolbar's Colours menu
 //
 // Every Ongoing and Project may carry a colour of its own (item.color, shared
-// by everyone; picked with the swatch before its title, see swatch.js). Two
+// by everyone; picked with the swatch in its expanded details, see swatch.js
+// and table.js detailRow). Two
 // per-user preferences decide what shows: "parent_colors" (custom: a parent
 // row uses its own colour when it has one, else the type colour from
 // Settings; type: always the type colour) and "task_colors" (type: task rows
@@ -69,9 +70,10 @@ export function parentColor(item) {
 
 /** The inline --row-color for a table or timeline row (see app.css), or null
  *  to leave the stylesheet's type tint: parent rows carry their effective
- *  colour; task rows their parent's when "task_colors" is parent. */
+ *  colour; task rows their parent's when "task_colors" is parent. An unsaved
+ *  new row takes exactly the tint a saved sibling would (its "new" mark is a
+ *  separate outline, see edit.css). */
 export function rowTint(item, kind) {
-  if (item.id == null) return null; // a new row keeps its own highlight
   if (kind === 'parent') return ownColor(item) || 'transparent';
   if (prefs.get('task_colors') === 'parent') return parentColor(item) || 'transparent';
   return null;
@@ -197,7 +199,7 @@ export function renderColorsMenu(slot, ctx) {
       ['type', 'The Task tint from Settings'],
       ['parent', 'Their Ongoing / Project colour'],
     ], ctx.setTaskColors),
-    el('p', { class: 'colors-note' }, 'Pick an item\u2019s colour with the swatch before its title (everyone sees it). The Timeline and Matrix have their own colour choice in the corner of the chart.'),
+    el('p', { class: 'colors-note' }, 'Pick an Ongoing\u2019s or Project\u2019s colour in the Colour box of its expanded row (everyone sees it). The Timeline and Matrix have their own colour choice in the corner of the chart.'),
   );
   slot.replaceChildren(el('div', { class: 'menu-wrap' }, btn, panel));
   installListeners();

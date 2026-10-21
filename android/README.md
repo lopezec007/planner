@@ -81,7 +81,9 @@ network never blocks a screen.
 - **List**: the Active / Backlog / Ideas templates, search, and the filter
   sheet, with the same semantics as `static/js/search.js` (an item matches
   on its own fields; a parent shows when it or a task matches; Active hides
-  parents without matching tasks). Parents are section headers with their
+  parents without matching tasks). Owner and Assignee are multi-select
+  chips: any chosen user, or "No owner" / "Unassigned", matches, and no
+  choice means any. Parents are section headers with their
   tasks beneath; Flat is a toggle. Row chips: status, assignee, end date
   (orange within 7 days, red today/overdue), urgency/importance per the
   server's colour ramps; blocked rows are dimmed; closed rows carry no
@@ -98,18 +100,22 @@ network never blocks a screen.
   long fade). Colour modes as in the web UI.
 - **Matrix**: full-screen urgency × importance scatter of the visible
   tasks, Eisenhower orientation, deterministic jitter, dependency arrows;
-  tap a point for its card, drag a point to change its values.
+  tap a point for its card (its underlined title, like the Open button,
+  opens the task), drag a point to change its values.
 - **Settings**: server and account, sync status and errors, notification
-  time, users (name, colour, chip label), app settings (week start,
-  colours), about.
+  time and look-ahead window, users (name, colour, chip label), app
+  settings (week start, colours), about.
 
 ### Due-date notifications
 
 A daily WorkManager job (`notify/DueWorker`) at the configured time (default
 08:00) reads Room and posts one notification listing open items assigned to
 the account (or owned by it when unassigned) that are overdue, due today, or
-due within 7 days. It needs no network, so it works offline. Tapping opens
-the item (single item) or the list filtered to the account's assignments.
+due within the next N days, where N is the "Look ahead" setting (0, 1, 3, 7,
+14 or 30 days; default 7; 0 lists only overdue and due-today items). The
+title names the window ("2 this week", "1 due tomorrow", "3 in the next 14
+days"). It needs no network, so it works offline. Tapping opens the item
+(single item) or the list filtered to the account's assignments.
 
 ### Layout of the code
 
@@ -122,7 +128,7 @@ the item (single item) or the list filtered to the account's assignments.
       data/sync/               PendingOp, SyncEngine, SyncWorker, ConnectivityProbe
       data/repo/               PlannerRepository: Flows for the UI, mutations that
                                write Room and enqueue ops
-      prefs/                   DataStore: server URL, account, view prefs, notify time
+      prefs/                   DataStore: server URL, account, view prefs, notify time and window
       ui/theme/                Material 3 theme (dynamic colour off; follows system
                                light/dark)
       ui/nav/                  Screen stack (no Navigation library)

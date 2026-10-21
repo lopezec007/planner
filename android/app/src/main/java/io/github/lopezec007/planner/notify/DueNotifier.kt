@@ -24,6 +24,7 @@ import io.github.lopezec007.planner.data.db.toModel
 import io.github.lopezec007.planner.data.model.Dates
 import io.github.lopezec007.planner.data.model.Item
 import io.github.lopezec007.planner.data.model.ItemType
+import io.github.lopezec007.planner.prefs.AppPrefs
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
@@ -87,7 +88,7 @@ class DueNotifier(private val context: Context) {
         }
         val today = Dates.today()
         val items = graph.db.items().live().map { it.toModel(emptyList()) }
-        val summary = summarize(items, prefs.accountId, today)
+        val summary = summarize(items, prefs.accountId, today, prefs.notifyDays)
         if (summary.isEmpty) {
             manager.cancel(NOTIFICATION_ID)
             return
@@ -139,25 +140,31 @@ class DueNotifier(private val context: Context) {
     }
 }
 
-/** The due items in their three buckets, each sorted by end date (overdue first overall). */
+/**
+ * The due items in their three buckets, each sorted by end date (overdue
+ * first overall); [daysAhead] is the window the `upcoming` bucket covers.
+ */
 data class DueSummary(
     val overdue: List<Item>,
     val today: List<Item>,
-    val week: List<Item>,
+    val upcoming: List<Item>,
+    val daysAhead: Int = AppPrefs.DEFAULT_NOTIFY_DAYS,
 ) {
-    val isEmpty: Boolean get() = overdue.isEmpty() && today.isEmpty() && week.isEmpty()
+    val isEmpty: Boolean get() = overdue.isEmpty() && today.isEmpty() && upcoming.isEmpty()
 
     /** Every due item, overdue first, then by end date. */
-    val all: List<Item> get() = overdue + today + week
+    val all: List<Item> get() = overdue + today + upcoming
 }
 
 /**
  * Picks the account's open projects and tasks with an end date and buckets
- * them: overdue (before [today]), due today, or due within the next 7 days.
+ * them: overdue (before [today]), due today, or due within the next
+ * [daysAhead] days (the Settings look-ahead; 0 = overdue and today only).
  * "Mine" is assigned to the account, or unassigned and owned by it; a null
  * [accountId] counts every item.
  */
-internal fun summarize(items: List<Item>, accountId: Long?, today: LocalDate): DueSummary {
+internal fun summarize(items: List<Item>, accountId: Long?, today: LocalDate, daysAhead: Int = AppPrefs.DEFAULT_NOTIFY_DAYS): DueSummary {
+    val window = daysAhead.coerceAtLeast(0)
     val mine = items.asSequence()
         .filter { it.type != ItemType.ONGOING && !it.isClosed && it.endDate != null }
         .filter { accountId == null || isMine(it, accountId) }
@@ -165,29 +172,40 @@ internal fun summarize(items: List<Item>, accountId: Long?, today: LocalDate): D
         .toList()
     val overdue = ArrayList<Item>()
     val due = ArrayList<Item>()
-    val week = ArrayList<Item>()
+    val upcoming = ArrayList<Item>()
     for (item in mine) {
         val end = item.endDate ?: continue
         val days = ChronoUnit.DAYS.between(today, end)
         when {
             days < 0 -> overdue.add(item)
             days == 0L -> due.add(item)
-            days <= 7 -> week.add(item)
+            days <= window -> upcoming.add(item)
         }
     }
-    return DueSummary(overdue, due, week)
+    return DueSummary(overdue, due, upcoming, window)
 }
 
 private fun isMine(item: Item, accountId: Long): Boolean =
     item.assigneeId == accountId || (item.assigneeId == null && item.ownerId == accountId)
 
-/** "3 overdue, 1 due today, 2 this week": only the non-zero parts. */
+/**
+ * "3 overdue, 1 due today, 2 this week": only the non-zero parts. The last
+ * part names the window: "this week" for 7 days, "due tomorrow" for 1, else
+ * "in the next N days".
+ */
 internal fun titleFor(s: DueSummary): String {
     val parts = ArrayList<String>(3)
     if (s.overdue.isNotEmpty()) parts.add("${s.overdue.size} overdue")
     if (s.today.isNotEmpty()) parts.add("${s.today.size} due today")
-    if (s.week.isNotEmpty()) parts.add("${s.week.size} this week")
+    if (s.upcoming.isNotEmpty()) parts.add("${s.upcoming.size} ${windowText(s.daysAhead)}")
     return parts.joinToString(", ")
+}
+
+/** The wording for the look-ahead window in the title. */
+internal fun windowText(daysAhead: Int): String = when (daysAhead) {
+    1 -> "due tomorrow"
+    7 -> "this week"
+    else -> "in the next $daysAhead days"
 }
 
 /** "overdue 3 days", "due today", "in 1 day". */

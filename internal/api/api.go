@@ -6,6 +6,8 @@
 //     clears a nullable field (parent_id excepted: tasks always need one).
 //   - Owner/assignee: send {"assignee_id": 3} for a user or
 //     {"assignee_id": null} to clear (likewise owner_id).
+//   - Every change is announced on GET /api/events (see events.go); clients
+//     identify themselves with the X-Planner-Client header.
 package api
 
 import (
@@ -23,13 +25,24 @@ import (
 )
 
 type Server struct {
-	st *store.Store
+	st  *store.Store
+	hub *Hub
 }
 
+// New makes a server over the store with its own event hub.
+func New(st *store.Store) *Server { return &Server{st: st, hub: NewHub()} }
+
 // Handler returns the API router mounted under /api/.
-func Handler(st *store.Store) http.Handler {
-	s := &Server{st: st}
+func Handler(st *store.Store) http.Handler { return New(st).Handler() }
+
+// Handler returns the server's router mounted under /api/.
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/events", s.events)
+	mux.HandleFunc("GET /api/scratch", s.getScratch)
+	mux.HandleFunc("PUT /api/scratch", s.putScratch)
+	mux.HandleFunc("GET /api/users/{id}/scratch", s.getUserScratch)
+	mux.HandleFunc("PUT /api/users/{id}/scratch", s.putUserScratch)
 	mux.HandleFunc("GET /api/users", s.listUsers)
 	mux.HandleFunc("POST /api/users", s.createUser)
 	mux.HandleFunc("PATCH /api/users/{id}", s.updateUser)
@@ -123,6 +136,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindUsers, "")
 	writeJSON(w, 201, u)
 }
 
@@ -146,6 +160,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindUsers, "")
 	writeJSON(w, 200, u)
 }
 
@@ -159,6 +174,7 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindUsers, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -330,6 +346,7 @@ func (s *Server) createItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindItems, "")
 	writeJSON(w, 201, it)
 }
 
@@ -358,6 +375,7 @@ func (s *Server) updateItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindItems, "")
 	writeJSON(w, 200, it)
 }
 
@@ -371,6 +389,7 @@ func (s *Server) deleteItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindItems, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -384,6 +403,7 @@ func (s *Server) restoreItem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindItems, "")
 	it, err := s.st.GetItem(id)
 	if err != nil {
 		writeErr(w, err)
@@ -421,6 +441,7 @@ func (s *Server) addDependency(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindItems, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -435,6 +456,7 @@ func (s *Server) removeDependency(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindItems, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -460,6 +482,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindSettings, "")
 	writeJSON(w, 200, st)
 }
 
@@ -475,6 +498,7 @@ func (s *Server) reorder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindItems, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -627,6 +651,7 @@ func (s *Server) uploadAttachments(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, *a)
 	}
+	s.publish(r, KindItems, "")
 	writeJSON(w, 201, out)
 }
 
@@ -678,6 +703,7 @@ func (s *Server) deleteAttachment(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindItems, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -692,6 +718,7 @@ func (s *Server) restoreAttachment(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	s.publish(r, KindItems, "")
 	a, err := s.st.GetAttachmentMeta(id)
 	if err != nil {
 		writeErr(w, err)

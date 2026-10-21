@@ -69,13 +69,14 @@ test('columns can be hidden and shown from the Columns menu, per user, and the d
   await expect(page.locator('#columns-badge')).toHaveText('1');
   await page.locator('#columns-panel input[data-column=key]').uncheck();
   await expect(page.locator('.row.header [data-sort="key"]')).toHaveCount(0);
-  await expect(page.locator('.drag-handle')).toHaveCount(0); // the handle lives in the key column
+  await expect(page.locator('.key-text')).toHaveCount(0);
+  await expect(page.locator('.row.task .actions .drag-handle').first()).toBeAttached(); // the handle lives in the actions, so it stays
   // The description still sits under the title column.
   await page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.toggle button').click();
   const title = await page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.title').boundingBox();
   const desc = await page.locator('.row.description[data-desc-for] > .title').boundingBox();
   expect(Math.abs(title.x - desc.x)).toBeLessThan(1);
-  await expect(page.locator('.table')).toHaveAttribute('data-columns', /^toggle title status assignee/);
+  await expect(page.locator('.table')).toHaveAttribute('data-columns', /^collapse title status assignee/);
   await page.reload();
   await expect(page.locator('.row.header [data-sort="owner"]')).toHaveCount(0); // a preference
   await page.locator('#btn-columns').click();

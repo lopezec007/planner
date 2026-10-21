@@ -92,12 +92,45 @@ class FiltersTest {
         val blocked = item(ItemType.TASK, "blocked", parentId = p.id, blockedBy = listOf(blocker.id))
         val (groups, byId) = groupsOf(p, mine, nobody, blocker, blocked)
 
-        assertEquals(listOf(mine.id), Criteria(assignee = "2").apply(groups, byId).single().tasks.map { it.id })
-        assertEquals(listOf(nobody.id, blocker.id, blocked.id), Criteria(assignee = "none").apply(groups, byId).single().tasks.map { it.id })
+        assertEquals(listOf(mine.id), Criteria(assignees = setOf("2")).apply(groups, byId).single().tasks.map { it.id })
+        assertEquals(listOf(nobody.id, blocker.id, blocked.id), Criteria(assignees = setOf("none")).apply(groups, byId).single().tasks.map { it.id })
         assertEquals(listOf(blocked.id), Criteria(blocked = "yes").apply(groups, byId).single().tasks.map { it.id })
         // The project matches owner=1 itself, so it shows even with no matching tasks.
-        val byOwner = Criteria(owner = "1").apply(groups, byId).single()
+        val byOwner = Criteria(owners = setOf("1")).apply(groups, byId).single()
         assertTrue(byOwner.tasks.isEmpty())
+    }
+
+    @Test
+    fun ownerAndAssigneeAreMultiSelect() {
+        val p = item(ItemType.PROJECT, "P", ownerId = 1)
+        val mine = item(ItemType.TASK, "mine", parentId = p.id, assigneeId = 2)
+        val theirs = item(ItemType.TASK, "theirs", parentId = p.id, assigneeId = 3)
+        val nobody = item(ItemType.TASK, "nobody", parentId = p.id)
+        val (groups, byId) = groupsOf(p, mine, theirs, nobody)
+
+        // Any of the chosen assignees matches, "none" included.
+        assertEquals(listOf(mine.id, theirs.id), Criteria(assignees = setOf("2", "3")).apply(groups, byId).single().tasks.map { it.id })
+        assertEquals(listOf(mine.id, nobody.id), Criteria(assignees = setOf("2", "none")).apply(groups, byId).single().tasks.map { it.id })
+        assertTrue(Criteria(assignees = setOf("9")).apply(groups, byId).isEmpty())
+        // Owners: the project owned by 1 shows; nobody owns 2, so that alone shows nothing.
+        assertEquals(1, Criteria(owners = setOf("1", "2")).apply(groups, byId).size)
+        assertTrue(Criteria(owners = setOf("2")).apply(groups, byId).isEmpty())
+        assertEquals(2, Criteria(owners = setOf("1"), assignees = setOf("none")).filterCount)
+    }
+
+    @Test
+    fun userSetsRoundTripAndReadTheLegacySingleKey() {
+        val c = Criteria(owners = setOf("1", "none"), assignees = setOf("2", "3"))
+        assertEquals(c, Criteria.fromJson(c.toJson()))
+        // A lone choice is also written under the web's single key.
+        val one = Criteria(owners = setOf("4"))
+        assertTrue(one.toJson().contains("\"owner\":\"4\""))
+        assertEquals(one, Criteria.fromJson(one.toJson()))
+        // Filters saved before multi-select carry only the single keys.
+        val legacy = Criteria.fromJson("{\"owner\":\"5\",\"assignee\":\"none\"}")
+        assertEquals(setOf("5"), legacy.owners)
+        assertEquals(setOf("none"), legacy.assignees)
+        assertEquals(emptySet<String>(), Criteria.fromJson("{\"owner\":\"\"}").owners)
     }
 
     @Test
@@ -113,11 +146,11 @@ class FiltersTest {
 
     @Test
     fun jsonRoundTripAndPresetDetection() {
-        val c = Criteria(statuses = setOf(Status.TODO, Status.IN_PROGRESS), recentDays = 14, hideEmptyParents = true, owner = "3", endAfter = LocalDate.of(2026, 1, 2))
+        val c = Criteria(statuses = setOf(Status.TODO, Status.IN_PROGRESS), recentDays = 14, hideEmptyParents = true, owners = setOf("3"), endAfter = LocalDate.of(2026, 1, 2))
         val back = Criteria.fromJson(c.toJson())
         assertEquals(c, back)
         assertEquals(Preset.ACTIVE, back.preset)
-        assertNull(back.copy(owner = "", recentDays = 0).preset)
+        assertNull(back.copy(owners = emptySet(), recentDays = 0).preset)
         assertEquals(Preset.ACTIVE, Criteria.fromJson(null).preset)
         assertEquals(Preset.ACTIVE, Criteria.fromJson("{not json").preset)
         assertFalse(Criteria().isActive)

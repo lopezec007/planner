@@ -37,9 +37,17 @@ data class AppPrefs(
     val notifyEnabled: Boolean = true,
     val notifyHour: Int = 8,
     val notifyMinute: Int = 0,
+    val notifyDays: Int = DEFAULT_NOTIFY_DAYS, // the notification also lists items due within this many days
     val setupDone: Boolean = false,
 ) {
     val isConfigured get() = serverUrl.isNotBlank() && setupDone
+
+    companion object {
+        const val DEFAULT_NOTIFY_DAYS = 7
+
+        /** The look-ahead choices offered in Settings (0 = overdue and due today only). */
+        val NOTIFY_DAY_CHOICES = listOf(0, 1, 3, 7, 14, 30)
+    }
 }
 
 class Prefs(private val context: Context) {
@@ -55,6 +63,7 @@ class Prefs(private val context: Context) {
         val notifyEnabled = booleanPreferencesKey("notify_enabled")
         val notifyHour = intPreferencesKey("notify_hour")
         val notifyMinute = intPreferencesKey("notify_minute")
+        val notifyDays = intPreferencesKey("notify_days")
         val setupDone = booleanPreferencesKey("setup_done")
     }
 
@@ -76,6 +85,7 @@ class Prefs(private val context: Context) {
         notifyEnabled = p[K.notifyEnabled] ?: true,
         notifyHour = p[K.notifyHour] ?: 8,
         notifyMinute = p[K.notifyMinute] ?: 0,
+        notifyDays = p[K.notifyDays] ?: AppPrefs.DEFAULT_NOTIFY_DAYS,
         setupDone = p[K.setupDone] ?: false,
     )
 
@@ -100,4 +110,5 @@ class Prefs(private val context: Context) {
         it[K.notifyHour] = hour.coerceIn(0, 23)
         it[K.notifyMinute] = minute.coerceIn(0, 59)
     }
+    suspend fun setNotifyDays(days: Int) = context.dataStore.edit { it[K.notifyDays] = days.coerceIn(0, 365) }
 }

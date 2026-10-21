@@ -27,14 +27,17 @@ the single SQLite file. The directory containing it must already exist.
 2. The planner is a single page. **Active**, **Backlog** and **Ideas** beside
    the search box are filter templates: Active sets To-Do and In-Progress
    plus anything closed in the last 14 days, the other two set that status
-   for projects and tasks. They fill the Filters panel, where you can adjust
+   for projects and tasks. They are toggles that combine: click one to turn
+   it on, click it again to turn it off, and turn on two or three to see
+   their statuses together (Active + Backlog shows both and hides ideas).
+   They fill the Filters panel, where you can adjust
    them; Clear removes every filter and shows everything. The filter
-   settings are remembered (per account, or per browser) like the other
+   settings are remembered per account like the other
    preferences; the search text is not. The gear at the
    far left opens Settings, which has an Items button to come back.
-   Active hides Ongoing and Project rows without active tasks; Backlog and
-   Ideas keep every Ongoing row so items can be added to them. Filters apply
-   to each item's own status.
+   Active on its own hides Ongoing and Project rows without active tasks;
+   Backlog and Ideas (alone or combined with Active) keep every Ongoing row
+   so items can be added to them. Filters apply to each item's own status.
    Click **+ Ongoing** or **+ Project** to add a blank row;
    fill in the title (required) and anything else, then press Enter or the ✓
    button (✕ or Escape discards). Use the **+** on an Ongoing or Project row
@@ -47,14 +50,27 @@ the single SQLite file. The directory containing it must already exist.
    otherwise; click the pressed chip to clear). The `~` before a date marks it approximate; click it to
    pin it firm (the `~` becomes a 📌; click again to make it approximate).
    In the urgency and importance fields a single key sets the
-   value: 1 to 9, 0 for 10 and ` for 0.
-4. Expand a row (▸) for its description, its attachments and, for projects
-   and tasks, its dependencies. The description is markdown, rendered
-   densely (a single newline is a line break, a blank line a new paragraph). The caret before an Ongoing or Project title
-   hides its tasks (remembered across reloads). **Flat** shows tasks only,
+   value: 1 to 9, 0 for 10 and ` for 0; nothing but digits can be typed
+   there. Leaving the page (the gear, a filter route, the back button)
+   while a new row or a text edit is in progress shows a warning and stays
+   put; finish the edit (Enter) or discard it (Escape) first. Reloading or
+   closing the tab asks the browser's usual confirmation.
+4. Expand a row with the ▸ at its right (the first of the row's buttons) for
+   its description, its attachments and, for projects
+   and tasks, its dependencies; an Ongoing or Project also gets a **Colour**
+   box there (see Item colours below). The description is markdown, rendered
+   densely (a single newline is a line break, a blank line a new paragraph).
+   The caret at the far left of an Ongoing or Project row
+   hides its tasks (remembered across reloads); while hidden, the count
+   after the title is of the tasks that pass the current filters, and the
+   toolbar's expand-all-parents / collapse-all-parents buttons (next to the
+   expand-all / collapse-all buttons for the details) do it for every parent
+   at once. **Flat** shows tasks only,
    with the parent's key and title as the first columns; a heavier rule marks
-   where one parent's tasks end and the next begin (parent rows in the
-   normal layout carry the same rule). Dependencies: "Blocked by" and
+   where one parent's tasks end and the next begin (in the normal layout
+   each Ongoing/Project with its tasks is a framed block of its own, with a
+   gap between blocks; the Timeline beside it is framed the same way).
+   Dependencies: "Blocked by" and
    "Blocks" lists of item keys with a dropdown to add more; hover a key for
    the item's title, status and description.
    An item blocked by anything still open has its Blocked box locked on. Two
@@ -64,7 +80,7 @@ the single SQLite file. The directory containing it must already exist.
    the strip) stores files of any type with the item; a 📎 after the title
    shows how many. Clicking a file opens it in a new tab when the browser can
    show it (images, PDF, text, audio, video) and downloads it otherwise; × removes it.
-5. Drag the ⠿ handle to reorder: Ongoing/Project rows among themselves, tasks
+5. Drag the ⠿ handle at the far right of a row to reorder: Ongoing/Project rows among themselves, tasks
    among any tasks. Dropping a task among another parent's tasks, or onto a
    parent row, moves it to that parent (in Flat a task only moves among its
    own parent's tasks). The ⇄ button on a task row moves it to another
@@ -83,25 +99,36 @@ the single SQLite file. The directory containing it must already exist.
    (the dropdown of items, or the file picker).
    The toolbar buttons are icons; hover one for what it does.
 6. **Timeline** shows a Gantt chart beside the titles (zoom with the +/−
-   buttons or Ctrl+wheel, wheel or drag to pan, Today recentres). Drag a bar
-   to move its dates or an end to resize; drag or click in a bar's faded
-   tail to pin the missing date; click or drag on an empty row to create
-   dates; hover a bar for × buttons that remove a date. The dropdown in the
+   buttons or Ctrl+wheel; Shift+wheel, Alt+wheel or drag to pan; a plain
+   wheel scrolls the page; Today recentres). The date axis stays in view
+   under the title bar while the page scrolls, like the table header. Drag
+   a bar to move its dates or an end to resize; drag or click in a bar's
+   faded tail to pin the missing date; click or drag on an empty row to
+   create dates; hover a bar for × buttons that remove a date. A Project
+   without a start or end of its own, and every Ongoing, gets that end from
+   its tasks (earliest start, latest end): such an end is hatched with a
+   dashed edge, the tooltip says "from its tasks", and on a Project
+   clicking or dragging it pins a real date. The dropdown in the
    Timeline's corner colours the bars by assignee, owner, importance, urgency
    or importance × urgency (a blend: red = urgent and important, blue =
-   important, amber = urgent, grey = neither), with a legend. **Matrix**
-   plots tasks by urgency and importance; hover a point for its description.
+   important, amber = urgent, grey = neither), with a legend. Tooltips name
+   a task's Ongoing or Project above its title. **Matrix**
+   plots tasks by urgency and importance and stays in view while the list
+   scrolls; hover a point for its description; the Keys / Titles toggle
+   above the plot labels points with the task key or its title.
    Settings has the first day of the week, the row tint colours for
    Ongoing, Project and Task rows, the end-date highlight colours and
    windows, and a colour for each urgency and importance value (two ramps,
    with presets).
    **Item colours**: every Ongoing and Project can have a colour of its own.
-   Click the swatch before its title for a palette, a custom colour, or back
+   Expand the row and click the swatch in its Colour box for a palette, a
+   custom colour, or back
    to the type colour; the colour is stored on the item, so everyone sees
    it. The **Colours** menu in the toolbar is your own choice of what shows:
    Ongoing/Project rows in their own colour (when set) or always the type
    colour from Settings, and task rows in the Task tint or in their
-   Ongoing/Project's colour. The Timeline's colour dropdown and a matching
+   Ongoing/Project's colour (then parent rows are tinted much more strongly
+   than their tasks, so the two stay distinct). The Timeline's colour dropdown and a matching
    one above the Matrix have an **Ongoing / Project** mode that colours bars
    and points the same way.
 7. Table, Timeline and Matrix show the same filtered items.
@@ -113,11 +140,23 @@ the single SQLite file. The directory containing it must already exist.
    and attachment uploads and removals. Inside a text field the browser's
    own undo applies.
 10. **Accounts**: the menu at the far right of the title bar says who you
-   are (one of the users from Settings; there is no password). The view,
-   Flat, Narrow, collapsed parents, sort, hidden columns, filters, Timeline
-   and Matrix colouring and the Colours menu are saved with the account, so they
-   follow you to any browser; with **No account** they are kept in the
-   browser only.
+   are (one of the users from Settings; there is no password). A browser
+   that has not picked anyone gets the first user and remembers the choice.
+   The view, Flat, Narrow, collapsed parents, sort, hidden columns, filters,
+   Timeline and Matrix colouring, the Colours menu, the Matrix labels and
+   the scratch pad layout are saved with the account, so they follow you to
+   any browser; until the first user exists they are kept in the browser.
+11. **Live updates**: a change made in another browser (or from the Android
+   app) shows up here within a moment, no refresh needed. A page waits
+   while you are in the middle of an edit and catches up as soon as you
+   finish it.
+12. **Scratch pad**: the notepad button at the far left of the title bar
+   slides out a panel with two plain-text panes, a **Shared** one that
+   everyone sees and one for your account. They save as you type and other
+   browsers' edits appear live (never over a pane you are typing in). Drag
+   the panel's right edge to resize it and the bar between the panes to
+   change their split; **Wrap** toggles line wrapping. Width, split, Wrap
+   and open/closed are remembered with the account.
 
 "Today" and all date highlighting use the browser's timezone, not the
 server's. A project's status decides under which filter its tasks appear.
@@ -234,16 +273,18 @@ Layout:
 
     main.go               HTTP server, embeds static/
     internal/store        SQLite persistence, validation, soft delete, status history
-    internal/api          JSON API handlers (see package doc for conventions)
+    internal/api          JSON API handlers (see package doc for conventions), the event stream, the scratch pad
     static/               Frontend: vanilla ES modules, no build step
-      js/app.js           hash router, toolbar, account menu, page rendering
+      js/app.js           hash router, toolbar, account menu, page rendering, the edit guard
+      js/realtime.js      server-sent events: reloads the page when another client changes something
+      js/scratch.js       the scratch pad panel (shared and per-account panes)
       js/prefs.js         per-account preferences (server) or per-browser (localStorage)
       js/sort.js          column sort: comparator, header-click rule, Sort menu
       js/columns.js       column definitions, widths, hidden columns and the Columns menu
       js/icons.js         inline SVG icons for the toolbar
       js/tooltip.js       the item tooltip shared by the Matrix and the dependency chips
       js/colors.js        colour-coding: bar/point modes, Ongoing/Project colours, the Colours menu
-      js/swatch.js        the colour swatch and palette popover on Ongoing/Project rows
+      js/swatch.js        the colour swatch and palette popover (the Colour box of an expanded Ongoing/Project)
       js/state.js         client cache + local-timezone date helpers
       js/filters.js       grouping of items and the Active/Backlog/Ideas filter templates
       js/table.js         hierarchical table renderer, drag reordering, expanded rows
@@ -272,7 +313,13 @@ API summary (all JSON):
     POST   /api/users {name, color?, short?}  DELETE /api/users/{id}   (409 if referenced)
     GET    /api/users/{id}/prefs      PATCH /api/users/{id}/prefs {key: value}
                                       (view, narrow, flat, collapsed, sort, blocked_last, bar_color, hidden_cols,
-                                       parent_colors, task_colors, point_color, filters)
+                                       parent_colors, task_colors, point_color, filters, matrix_labels,
+                                       scratch_open, scratch_width, scratch_split, scratch_wrap)
+    GET    /api/users/{id}/scratch    PUT /api/users/{id}/scratch {text}   the user's scratch pad {text, updated_at}
+    GET    /api/scratch               PUT /api/scratch {text}              the shared scratch pad (1 MiB cap)
+    GET    /api/events                server-sent events: {"kind": items|users|settings|scratch, "scope"?,
+                                      "client", "rev"} after every change; "client" echoes the X-Planner-Client
+                                      header of the request that made it, so a page can ignore its own changes
     GET    /api/items                 all live items, ordered by parent then sort_order
     POST   /api/items {type, title, parent_id?, ...}
     GET    /api/items/{id}            PATCH /api/items/{id}  partial; null clears

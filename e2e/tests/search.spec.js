@@ -223,3 +223,78 @@ test('the Active / Backlog / Ideas templates set the filters; other criteria sta
   await expect(parents(page)).toHaveCount(7);
   await expect(page.locator('.search-preset.active')).toHaveCount(0);
 });
+
+test('the templates are toggles that combine; clearing one, the lit set and persistence', async ({ page }) => {
+  const lit = () => page.locator('.search-preset[aria-pressed=true]');
+  const baselineTasks = await tasks(page).count();
+  // #/everything lights nothing. Active on its own hides empty parents.
+  await expect(lit()).toHaveCount(0);
+  await page.locator('.search-preset[data-preset=active]').click();
+  await expect(lit()).toHaveCount(1);
+  await expect(parent(page, 'Solar panels')).toHaveCount(0); // no active tasks
+  await expect(task(page, 'Service lawnmower')).toHaveCount(0); // backlog
+  // Active + Backlog: both statuses show, empty Ongoing/Project rows stay.
+  await page.locator('.search-preset[data-preset=backlog]').click();
+  await expect(lit()).toHaveCount(2);
+  await expect(page.locator('.search-preset[data-preset=active]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.search-preset[data-preset=backlog]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(task(page, 'Clean gutters')).toBeVisible();      // todo
+  await expect(task(page, 'Service lawnmower')).toBeVisible();  // backlog
+  await expect(task(page, 'Paint walls')).toBeVisible();        // backlog under an in-progress project
+  await expect(parent(page, 'Finance')).toBeVisible();          // an Ongoing with no matching tasks is kept
+  await expect(parent(page, 'Solar panels')).toHaveCount(0);    // an idea project with only idea tasks matches nothing
+  await expect(page.locator('[data-search-key="hideEmpty"]')).not.toBeChecked();
+  await expect(page.locator('#btn-filters .search-badge')).toHaveText('1'); // the statuses count as one filter
+  await openFilters(page);
+  await expect(page.locator('[data-search-key="status:todo"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-search-key="status:backlog"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-search-key="status:idea"]')).not.toHaveClass(/active/);
+  await expect(page.locator('[data-search-key="recentDays"]')).toHaveValue('14');
+  await page.keyboard.press('Escape');
+  // The combination survives a reload (from #/, since a filter route would apply itself afresh).
+  await page.goto('/#/');
+  await page.reload();
+  await expect(lit()).toHaveCount(2);
+  await expect(task(page, 'Service lawnmower')).toBeVisible();
+  // Clicking a lit template clears it: Backlog alone (hide-empty off, closed-within off).
+  await page.locator('.search-preset[data-preset=active]').click();
+  await expect(lit()).toHaveCount(1);
+  await expect(page.locator('.search-preset[data-preset=backlog]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(task(page, 'Clean gutters')).toHaveCount(0);
+  await expect(task(page, 'Service lawnmower')).toBeVisible();
+  await expect(parent(page, 'Finance')).toBeVisible(); // an Ongoing without backlog tasks stays
+  await openFilters(page);
+  await expect(page.locator('[data-search-key="recentDays"]')).toHaveValue('');
+  await page.keyboard.press('Escape');
+  // All three: every status, so everything shows.
+  await page.locator('.search-preset[data-preset=active]').click();
+  await page.locator('.search-preset[data-preset=ideas]').click();
+  await expect(lit()).toHaveCount(3);
+  await expect(parents(page)).toHaveCount(7);
+  await expect(tasks(page)).toHaveCount(baselineTasks);
+  // A manual change that equals a combination lights it; any other change lights none.
+  await openFilters(page);
+  await page.locator('[data-search-key="status:idea"]').click();
+  await expect(lit()).toHaveCount(2); // Active + Backlog again
+  await page.locator('[data-search-key="recentDays"]').fill('3');
+  await page.locator('[data-search-key="recentDays"]').press('Enter');
+  await expect(lit()).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  // Turning the last template off leaves no status filter at all.
+  await page.locator('.search-preset[data-preset=ideas]').click();
+  await expect(lit()).toHaveCount(1);
+  await page.locator('.search-preset[data-preset=ideas]').click();
+  await expect(lit()).toHaveCount(0);
+  await expect(page.locator('#btn-filters .search-badge')).toHaveCount(0);
+  await expect(parents(page)).toHaveCount(7);
+  // Other criteria survive a template click; the routes still apply exactly one template.
+  await page.locator('#search-text').fill('lawn');
+  await page.locator('.search-preset[data-preset=backlog]').click();
+  await expect(page.locator('#search-text')).toHaveValue('lawn');
+  await expect(tasks(page)).toHaveCount(1);
+  await page.locator('.search-preset[data-preset=active]').click();
+  await expect(lit()).toHaveCount(2);
+  await page.goto('/#/ideas');
+  await expect(lit()).toHaveCount(1);
+  await expect(page.locator('.search-preset[data-preset=ideas]')).toHaveAttribute('aria-pressed', 'true');
+});

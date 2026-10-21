@@ -1,5 +1,7 @@
-// Inline SVG icons for the toolbar (16×16, drawn with the current text
-// colour so they follow the theme). icon(name) returns a fresh <svg>.
+// Inline SVG icons for the toolbar and the row action buttons (16×16, drawn
+// with the current text colour so they follow the theme). icon(name) returns
+// a fresh <svg>. Action buttons use icons rather than text glyphs so they
+// centre the same way in every font and at every screen density.
 //
 // Buttons that show only an icon must carry an aria-label and a title: the
 // label names the control for assistive technology and the title is the
@@ -12,6 +14,9 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const PATHS = {
   'expand-all': '<path d="M4 5.5l4-3.5 4 3.5M4 10.5l4 3.5 4-3.5"/>',
   'collapse-all': '<path d="M4 2l4 3.5 4-3.5M4 14l4-3.5 4 3.5"/>',
+  // Show / hide the tasks of every Ongoing and Project (the carets on parent rows).
+  'expand-parents': '<path d="M2.5 4l2.5 2.5L7.5 4"/><path d="M9.5 5h4.5M6 9.5h8M6 13.5h8"/>',
+  'collapse-parents': '<path d="M3.5 3l2.5 2.5L3.5 8"/><path d="M9 5h5M9 9.5h5M9 13.5h5"/>',
   active: '<path d="M4 2.5l9 5.5-9 5.5z" fill="currentColor" stroke="none"/>',
   backlog: '<path d="M5 4h9M5 8h9M5 12h9"/><circle cx="2.2" cy="4" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.2" cy="8" r="0.9" fill="currentColor" stroke="none"/><circle cx="2.2" cy="12" r="0.9" fill="currentColor" stroke="none"/>',
   ideas: '<path d="M8 1.5a4.3 4.3 0 0 0-2.4 7.9V11h4.8V9.4A4.3 4.3 0 0 0 8 1.5z"/><path d="M6.2 13.2h3.6M7 15h2"/>',
@@ -31,6 +36,14 @@ const PATHS = {
   timeline: '<path d="M2 3.5h6M5.5 8h8M3 12.5h5" stroke-width="2.6"/>',
   matrix: '<path d="M2.5 1.5v12h12"/><circle cx="6" cy="5.5" r="1.4" fill="currentColor" stroke="none"/><circle cx="10.5" cy="4.5" r="1.4" fill="currentColor" stroke="none"/><circle cx="8.5" cy="9.5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12.5" cy="9" r="1.4" fill="currentColor" stroke="none"/>',
   back: '<path d="M13.5 8H3M7 3.5L2.5 8 7 12.5"/>',
+  // Row actions (table.js): add a task, move a task elsewhere, delete, save
+  // and discard a new row, and the grip of the drag handle.
+  plus: '<path d="M8 3v10M3 8h10"/>',
+  move: '<path d="M2.5 5.5h9M9 2.5l3 3-3 3M13.5 10.5h-9M7 7.5l-3 3 3 3"/>',
+  trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5M6.8 7v4M9.2 7v4"/>',
+  check: '<path d="M3 8.5l3.2 3.2L13 5"/>',
+  cross: '<path d="M4 4l8 8M12 4l-8 8"/>',
+  grip: '<circle cx="5.5" cy="3.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="10.5" cy="3.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="5.5" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="10.5" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="5.5" cy="12.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="10.5" cy="12.5" r="1.3" fill="currentColor" stroke="none"/>',
 };
 
 export function icon(name) {

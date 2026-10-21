@@ -8,8 +8,15 @@
 
 import { state } from './state.js';
 
+// This page's id, sent with every request as X-Planner-Client. The server
+// puts it in the events it announces (realtime.js), so the page can tell its
+// own changes from everyone else's.
+export const clientId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+  ? crypto.randomUUID()
+  : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
 async function req(method, path, body) {
-  const opts = { method, headers: {} };
+  const opts = { method, headers: { 'X-Planner-Client': clientId } };
   if (body instanceof FormData) {
     opts.body = body; // the browser sets the multipart boundary
   } else if (body !== undefined) {
@@ -59,6 +66,12 @@ const raw = {
   deleteAttachment: (id) => req('DELETE', `/api/attachments/${id}`),
   restoreAttachment: (id) => req('POST', `/api/attachments/${id}/restore`),
   getVersion: () => req('GET', '/api/version'),
+  // Scratch pad (scratch.js): {text, updated_at} for the shared pane and a
+  // user's own; PUT replaces the text and returns the same shape.
+  getScratch: () => req('GET', '/api/scratch'),
+  putScratch: (text) => req('PUT', '/api/scratch', { text }),
+  getUserScratch: (id) => req('GET', `/api/users/${id}/scratch`),
+  putUserScratch: (id, text) => req('PUT', `/api/users/${id}/scratch`, { text }),
   getSettings: () => req('GET', '/api/settings'),
   // body: {key: value, ...}; returns the full settings
   updateSettings: (body) => req('PATCH', '/api/settings', body),

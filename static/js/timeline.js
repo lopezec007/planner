@@ -9,12 +9,25 @@
 //           barColor is the bar colouring mode (see colors.js) and
 //           setBarColor persists a new one and re-renders.
 //
-// Layout: a horizontally scrollable canvas (native scrollbar, shift+wheel,
-// drag to pan) covering a wide date range; zoom (ctrl+wheel or the +/- buttons)
-// changes the pixels-per-day scale. The axis is the same height as the table's
-// header row and has two tiers: the major unit (month/year, a sticky label that
-// stays in view while scrolling) above the minor unit (days/weeks/months).
-// View state (zoom and scroll position) is kept in memory for the session only.
+// Layout: a horizontally scrollable canvas covering a wide date range. A
+// plain wheel is left to the page (it scrolls the list vertically); Shift+wheel
+// or Alt+wheel pans the timeline sideways, as does dragging the canvas, and
+// Ctrl/Meta+wheel or the +/- buttons zoom (pixels per day). The axis is the
+// same height as the table's header row and has two tiers: the major unit
+// (month/year, a sticky label that stays in view while scrolling sideways)
+// above the minor unit (days/weeks/months). The tick columns are empty line
+// elements; their labels live in the axis band, which is shifted down by the
+// amount the canvas top has scrolled under the title bar so the dates stay
+// readable while the page scrolls (as the table header does). View state
+// (zoom and scroll position) is kept in memory for the session only.
+//
+// Parents: a Project missing its own start or end, and every Ongoing (which
+// has no dates of its own), takes that end from its live tasks (all of them,
+// not only the visible ones): the earliest task start (else the earliest task
+// end) and the latest task end (else the latest task start). Such a derived
+// end is drawn hatched with a dashed edge, is never firm and cannot be
+// resized; on a Project, clicking or dragging its edge pins a real date, and
+// an Ongoing's bar is inert (the row band shows the tooltip instead).
 //
 // Dependencies: every edge whose two items both have a bar is drawn as a
 // rounded orthogonal connector from the end of the blocker's bar to the start
@@ -31,6 +44,7 @@ const DAY_MS = 86400000;
 const MAX_PPD = 80;        // max pixels per day
 const ZOOM_STEP = 1.35;    // factor per +/- click
 const MISSING_FADE_DAYS = 14; // tail length for a missing start or end date
+const DERIVED_EDGE = 16;   // width of the "pin a date" zone at a derived end (px)
 const DEP_PAD = 10;        // connector stub length beyond a bar edge (px)
 const DEP_RADIUS = 6;      // connector corner radius (px)
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -54,6 +68,27 @@ function addMonths(s, n) {
 
 function daysBetween(a, b) {
   return Math.round((b - a) / DAY_MS);
+}
+
+/** The dates an item is drawn with: its own, or for an Ongoing/Project row
+ *  with a missing one, the span of its tasks (state.childrenOf: every live
+ *  task, not only the visible rows). A derived start is clamped to the own
+ *  end and vice versa. Returns YMD strings (or null) and which are derived. */
+function effectiveDates(it, kind) {
+  const d = { start: it.start_date || null, end: it.end_date || null, derivedStart: false, derivedEnd: false };
+  if (kind !== 'parent' || (d.start && d.end)) return d;
+  const kids = state.childrenOf.get(it.id) || [];
+  const starts = kids.map((k) => k.start_date).filter(Boolean).sort();
+  const ends = kids.map((k) => k.end_date).filter(Boolean).sort();
+  if (!d.start) {
+    const s = starts[0] || ends[0] || null;
+    if (s) { d.start = d.end && s > d.end ? d.end : s; d.derivedStart = true; }
+  }
+  if (!d.end) {
+    const e = ends[ends.length - 1] || starts[starts.length - 1] || null;
+    if (e) { d.end = d.start && e < d.start ? d.start : e; d.derivedEnd = true; }
+  }
+  return d;
 }
 
 // ---------------------------------------------------------------- axis ticks
@@ -215,12 +250,14 @@ export function renderTimeline(panel, handle, ctx) {
   const T = today();
   const base = parseYMD(T);
   const rows = handle.rows;
+  const datesOf = new Map(rows.map((r) => [r.item.id, effectiveDates(r.item, r.kind)]));
 
   // Date range covered by the canvas (day offsets from today), generous so
   // that scrolling has room and every dated item is reachable.
   let rangeStart = -365, rangeEnd = 730;
   for (const r of rows) {
-    for (const s of [r.item.start_date, r.item.end_date]) {
+    const d = datesOf.get(r.item.id);
+    for (const s of [d.start, d.end]) {
       const d = daysFromToday(s);
       if (d == null) continue;
       rangeStart = Math.min(rangeStart, d - 60);
@@ -238,6 +275,10 @@ export function renderTimeline(panel, handle, ctx) {
   // ---- skeleton: wrapper, scroll container, canvas (appended before
   // measuring so positions are taken relative to the real canvas box) ----
   const plan = el('div', { class: 'timeline' });
+  // Group frames (Nested only): one outline per Ongoing/Project with its
+  // tasks and one for the axis, drawn over the chart at the panel's edges so
+  // the groups read as separate blocks, like the table's.
+  const frames = el('div', { class: 'timeline-frames', 'aria-hidden': 'true' });
   const scroll = el('div', { class: 'timeline-scroll' });
   const canvas = el('div', { class: 'timeline-canvas' });
   const tooltip = el('div', { class: 'timeline-tooltip', hidden: true });
@@ -248,13 +289,13 @@ export function renderTimeline(panel, handle, ctx) {
   for (const [m, label] of BAR_COLOR_MODES) colorSel.append(el('option', { value: m, selected: m === colorMode ? true : null }, label));
   colorSel.addEventListener('pointerdown', (ev) => ev.stopPropagation()); // not a pan
   colorSel.addEventListener('change', () => ctx.setBarColor?.(colorSel.value));
-  const btnOut = el('button', { type: 'button', class: 'icon', title: 'Zoom out', 'aria-label': 'Zoom out', dataset: { plan: 'zoom-out' } }, '−');
-  const btnIn = el('button', { type: 'button', class: 'icon', title: 'Zoom in', 'aria-label': 'Zoom in', dataset: { plan: 'zoom-in' } }, '+');
+  const btnOut = el('button', { type: 'button', class: 'icon', title: 'Zoom out (Ctrl+wheel; Shift+wheel or drag pans)', 'aria-label': 'Zoom out', dataset: { plan: 'zoom-out' } }, '−');
+  const btnIn = el('button', { type: 'button', class: 'icon', title: 'Zoom in (Ctrl+wheel; Shift+wheel or drag pans)', 'aria-label': 'Zoom in', dataset: { plan: 'zoom-in' } }, '+');
   const btnToday = el('button', { type: 'button', title: 'Scroll to today', dataset: { plan: 'today' } }, 'Today');
   controls.append(colorSel, btnOut, btnIn, btnToday);
   scroll.append(canvas);
   const legend = legendFor(colorMode);
-  plan.append(scroll, controls, ...(legend ? [legend] : []), tooltip);
+  plan.append(scroll, frames, controls, ...(legend ? [legend] : []), tooltip);
   panel.replaceChildren(plan);
 
   const viewportW = () => Math.max(scroll.clientWidth, 50);
@@ -274,14 +315,20 @@ export function renderTimeline(panel, handle, ctx) {
   // the handle contract, so they are found by DOM query.
   const table = panel.parentElement?.querySelector('.table') || rows[0]?.el.closest('.table');
   const headers = table ? [...table.querySelectorAll(':scope > .row.header')] : [];
+  const nested = !!table && !table.classList.contains('flat');
+  plan.classList.toggle('nested', nested);
+  let axisH = 36;
 
   function draw() {
     canvas.replaceChildren();
     const canvasTop = canvas.getBoundingClientRect().top;
     const tableRect = table?.getBoundingClientRect();
     // The axis is exactly as tall as the table's header row; its two tiers
-    // split that height.
-    const axisH = headers.length ? headers[headers.length - 1].getBoundingClientRect().bottom - canvasTop : 36;
+    // split that height. The header row is the table's first child, so its
+    // natural bottom is the table top plus its height (a sticky header may
+    // have been pushed down by scrolling and is not measured in place).
+    const header = headers[headers.length - 1];
+    axisH = header && tableRect ? tableRect.top + header.getBoundingClientRect().height - canvasTop : 36;
     const tier1 = Math.round(axisH / 2);
     let height = tableRect ? tableRect.bottom - 1 - canvasTop : axisH;
     const W = Math.ceil(rangeDays * view.ppd);
@@ -308,8 +355,9 @@ export function renderTimeline(panel, handle, ctx) {
       if (tint) band.style.setProperty('--row-color', tint);
       bands.push(band);
       const barH = Math.max(8, Math.round(Math.min(r.kind === 'parent' ? 18 : 14, h * 0.55)));
+      const d = datesOf.get(it.id);
 
-      if (!it.start_date && !it.end_date) {
+      if (!d.start && !d.end) {
         if (it.type !== 'ongoing') {
           band.classList.add('empty-dates');
           band.title = 'Click to set a start date here; drag to set start and end';
@@ -317,8 +365,8 @@ export function renderTimeline(panel, handle, ctx) {
         }
         continue;
       }
-      const s = daysFromToday(it.start_date);
-      const e = daysFromToday(it.end_date);
+      const s = daysFromToday(d.start);
+      const e = daysFromToday(d.end);
       let x0, x1, fadeL, fadeR;
       // Known dates get a hard edge (firm ones are marked in red, see css);
       // only missing dates fade.
@@ -351,23 +399,36 @@ export function renderTimeline(panel, handle, ctx) {
       if (isBlocked(it)) cls.push('blocked');
       if (s == null) cls.push('no-start');
       if (e == null) cls.push('no-end');
-      if (s != null && it.start_firm) cls.push('firm-start');
-      if (e != null && it.end_firm) cls.push('firm-end');
+      // Derived ends are never firm and are styled apart (see css).
+      if (d.derivedStart) cls.push('derived', 'derived-start');
+      if (d.derivedEnd) cls.push('derived', 'derived-end');
+      if (s != null && it.start_date && it.start_firm) cls.push('firm-start');
+      if (e != null && it.end_date && it.end_firm) cls.push('firm-end');
+      // An Ongoing's bar is read-only: it lets the pointer through to the
+      // row band, which shows the tooltip for it.
+      const inert = it.type === 'ongoing';
       // The wrapper carries the geometry; the bar inside it carries the mask
       // (so the remove buttons beside it are not faded).
       const wrap = el('div', {
-        class: 'timeline-barwrap',
+        class: `timeline-barwrap${inert ? ' inert' : ''}`,
         style: { left: `${x0}px`, width: `${x1 - x0}px`, top: `${top + (h - barH) / 2}px`, height: `${barH}px` },
       });
       const bar = el('div', {
         class: cls.join(' '),
         dataset: { id: it.id, key: it.key, fadeL: fadeL.toFixed(1), fadeR: fadeR.toFixed(1) },
         style: {
-          background: barColor(it, colorMode),
+          backgroundColor: barColor(it, colorMode),
           maskImage: mask, webkitMaskImage: mask,
         },
       });
+      if (d.derivedStart) bar.dataset.derivedStart = '1';
+      if (d.derivedEnd) bar.dataset.derivedEnd = '1';
       wrap.append(bar);
+      if (inert) {
+        band.addEventListener('mouseenter', () => { if (!barDrag) { showTip(it, d); setTipHint(hintFor('none', it)); } });
+        band.addEventListener('mousemove', (ev) => { if (!barDrag) moveTip(ev); });
+        band.addEventListener('mouseleave', hideTip);
+      }
       for (const which of ['start', 'end']) {
         if (!it[`${which}_date`]) continue;
         const btn = el('button', {
@@ -381,7 +442,7 @@ export function renderTimeline(panel, handle, ctx) {
         });
         wrap.append(btn);
       }
-      bar.addEventListener('mouseenter', () => { if (!barDrag) showTip(it); });
+      bar.addEventListener('mouseenter', () => { if (!barDrag) showTip(it, d); });
       bar.addEventListener('mousemove', (e) => { if (!barDrag) { const z = zoneFor(bar, it, e); bar.style.cursor = cursorFor(z); setTipHint(hintFor(z, it)); moveTip(e); } });
       bar.addEventListener('mouseleave', hideTip);
       bar.addEventListener('pointerdown', (e) => startBarDrag(e, wrap, bar, it));
@@ -393,49 +454,84 @@ export function renderTimeline(panel, handle, ctx) {
     canvas.style.height = `${height}px`;
     canvas.dataset.ppd = ppd.toFixed(3);
 
-    // Axis background (level with the header rows) and tick columns.
+    // Axis band (level with the header rows) holding the tick labels, and
+    // the full-height tick columns (lines only) behind the bars.
     const [majorU, minorU] = tickUnits(ppd);
     canvas.dataset.units = `${majorU}/${minorU}`;
-    canvas.append(el('div', { class: 'timeline-axis', style: { height: `${axisH}px` } },
-      el('div', { class: 'timeline-axis-tier', style: { height: `${tier1}px` } })));
+    const axis = el('div', { class: 'timeline-axis', style: { height: `${axisH}px` } },
+      el('div', { class: 'timeline-axis-tier', style: { height: `${tier1}px` } }));
     const tickEls = [];
     const ymdOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    for (const t of ticks(majorU, base, rangeStart, rangeEnd)) {
-      const left = x(t.start), w = (t.end - t.start) * ppd;
-      tickEls.push(el('div', {
-        class: `timeline-tick major ${majorU}`,
-        dataset: { date: ymdOf(t.date) },
-        style: { left: `${left}px`, width: `${w}px`, top: '0px' },
-      }, el('span', { class: 'timeline-tick-label', style: { height: `${tier1}px`, lineHeight: `${tier1}px` } }, tickLabel(majorU, t.date, w))));
-    }
-    for (const t of ticks(minorU, base, rangeStart, rangeEnd)) {
-      const left = x(t.start), w = (t.end - t.start) * ppd;
-      tickEls.push(el('div', {
-        class: `timeline-tick minor ${minorU}`,
-        dataset: { date: ymdOf(t.date) },
-        style: { left: `${left}px`, width: `${w}px`, top: `${tier1}px` },
-      }, el('span', { class: 'timeline-tick-label', style: { height: `${axisH - tier1}px`, lineHeight: `${axisH - tier1}px` } }, tickLabel(minorU, t.date, w))));
-    }
+    const addTicks = (unit, tier, top, h) => {
+      for (const t of ticks(unit, base, rangeStart, rangeEnd)) {
+        const left = x(t.start), w = (t.end - t.start) * ppd;
+        tickEls.push(el('div', {
+          class: `timeline-tick ${tier} ${unit}`,
+          dataset: { date: ymdOf(t.date) },
+          style: { left: `${left}px`, width: `${w}px`, top: `${top}px` },
+        }));
+        axis.append(el('div', {
+          class: `timeline-axis-tick ${tier} ${unit}`,
+          style: { left: `${left}px`, width: `${w}px`, top: `${top}px`, height: `${h}px` },
+        }, el('span', { class: 'timeline-tick-label', style: { height: `${h}px`, lineHeight: `${h}px` } }, tickLabel(unit, t.date, w))));
+      }
+    };
+    addTicks(majorU, 'major', 0, tier1);
+    addTicks(minorU, 'minor', tier1, axisH - tier1);
     canvas.append(el('div', { class: 'timeline-rows', style: { top: '0px' } }, ...bands));
     canvas.append(...tickEls);
     canvas.append(...bars);
     canvas.append(drawDependencies(geom, W, height));
+    canvas.append(axis);
 
     // Today marker.
     canvas.append(el('div', { class: 'timeline-today', style: { left: `${x(0)}px` } },
       el('span', { class: 'timeline-today-label' }, 'Today')));
 
+    if (nested) drawFrames(canvasTop, tableRect);
+
     scroll.scrollLeft = Math.round((view.leftDay - rangeStart) * ppd);
     btnIn.disabled = ppd >= MAX_PPD - 1e-6;
     btnOut.disabled = ppd <= minPpd() + 1e-6;
+    shiftAxis();
+  }
+
+  /** Nested: an outline around the axis and around each parent row with
+   *  everything beneath it up to the next parent (its tasks and any open
+   *  detail rows), taken from the table's row boxes. The frames sit outside
+   *  the scroll container, so their edges stay at the panel's edges. */
+  function drawFrames(canvasTop, tableRect) {
+    const planTop = plan.getBoundingClientRect().top;
+    const frame = (cls, top, bottom) => el('div', { class: `timeline-frame ${cls}`, style: { top: `${top - planTop}px`, height: `${bottom - top}px` } });
+    const out = [frame('axis', canvasTop, canvasTop + axisH)];
+    const parents = rows.filter((r) => r.kind === 'parent').map((r) => r.el);
+    parents.forEach((p, i) => {
+      const next = parents[i + 1];
+      const last = next ? next.previousElementSibling : null;
+      const bottom = last ? last.getBoundingClientRect().bottom : (tableRect ? tableRect.bottom : p.getBoundingClientRect().bottom);
+      out.push(frame('group', p.getBoundingClientRect().top, bottom));
+    });
+    frames.replaceChildren(...out);
+  }
+
+  // ---- axis stays readable while the page scrolls ----
+  // The amount the canvas top has scrolled under the title bar (the table
+  // header is sticky there) is applied as a translate to the axis band, the
+  // floating controls and the Today label (see css, --axis-shift).
+  function shiftAxis() {
+    const topbar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topbar-h')) || 0;
+    const top = canvas.getBoundingClientRect().top;
+    const dy = Math.max(0, Math.min(topbar - top, canvas.offsetHeight - axisH));
+    plan.style.setProperty('--axis-shift', `${Math.round(dy)}px`);
   }
 
   // ---- editing dates on the timeline ----
   // Bars: the middle moves every date the item has; an 8px edge resizes an
-  // existing start/end; the faded region of a missing date is a "create"
-  // zone: drag (or click) there to pin that date. Empty rows: click sets a
-  // start date at that day, drag sets start and end. The × buttons shown on
-  // hover remove a date.
+  // existing start/end; the faded region of a missing date (or the edge of
+  // a derived one) is a "create" zone: drag (or click) there to pin that
+  // date. Empty rows: click sets a start date at that day, drag sets start
+  // and end. The × buttons shown on hover remove a date. Ongoing bars and
+  // the middle of a bar with no own dates are inert ('none').
   const EDGE = 8;
   let barDrag = null;
   const dayAt = (clientX) => Math.floor((clientX - canvas.getBoundingClientRect().left) / view.ppd) + rangeStart;
@@ -445,19 +541,23 @@ export function renderTimeline(panel, handle, ctx) {
     const r = bar.getBoundingClientRect();
     const px = e.clientX - r.left;
     const fadeL = Number(bar.dataset.fadeL) || 0, fadeR = Number(bar.dataset.fadeR) || 0;
-    if (!it.start_date && px < fadeL * 0.6) return 'create-start';
-    if (!it.end_date && px > r.width - fadeR * 0.6) return 'create-end';
+    if (it.type === 'ongoing') return 'none';
+    const edge = Math.min(DERIVED_EDGE, r.width / 3);
+    if (!it.start_date && px < (bar.dataset.derivedStart ? edge : fadeL * 0.6)) return 'create-start';
+    if (!it.end_date && px > r.width - (bar.dataset.derivedEnd ? edge : fadeR * 0.6)) return 'create-end';
     if (it.start_date && px <= EDGE) return 'start';
     if (it.end_date && px >= r.width - EDGE) return 'end';
+    if (!it.start_date && !it.end_date) return 'none';
     return 'move';
   }
-  const cursorFor = (z) => (z === 'move' ? 'grab' : z === 'create-start' ? 'w-resize' : z === 'create-end' ? 'e-resize' : 'ew-resize');
+  const cursorFor = (z) => (z === 'move' ? 'grab' : z === 'none' ? 'default' : z === 'create-start' ? 'w-resize' : z === 'create-end' ? 'e-resize' : 'ew-resize');
   function hintFor(z, it) {
     switch (z) {
       case 'create-start': return 'Click or drag here to set the start date';
       case 'create-end': return 'Click or drag here to set the end date';
       case 'start': return 'Drag to change the start date';
       case 'end': return 'Drag to change the end date';
+      case 'none': return it.type === 'ongoing' ? 'Spans its tasks (an Ongoing has no dates of its own)' : 'Spans its tasks; click or drag an end to pin a date';
       default: return it.start_date && it.end_date ? 'Drag to move both dates' : 'Drag to move the date';
     }
   }
@@ -468,6 +568,7 @@ export function renderTimeline(panel, handle, ctx) {
     e.preventDefault();
     hideTip();
     const zone = zoneFor(bar, it, e);
+    if (zone === 'none') return;
     const left0 = parseFloat(wrap.style.left), width0 = parseFloat(wrap.style.width);
     const sDay = daysFromToday(it.start_date), eDay = daysFromToday(it.end_date);
     barDrag = { zone, x: e.clientX, days: 0, day: null, moved: false };
@@ -565,14 +666,18 @@ export function renderTimeline(panel, handle, ctx) {
   }
 
   // ---- tooltip ----
-  function fmtDate(d, firm) {
+  function fmtDate(d, firm, derived) {
     if (!d) return 'none';
+    if (derived) return `${d} (from its tasks)`;
     return firm ? `${d} (firm)` : d;
   }
-  function showTip(it) {
+  /** Fill and show the tooltip for `it` drawn with dates `d` (see effectiveDates). */
+  function showTip(it, d) {
+    const parent = it.type === 'task' && it.parent_id != null ? state.itemsById.get(it.parent_id) : null;
     tooltip.replaceChildren(
+      ...(parent ? [el('div', { class: 'timeline-tip-parent' }, el('span', { class: 'key' }, parent.key), ' ', parent.title)] : []),
       el('div', { class: 'timeline-tip-title' }, el('span', { class: 'key' }, it.key), ' ', it.title),
-      el('div', { class: 'timeline-tip-dates' }, `Start: ${fmtDate(it.start_date, it.start_firm)}  ·  End: ${fmtDate(it.end_date, it.end_firm)}`),
+      el('div', { class: 'timeline-tip-dates' }, `Start: ${fmtDate(d.start, it.start_firm, d.derivedStart)}  ·  End: ${fmtDate(d.end, it.end_firm, d.derivedEnd)}`),
     );
     const assignee = it.assignee_id != null ? state.usersById.get(it.assignee_id) : null;
     const owner = it.owner_id != null ? state.usersById.get(it.owner_id) : null;
@@ -581,8 +686,6 @@ export function renderTimeline(panel, handle, ctx) {
     if (it.type === 'task' && (colorMode === 'importance' || colorMode === 'urgency' || colorMode === 'combo')) {
       tooltip.append(el('div', { class: 'timeline-tip-who' }, `Importance: ${it.importance ?? '—'}  ·  Urgency: ${it.urgency ?? '—'}`));
     }
-    const parent = it.type === 'task' && it.parent_id != null ? state.itemsById.get(it.parent_id) : null;
-    if (parent && colorMode === 'parent') tooltip.append(el('div', { class: 'timeline-tip-who' }, `${parent.type === 'ongoing' ? 'Ongoing' : 'Project'}: ${parent.key} ${parent.title}`));
     tooltip.append(el('div', { class: 'timeline-tip-hint' }));
     tooltip.hidden = false;
   }
@@ -626,16 +729,21 @@ export function renderTimeline(panel, handle, ctx) {
     view.leftDay = scroll.scrollLeft / view.ppd + rangeStart;
   }, { passive: true });
 
+  // Wheel: Ctrl/Meta zooms, Shift or Alt pans sideways; a plain wheel is
+  // left alone so the page scrolls the list as usual.
   scroll.addEventListener('wheel', (e) => {
-    e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
       const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.002));
       zoomTo(view.ppd * factor, e.clientX - scroll.getBoundingClientRect().left);
       return;
     }
-    // Plain wheel (either axis) scrolls the timeline sideways.
+    if (!e.shiftKey && !e.altKey) return;
+    e.preventDefault();
+    // Some browsers report a shifted wheel on the x axis already.
+    const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY;
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? viewportW() : 1;
-    scroll.scrollLeft += (e.deltaY + e.deltaX) * unit;
+    scroll.scrollLeft += delta * unit;
   }, { passive: false });
 
   // Drag to pan.
@@ -670,7 +778,8 @@ export function renderTimeline(panel, handle, ctx) {
   });
   ro.observe(panel);
   if (table) ro.observe(table);
-  cleanup = () => ro.disconnect();
+  window.addEventListener('scroll', shiftAxis, { passive: true });
+  cleanup = () => { ro.disconnect(); window.removeEventListener('scroll', shiftAxis); };
 
   draw();
   lastSize = `${scroll.clientWidth}x${table?.offsetHeight}`;

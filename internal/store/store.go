@@ -146,7 +146,7 @@ type Store struct {
 
 // schemaVersion is stored in PRAGMA user_version. Bump it whenever migrate()
 // gains a step; an existing database below it is backed up before migrating.
-const schemaVersion = 4
+const schemaVersion = 5
 
 // Open opens (creating if necessary) the SQLite database at path and applies
 // the schema. An existing database whose schema is behind is first copied to
@@ -277,6 +277,14 @@ CREATE TABLE IF NOT EXISTS attachments (
 	deleted_at   TEXT
 );
 CREATE INDEX IF NOT EXISTS attachments_item ON attachments(item_id);
+
+-- Scratch pad text (schema version 5): one row per scope, "global" for the
+-- pane everyone shares and "user:<id>" for a user's own pane.
+CREATE TABLE IF NOT EXISTS scratch (
+	scope      TEXT PRIMARY KEY,
+	text       TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL
+);
 `
 
 func (s *Store) migrate() error {
@@ -482,6 +490,15 @@ var PrefDefaults = map[string]string{
 	// The Filters panel criteria, as JSON (see validFilters), or "" for the
 	// default Active template. The search text is not kept.
 	"filters": "",
+	// Matrix point labels: the task key or its title.
+	"matrix_labels": "key", // key | title
+	// The scratch pad panel (see static/js/scratch.js): whether it is open,
+	// its width in px, the height of the global pane as a percentage of the
+	// panel, and whether lines wrap.
+	"scratch_open":  "0",
+	"scratch_width": "320",
+	"scratch_split": "50",
+	"scratch_wrap":  "1",
 }
 
 // MaxCollapsed caps the number of ids kept in the "collapsed" preference.
@@ -517,9 +534,21 @@ func validPref(k, v string) error {
 		if !oneOf(v, "table", "timeline", "matrix") {
 			return verr("view must be one of table, timeline, matrix")
 		}
-	case "narrow", "flat", "blocked_last":
+	case "narrow", "flat", "blocked_last", "scratch_open", "scratch_wrap":
 		if v != "0" && v != "1" {
 			return verr("%s must be \"0\" or \"1\"", k)
+		}
+	case "matrix_labels":
+		if !oneOf(v, "key", "title") {
+			return verr("matrix_labels must be key or title")
+		}
+	case "scratch_width":
+		if n, err := strconv.Atoi(v); err != nil || n < 160 || n > 2000 {
+			return verr("scratch_width must be an integer between 160 and 2000")
+		}
+	case "scratch_split":
+		if n, err := strconv.Atoi(v); err != nil || n < 5 || n > 95 {
+			return verr("scratch_split must be an integer between 5 and 95")
 		}
 	case "collapsed":
 		var ids []int64
@@ -868,6 +897,9 @@ func (s *Store) DeleteUser(id int64) error {
 		return err
 	}
 	if _, err := s.db.Exec(`DELETE FROM user_prefs WHERE user_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM scratch WHERE scope = ?`, UserScratchScope(id)); err != nil {
 		return err
 	}
 	_, err = s.db.Exec(`DELETE FROM users WHERE id = ?`, id)

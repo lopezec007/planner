@@ -33,8 +33,16 @@
 // together), ties keeping the user-defined order, and dragging is disabled
 // because the positions no longer mean anything.
 //
-// Reordering: every saved row has a drag handle in its key cell. Top-level
-// rows can be dropped among top-level rows; tasks among any parent's tasks or
+// Columns, left to right: the parent collapse caret (shows or hides a
+// parent's tasks; empty on task rows; absent in Flat), the key, the title...
+// and the actions cell: the details caret (opens the description,
+// dependencies, attachments and, for parents, the colour), "+" (add a task,
+// parents), "move" (tasks), Delete, and the drag handle. In title-only mode
+// there is no actions column: the details caret sits at the right end of the
+// title cell, always visible, before the hover-revealed buttons.
+//
+// Reordering: every saved row has a drag handle at the right end of its
+// actions. Top-level rows can be dropped among top-level rows; tasks among any parent's tasks or
 // onto a parent row (which reparents them). In Flat there are no parent rows
 // to show where one parent ends and the next begins, so a task can only be
 // dropped among the tasks of its own parent and never changes parent there.
@@ -52,7 +60,9 @@ import {
 import { SORT_COLUMNS, normalizeSort, compareItems, toggleSort, defaultDir } from './sort.js';
 import { visibleColumns, gridTemplate } from './columns.js';
 import { rowTint } from './colors.js';
-import { colorSwatch } from './swatch.js';
+import { colorSwatch, colorLabel } from './swatch.js';
+import { icon } from './icons.js';
+import { prefs } from './prefs.js';
 
 export function userChip(id) {
   if (id == null) return '';
@@ -67,23 +77,29 @@ export function isExpandable() {
   return true;
 }
 
-function toggleCell(item, expanded, onToggle) {
-  const cell = el('div', { class: 'toggle' });
-  if (isExpandable(item) && !isDraft(item)) {
-    cell.append(el('button', {
-      type: 'button',
-      title: expanded ? 'Collapse' : 'Expand (description, dependencies and attachments)',
-      'aria-expanded': expanded ? 'true' : 'false',
-      onClick: (e) => { e.stopPropagation(); onToggle(item); },
-    }));
-  }
-  return cell;
+/** The details caret (a `.toggle` wrapper around the button): opens the
+ *  description, dependencies, attachments and colour under the row. Null
+ *  for a new row, whose details are always open. */
+function detailsToggle(item, expanded, onToggle) {
+  if (!isExpandable(item) || isDraft(item)) return null;
+  const what = item.type === 'task' ? 'description, dependencies and attachments' : 'description, attachments and colour';
+  return el('span', { class: 'toggle' }, el('button', {
+    type: 'button',
+    title: expanded ? 'Collapse' : `Expand (${what})`,
+    'aria-expanded': expanded ? 'true' : 'false',
+    onClick: (e) => { e.stopPropagation(); onToggle(item); },
+  }));
+}
+
+/** A square icon-only button; the words live in title and aria-label. */
+function iconButton(name, attrs) {
+  return el('button', { type: 'button', ...attrs, class: `icon ${attrs.class || ''}` }, icon(name));
 }
 
 /** "Move to another Ongoing/Project": the button becomes a dropdown of the
  *  other parents; picking one reparents the task (it goes last there). */
 function reparentButton(item, ctx) {
-  const btn = el('button', { class: 'icon reparent', type: 'button', title: 'Move to another Ongoing or Project', 'aria-label': `Move ${item.key} to another Ongoing or Project` }, '⇄');
+  const btn = iconButton('move', { class: 'reparent', title: 'Move to another Ongoing or Project', 'aria-label': `Move ${item.key} to another Ongoing or Project` });
   btn.addEventListener('click', () => {
     const sel = el('select', { class: 'cell-select reparent-select', name: 'reparent', 'aria-label': 'Move to' }, el('option', { value: '' }, 'Move to…'));
     for (const p of state.items) {
@@ -120,24 +136,31 @@ function reparentButton(item, ctx) {
   return btn;
 }
 
-function actionButtons(item, ctx) {
+/** The actions cell: [details caret] [+ add task | move] [Delete] [drag
+ *  handle]. In title-only mode the caret is placed outside this cell (it
+ *  must not fade with the buttons), so `withToggle` is false there. */
+function actionButtons(item, ctx, { expanded = false, withToggle = true } = {}) {
   const cell = el('div', { class: 'actions' });
   if (isDraft(item)) {
     cell.append(
-      el('button', { class: 'primary icon', type: 'button', title: 'Save', 'aria-label': 'Save', onClick: () => commitNew(ctx) }, '✓'),
-      el('button', { class: 'icon', type: 'button', title: 'Discard', 'aria-label': 'Discard', onClick: () => { discardNew(); ctx.rerender(); } }, '✕'),
+      iconButton('check', { class: 'primary', title: 'Save', 'aria-label': 'Save', onClick: () => commitNew(ctx) }),
+      iconButton('cross', { title: 'Discard', 'aria-label': 'Discard', onClick: () => { discardNew(); ctx.rerender(); } }),
     );
     return cell;
   }
+  const toggle = withToggle ? detailsToggle(item, expanded, ctx.onToggle) : null;
+  if (toggle) cell.append(toggle);
   const { actions } = ctx;
-  if (!actions) return cell;
-  if (item.type !== 'task' && actions.onAddTask) {
-    cell.append(el('button', { class: 'icon', type: 'button', title: 'Add task', onClick: () => actions.onAddTask(item) }, '+'));
+  if (actions) {
+    if (item.type !== 'task' && actions.onAddTask) {
+      cell.append(iconButton('plus', { title: 'Add task', 'aria-label': `Add a task to ${item.key}`, onClick: () => actions.onAddTask(item) }));
+    }
+    if (item.type === 'task') cell.append(reparentButton(item, ctx));
+    if (actions.onDelete) {
+      cell.append(iconButton('trash', { title: 'Delete', 'aria-label': `Delete ${item.key}`, onClick: () => actions.onDelete(item) }));
+    }
   }
-  if (item.type === 'task') cell.append(reparentButton(item, ctx));
-  if (actions.onDelete) {
-    cell.append(el('button', { class: 'icon', type: 'button', title: 'Delete', onClick: () => actions.onDelete(item) }, '🗑'));
-  }
+  cell.append(dragHandle(ctx));
   return cell;
 }
 
@@ -180,7 +203,7 @@ function sortHeader(key, label, ctx, extraClass = '') {
 function headerCells(ctx) {
   const h = (key, label, cls) => sortHeader(key, label, ctx, cls);
   return {
-    toggle: el('div'),
+    collapse: el('div', { class: 'collapse-cell' }),
     pkey: el('div', { class: 'key' }),
     key: h('key', 'Key', 'key'),
     ptitle: h('parent', 'Ongoing / Project', 'parent-ref'),
@@ -213,44 +236,71 @@ function rowClasses(item, kind, expanded) {
 
 function dragHandle(ctx) {
   if (ctx.sorting) {
-    return el('span', { class: 'drag-handle disabled', title: 'Rows cannot be dragged while sorted by a column or with blocked items last; choose User-defined in the Sort menu to reorder', 'aria-hidden': 'true' }, '⠿');
+    return el('span', { class: 'drag-handle disabled', title: 'Rows cannot be dragged while sorted by a column or with blocked items last; choose User-defined in the Sort menu to reorder', 'aria-hidden': 'true' }, icon('grip'));
   }
-  return el('span', { class: 'drag-handle', title: 'Drag to reorder', draggable: 'true', 'aria-label': 'Drag to reorder' }, '⠿');
+  return el('span', { class: 'drag-handle', title: 'Drag to reorder', draggable: 'true', 'aria-label': 'Drag to reorder' }, icon('grip'));
 }
 
-function keyCell(item, ctx) {
+function keyCell(item) {
   if (isDraft(item)) {
     const prefix = item.type === 'ongoing' ? 'N' : item.type === 'project' ? 'P' : 'T';
     return el('div', { class: 'key' }, el('span', { class: 'key-text new-key' }, `${prefix}-?`));
   }
-  return el('div', { class: 'key' }, dragHandle(ctx), el('span', { class: 'key-text' }, item.key));
+  return el('div', { class: 'key' }, el('span', { class: 'key-text' }, item.key));
 }
 
-// In the title-only table there is no actions column, so the action buttons
-// sit at the right of the title cell (revealed on hover, see edit.css).
-function titleCell(item, mode, ctx, saver, kind) {
+/** How many of a parent's tasks this table shows (opts.groups, after the
+ *  filters) and how many it has in all. */
+function taskCounts(item, ctx) {
+  return { shown: ctx.shown.get(item.id) ?? 0, total: (state.childrenOf.get(item.id) || []).length };
+}
+
+/** The first column: the caret that shows or hides a parent's tasks. Empty
+ *  on task rows and new rows. */
+function collapseCell(item, kind, ctx) {
+  const cell = el('div', { class: 'collapse-cell' });
+  if (kind !== 'parent' || isDraft(item)) return cell;
+  const { shown } = taskCounts(item, ctx);
+  const isCollapsed = ctx.collapsed.has(item.id);
+  cell.append(el('button', {
+    type: 'button', class: 'caret', title: isCollapsed ? `Show ${shown} task(s)` : 'Hide tasks',
+    'aria-expanded': isCollapsed ? 'false' : 'true', 'aria-label': isCollapsed ? 'Show tasks' : 'Hide tasks',
+    dataset: { collapse: item.id },
+    onClick: (e) => { e.stopPropagation(); ctx.onCollapse(item.id, !isCollapsed); },
+  }));
+  return cell;
+}
+
+/** "(n)" after a collapsed parent's title: the tasks hidden by the caret,
+ *  counted as this table shows them; the tooltip says when the filters hide
+ *  more of them. Null when there is nothing to count. */
+function taskCount(item, ctx) {
+  const { shown, total } = taskCounts(item, ctx);
+  if (!shown && !total) return null;
+  let title = `${shown} hidden task(s)`;
+  if (shown !== total) title += ` (${total - shown} of ${total} hidden by the filters)`;
+  return el('span', { class: 'task-count', title }, `(${shown})`);
+}
+
+// In the title-only table there is no actions column, so the details caret
+// and then the action buttons sit at the right of the title cell (the
+// buttons revealed on hover, see edit.css).
+function titleCell(item, mode, ctx, saver, kind, expanded) {
   const cell = el('div', { class: 'title' });
-  if (kind === 'parent' && !isDraft(item)) {
-    const n = (state.childrenOf.get(item.id) || []).length;
-    const isCollapsed = ctx.collapsed.has(item.id);
-    cell.append(el('button', {
-      type: 'button', class: 'caret', title: isCollapsed ? `Show ${n} task(s)` : 'Hide tasks',
-      'aria-expanded': isCollapsed ? 'false' : 'true', 'aria-label': isCollapsed ? 'Show tasks' : 'Hide tasks',
-      dataset: { collapse: item.id },
-      onClick: (e) => { e.stopPropagation(); ctx.onCollapse(item.id, !isCollapsed); },
-    }));
-    cell.append(colorSwatch(item, saver)); // the item's own colour (see swatch.js)
-  }
   cell.append(titleControl(item, saver, ctx));
   if (kind === 'parent' && !isDraft(item) && ctx.collapsed.has(item.id)) {
-    const n = (state.childrenOf.get(item.id) || []).length;
-    if (n) cell.append(el('span', { class: 'task-count', title: `${n} hidden task(s)` }, `(${n})`));
+    const count = taskCount(item, ctx);
+    if (count) cell.append(count);
   }
   if (!isDraft(item)) {
     const badge = attachmentBadge(item, () => ctx.onToggle(item));
     if (badge) cell.append(badge);
   }
-  if (mode !== 'full') cell.append(actionButtons(item, ctx));
+  if (mode !== 'full') {
+    const toggle = detailsToggle(item, expanded, ctx.onToggle);
+    if (toggle) cell.append(toggle);
+    cell.append(actionButtons(item, ctx, { withToggle: false }));
+  }
   return cell;
 }
 
@@ -270,11 +320,11 @@ function itemRow(item, kind, mode, expanded, ctx) {
   if (tint) row.style.setProperty('--row-color', tint);
   const parent = ctx.flat && item.parent_id != null ? state.itemsById.get(item.parent_id) : null;
   const build = {
-    toggle: () => toggleCell(item, expanded, ctx.onToggle),
+    collapse: () => collapseCell(item, kind, ctx),
     pkey: () => el('div', { class: 'key parent-ref' }, parent ? parent.key : ''),
-    key: () => keyCell(item, ctx),
+    key: () => keyCell(item),
     ptitle: () => el('div', { class: 'title parent-ref', title: parent ? `${parent.key} ${parent.title}` : '' }, parent ? parent.title : ''),
-    title: () => titleCell(item, mode, ctx, saver, kind),
+    title: () => titleCell(item, mode, ctx, saver, kind, expanded),
     status: () => statusControl(item, saver),
     owner: () => userControl(item, 'owner_id', saver),
     assignee: () => userControl(item, 'assignee_id', saver),
@@ -283,32 +333,46 @@ function itemRow(item, kind, mode, expanded, ctx) {
     urgency: () => levelControl(item, 'urgency', saver),
     importance: () => levelControl(item, 'importance', saver),
     blocked: () => blockedControl(item, saver),
-    actions: () => actionButtons(item, ctx),
+    actions: () => actionButtons(item, ctx, { expanded }),
   };
   for (const n of ctx.columns) row.append(build[n]());
   return row;
 }
 
+/** The "Colour" box of an Ongoing's or Project's details: the swatch that
+ *  picks its colour (see swatch.js) and the colour's hex, or the type's
+ *  name when it has none of its own. */
+function colorBlock(item, saver) {
+  return el('div', { class: 'color-block', dataset: { colorBlock: item.id } },
+    el('span', { class: 'color-label' }, 'Colour'),
+    colorSwatch(item, saver),
+    el('span', { class: `color-hex${item.color ? ' own' : ''}` }, colorLabel(item)));
+}
+
 /** The expanded detail row: the description under the title column; the
- *  dependencies and attachments under the remaining columns (or below, in
- *  title-only mode). */
+ *  dependencies, attachments and (for parents) the colour under the
+ *  remaining columns (or below, in title-only mode). It carries its item
+ *  row's tint (see app.css). */
 function detailRow(item, kind, ctx) {
   const saver = makeSaver(item, ctx);
   const deps = dependencyPanel(item, ctx);
   const files = attachmentsPanel(item, ctx);
+  const colour = item.type !== 'task' && !isDraft(item) ? colorBlock(item, saver) : null;
   const dataset = isDraft(item) ? { editing: 'new' } : { descFor: item.id };
   // Same grid as the item row. Not given the kind class itself, so
   // `.row.task` / `.row.parent` only ever match item rows (detail rows
   // contain other items' titles).
   const titleCol = ctx.columns.indexOf('title') + 1; // 1-based grid line
-  const row = el('div', { class: `row description kind-${kind}`, dataset });
+  const row = el('div', { class: `row description kind-${kind}${isDraft(item) ? ' new' : ''}`, dataset });
+  const tint = rowTint(item, kind);
+  if (tint) row.style.setProperty('--row-color', tint);
   for (let i = 1; i < titleCol; i++) row.append(el('div'));
   row.append(el('div', { class: 'title' }, descriptionControl(item, saver)));
-  if (deps || files) {
+  if (deps || files || colour) {
     // Full table: to the right of the description. Title-only: the title is
     // the last column, so the side panel wraps onto its own line below.
     const from = ctx.mode === 'full' ? titleCol + 1 : titleCol;
-    row.append(el('div', { class: 'deps-cell', style: { gridColumn: `${from} / -1` } }, deps, files));
+    row.append(el('div', { class: 'deps-cell', style: { gridColumn: `${from} / -1` } }, deps, files, colour));
   }
   return row;
 }
@@ -361,9 +425,14 @@ export function renderTable(container, opts) {
   const order = orderGroups(groups, sort, blockedLast, flat);
   const columns = visibleColumns(mode, flat, hidden);
 
+  // Tints: when tasks take their parent's colour, parents and tasks mix it
+  // in clearly different amounts (see app.css --tint-parent / --tint-task).
+  document.body.classList.toggle('tasks-by-parent', prefs.get('task_colors') === 'parent');
+
   const ctx = {
     actions,
     collapsed,
+    shown: new Map(groups.map((g) => [g.parent.id, g.tasks.length])), // tasks per parent after the filters
     flat,
     mode,
     columns,

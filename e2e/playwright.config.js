@@ -31,6 +31,11 @@ export default defineConfig({
     baseURL: process.env.PLANNER_E2E_BASE,
     viewport: { width: 1500, height: 900 },
     screenshot: 'only-on-failure',
+    // A browser that has not picked an account gets the first user, whose
+    // preferences live on the shared server and would leak between tests.
+    // An empty remembered account (prefs.js) keeps each test's browser to
+    // its own preferences; accounts.spec.js opens contexts without it.
+    storageState: { cookies: [], origins: [{ origin: process.env.PLANNER_E2E_BASE, localStorage: [{ name: 'planner.account', value: '' }] }] },
   },
   webServer: {
     command: `cd .. && go build -o ${bin} . && ${bin} -addr 127.0.0.1:${PORT} -db ${process.env.PLANNER_E2E_DB}`,

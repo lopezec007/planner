@@ -7,9 +7,14 @@
 //
 // View, Flat, Narrow, collapsed parents, sort order, the filter settings,
 // the Timeline bar and Matrix point colours and the row colour-coding are
-// preferences (prefs.js):
-// per account when one is picked in the account menu at the far right,
-// otherwise per browser.
+// preferences (prefs.js) belonging to the account picked in the account
+// menu at the far right. The menu lists the users; a browser that has not
+// picked one (or whose user was deleted) gets the first user. Only with no
+// users at all do the preferences stay in the browser.
+//
+// An edit in progress (a new row, an open title/date/description editor) is
+// protected: in-app navigation shows a snack and stays put, and leaving the
+// page asks first.
 
 import { api, undo } from './api.js';
 import { state, load } from './state.js';
@@ -20,12 +25,14 @@ import { renderMatrix } from './matrix.js';
 import { renderSettings } from './settings.js';
 import { renderSearch, applyPreset, newStatus, typeAllowed, restoreFilters, persistFilters } from './search.js';
 import { el, toast, contrastText } from './util.js';
-import { beginNew, discardNew } from './cells.js';
+import { beginNew, discardNew, draft } from './cells.js';
 import { prefs } from './prefs.js';
 import { renderSortMenu, normalizeSort, SORT_COLUMNS } from './sort.js';
 import { renderColumnsMenu, normalizeHidden } from './columns.js';
 import { icon, keyGlyph } from './icons.js';
 import { renderColorsMenu } from './colors.js';
+import { startRealtime } from './realtime.js';
+import { renderScratch } from './scratch.js';
 
 const main = document.getElementById('main');
 const toolbar = document.getElementById('toolbar');
@@ -33,6 +40,23 @@ const settingsBtn = document.getElementById('btn-settings');
 const accountSlot = document.getElementById('account');
 
 const VIEWS = ['table', 'timeline', 'matrix'];
+
+// The title bar's height as a CSS variable, so sticky things (the table
+// header row, the Matrix panel, the scratch pad) can sit just beneath it
+// whatever the toolbar wraps to.
+const topbar = document.querySelector('.topbar');
+function syncTopbarHeight() { document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`); }
+new ResizeObserver(syncTopbarHeight).observe(topbar);
+syncTopbarHeight();
+
+/** True while an edit is in progress on the planner page: an unsaved new
+ *  row, or an open text editor (title, date, description) on a saved row.
+ *  Pickers (owner, assignee, status) do not count: closing them loses
+ *  nothing. Navigation and remote refreshes wait for it to finish. */
+export function isEditing() {
+  if (draft.item) return true;
+  return !!main.querySelector('.row[data-id] .title-input, .row[data-id] .date-input, .row[data-desc-for] .desc-textarea');
+}
 const LEGACY_FILTER_ROUTES = { active: 'active', backlog: 'backlog', ideas: 'ideas', all: 'all', everything: 'all', home: 'active' };
 
 // UI state for the planner page that is not a preference: open detail rows
@@ -80,13 +104,17 @@ async function reload() {
   render();
 }
 
-// The remembered account must still exist (users can be deleted in Settings);
-// otherwise fall back to this browser's own preferences.
+// The account is the remembered user when it still exists (users can be
+// deleted in Settings), otherwise the first listed user; with no users the
+// browser's own preferences apply. A browser told to keep to itself
+// (prefs.rememberedAccount() === null) stays that way.
 let accountLoaded = false;
 /** Returns true when the preferences were (re)loaded. */
 async function syncAccount() {
-  const wanted = accountLoaded ? prefs.account : prefs.rememberedAccount();
-  const valid = wanted != null && state.usersById.has(wanted) ? wanted : null;
+  const wanted = accountLoaded && prefs.account != null ? prefs.account : prefs.rememberedAccount();
+  let valid = null;
+  if (wanted != null && state.usersById.has(wanted)) valid = wanted;
+  else if (wanted !== null) valid = state.users.length ? state.users[0].id : null;
   const load = !accountLoaded || valid !== prefs.account;
   if (load) await prefs.load(valid);
   accountLoaded = true;
@@ -152,16 +180,21 @@ function versionBadge() {
 }
 
 /** The far right of the title bar: the version badge and the account menu
- *  (who is using this browser; preferences follow the account). */
+ *  (who is using this browser; preferences follow the account). The menu
+ *  lists the users only; with none yet it is disabled with a placeholder. */
 function renderAccount() {
   const current = prefs.account;
   const u = current != null ? state.usersById.get(current) : null;
+  const noUsers = !state.users.length;
   const sel = el('select', {
-    id: 'account-select', class: 'account-select', 'aria-label': 'Account',
-    title: u ? `${u.name}: your view, sort and layout preferences are saved to this account` : 'Pick who you are so your preferences follow you to any browser',
-    onChange: () => switchAccount(sel.value ? Number(sel.value) : null),
+    id: 'account-select', class: 'account-select', 'aria-label': 'Account', disabled: noUsers ? true : null,
+    title: u ? `${u.name}: your view, sort and layout preferences are saved to this account and follow you to any browser`
+      : noUsers ? 'No users yet: add people under Settings and your preferences will follow you to any browser'
+        : 'Pick who you are: your view, sort and layout preferences follow you to any browser',
+    onChange: () => { if (sel.value) switchAccount(Number(sel.value)); },
   });
-  sel.append(el('option', { value: '', selected: current == null ? true : null }, 'No account'));
+  // A placeholder only while nobody is current (no users, or a browser that keeps to itself).
+  if (!u) sel.append(el('option', { value: '', selected: true, hidden: noUsers ? null : true }, noUsers ? 'No users' : 'This browser'));
   for (const x of state.users) sel.append(el('option', { value: String(x.id), selected: current === x.id ? true : null }, x.name));
   if (u) Object.assign(sel.style, { background: u.color, color: contrastText(u.color), borderColor: u.color });
   accountSlot.replaceChildren(versionBadge(), sel);
@@ -172,6 +205,7 @@ settingsBtn.addEventListener('click', () => { location.hash = '#/settings'; });
 function render() {
   const r = route();
   renderAccount();
+  renderScratch({ account: prefs.account, page: r.page });
   settingsBtn.classList.toggle('active', r.page === 'settings');
   if (r.page === 'settings') {
     toolbar.replaceChildren(
@@ -220,6 +254,22 @@ function render() {
   toolbar.append(
     el('button', { type: 'button', id: 'btn-expand-all', 'aria-label': 'Expand all', title: 'Expand every row (descriptions, dependencies and attachments)', onClick: () => { for (const id of expandableIds(currentGroups)) ui.expanded.add(id); render(); } }, icon('expand-all')),
     el('button', { type: 'button', id: 'btn-collapse-all', 'aria-label': 'Collapse all', title: 'Collapse every row', onClick: () => { ui.expanded.clear(); render(); } }, icon('collapse-all')),
+  );
+  // Show / hide the tasks of every Ongoing and Project (the carets on the
+  // parent rows). The preference covers every live parent, not just the
+  // filtered ones, so it stays consistent as the filters change.
+  const parentIds = () => state.items.filter((it) => it.parent_id == null).map((it) => it.id);
+  toolbar.append(
+    el('button', {
+      type: 'button', id: 'btn-expand-parents', 'aria-label': 'Expand all parents', disabled: flat ? true : null,
+      title: flat ? 'Flat has no Ongoing or Project rows to expand' : 'Show the tasks of every Ongoing and Project',
+      onClick: () => { prefs.set('collapsed', []); render(); },
+    }, icon('expand-parents')),
+    el('button', {
+      type: 'button', id: 'btn-collapse-parents', 'aria-label': 'Collapse all parents', disabled: flat ? true : null,
+      title: flat ? 'Flat has no Ongoing or Project rows to collapse' : 'Hide the tasks of every Ongoing and Project',
+      onClick: () => { prefs.set('collapsed', parentIds()); render(); },
+    }, icon('collapse-parents')),
   );
 
   const searchSlot = el('div', { class: 'search-slot' });
@@ -314,7 +364,9 @@ function render() {
     renderTable(wrap, { ...tableOpts, mode: 'full' });
   } else {
     const wrap = el('div', { class: 'table-wrap' });
-    const panel = el('div', { class: 'panel', id: 'panel' });
+    // The Matrix stays in view while the list scrolls (the Timeline's bars
+    // are aligned to the rows, so it scrolls with them).
+    const panel = el('div', { class: `panel${currentView === 'matrix' ? ' sticky' : ''}`, id: 'panel' });
     main.replaceChildren(el('div', { class: 'split' }, wrap, panel));
     const draw = (handle) => {
       const ctx = {
@@ -325,6 +377,9 @@ function render() {
         // Matrix point colouring (a preference): assignee | owner | parent.
         pointColor: prefs.get('point_color'),
         setPointColor: (mode) => { prefs.set('point_color', mode); render(); },
+        // Matrix point labels (a preference): key | title.
+        labelMode: prefs.get('matrix_labels'),
+        setLabelMode: (mode) => { prefs.set('matrix_labels', mode); render(); },
       };
       if (currentView === 'timeline') renderTimeline(panel, handle, ctx);
       else renderMatrix(panel, handle, ctx);
@@ -353,5 +408,30 @@ document.addEventListener('keydown', async (e) => {
   }
 });
 
-window.addEventListener('hashchange', () => { discardNew(); render(); });
+// In-app navigation (the gear, a filter route) waits for an edit in progress:
+// the hash is put back and a snack says how to finish. Putting it back fires
+// a second hashchange, which is ignored (it would otherwise be refused too).
+const EDIT_IN_PROGRESS = 'Finish (Enter) or discard (Escape) the edit first';
+let restoringHash = null;
+window.addEventListener('hashchange', (e) => {
+  if (restoringHash != null && location.hash === restoringHash) { restoringHash = null; return; }
+  restoringHash = null;
+  if (isEditing()) {
+    toast(EDIT_IN_PROGRESS);
+    restoringHash = new URL(e.oldURL).hash;
+    location.hash = restoringHash;
+    return;
+  }
+  discardNew();
+  render();
+});
+// Leaving the page (reload, close, another site) asks first while editing.
+window.addEventListener('beforeunload', (e) => {
+  if (!isEditing()) return;
+  e.preventDefault();
+  e.returnValue = EDIT_IN_PROGRESS; // older browsers want a string; the text itself is not shown
+});
 reload();
+// Changes made elsewhere (another browser, the Android app) arrive as server
+// events; the page reloads itself once no edit is in progress here.
+startRealtime({ reload, busy: isEditing });

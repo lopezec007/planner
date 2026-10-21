@@ -53,16 +53,18 @@ test('Flat shows tasks only, with the parent key and title as leading columns', 
   await expect(page.locator('.row.parent')).toHaveCount(0);
   const row = page.locator('.row.task', { hasText: 'Order countertops' });
   const cells = row.locator(':scope > *');
-  await expect(cells.nth(1)).toHaveText('P-1');              // parent key
-  await expect(cells.nth(2)).toContainText('T-9');           // task key
-  await expect(cells.nth(3)).toHaveText('Kitchen remodel');  // parent title
-  await expect(cells.nth(4)).toContainText('Order countertops');
-  await expect(page.locator('.row.header > *').nth(3)).toHaveText('Ongoing / Project');
+  // No collapse column in Flat (there are no parent rows to collapse).
+  await expect(page.locator('.collapse-cell')).toHaveCount(0);
+  await expect(cells.nth(0)).toHaveText('P-1');              // parent key
+  await expect(cells.nth(1)).toContainText('T-9');           // task key
+  await expect(cells.nth(2)).toHaveText('Kitchen remodel');  // parent title
+  await expect(cells.nth(3)).toContainText('Order countertops');
+  await expect(page.locator('.row.header > *').nth(2)).toHaveText('Ongoing / Project');
   // The expanded row keeps the description under the task title.
   await row.locator('.toggle button').click();
   const detail = page.locator('.row.description[data-desc-for]');
   await expect(detail.locator(':scope > .title')).toBeVisible();
-  const title = await cells.nth(4).boundingBox();
+  const title = await cells.nth(3).boundingBox();
   const desc = await detail.locator(':scope > .title').boundingBox();
   expect(Math.abs(title.x - desc.x)).toBeLessThan(1);
   // Timeline beside the flat table shows task bars only.
@@ -180,22 +182,138 @@ test('in Flat a drag reorders within the parent only and never moves the task el
   await page.locator('#btn-nested').click();
 });
 
-test('a heavier rule separates each parent from the previous group, in the table and in Flat', async ({ page }) => {
+test('in Nested each parent and its tasks is a framed block of its own; Flat is one table with a heavier rule per group', async ({ page }) => {
   await page.goto('/#/all');
   const width = (loc) => loc.evaluate((e) => getComputedStyle(e).borderTopWidth);
-  expect(await width(page.locator('.row.parent', { hasText: 'Finance' }))).toBe('2px');
+  const gap = (loc) => loc.evaluate((e) => parseFloat(getComputedStyle(e).marginTop));
+  const sides = (loc) => loc.evaluate((e) => { const s = getComputedStyle(e); return [s.borderLeftWidth, s.borderRightWidth]; });
+  const first = page.locator('.row.parent').first();
+  const finance = page.locator('.row.parent', { hasText: 'Finance' });
+  for (const p of [first, finance]) {                             // every parent leaves a gap, the first one too (after the header)
+    expect(await gap(p)).toBeGreaterThanOrEqual(5);
+    expect(await gap(p)).toBeLessThanOrEqual(8);
+  }
+  expect(await width(finance)).toBe('1px');                        // no heavier rule any more
   expect(await width(page.locator('.row.task', { hasText: 'Review budget' }))).toBe('1px');
-  expect(await page.locator('.row.parent', { hasText: 'Finance' }).evaluate((e) => e.getBoundingClientRect().height)).toBe(36);
+  expect(await finance.evaluate((e) => e.getBoundingClientRect().height)).toBe(36); // rows keep their height (the Timeline aligns to it)
+  // The page shows through the gap: the previous row's bottom and the parent's top do not touch,
+  // and nothing frames the gap: the table has no side borders of its own, each row has.
+  const prev = await finance.evaluate((e) => e.previousElementSibling.getBoundingClientRect().bottom);
+  const top = await finance.evaluate((e) => e.getBoundingClientRect().top);
+  expect(top - prev).toBeGreaterThanOrEqual(5);
+  expect(await sides(page.locator('.table'))).toEqual(['0px', '0px']);
+  expect(await sides(finance)).toEqual(['1px', '1px']);
+  expect(await sides(page.locator('.row.task', { hasText: 'Review budget' }))).toEqual(['1px', '1px']);
+  // The group's last row closes the frame; a row in the middle does not.
+  const last = page.locator('.row.task', { hasText: 'Review budget' }); // Finance's last task
+  expect(await last.evaluate((e) => getComputedStyle(e).borderBottomWidth)).toBe('1px');
+  expect(await last.evaluate((e) => getComputedStyle(e).borderBottomLeftRadius)).not.toBe('0px');
+  expect(await finance.evaluate((e) => getComputedStyle(e).borderTopLeftRadius)).not.toBe('0px');
+  expect(await page.locator('.row.task', { hasText: 'Pay insurance' }).evaluate((e) => getComputedStyle(e).borderBottomWidth)).toBe('0px');
+  expect(await page.locator('.row.header').evaluate((e) => getComputedStyle(e).borderBottomLeftRadius)).not.toBe('0px'); // the header is its own block
   await page.locator('#btn-flat').click();
-  const first = page.locator('.row.task', { hasText: 'Pay insurance' }); // first task of the second parent
-  await expect(first).toHaveClass(/group-start/);
-  expect(await width(first)).toBe('2px');
+  expect(await sides(page.locator('.table'))).toEqual(['1px', '1px']); // Flat: one framed table
+  expect(await sides(page.locator('.row.task', { hasText: 'Review budget' }))).toEqual(['0px', '0px']);
+  const start = page.locator('.row.task', { hasText: 'Pay insurance' }); // first task of the second parent
+  await expect(start).toHaveClass(/group-start/);
+  expect(await width(start)).toBe('2px');
+  expect(await gap(start)).toBe(0);
   expect(await width(page.locator('.row.task', { hasText: 'Review budget' }))).toBe('1px');
-  await page.locator('button[data-view=timeline]').click();
-  expect(await width(page.locator('.timeline-row.task').first())).toBe('1px');
-  await page.locator('button[data-view=table]').click();
   await page.locator('#btn-nested').click();
-  await page.locator('button[data-view=timeline]').click();
-  expect(await width(page.locator('.timeline-row.parent').first())).toBe('2px');
+});
+
+test('the collapsed task count follows the filters', async ({ page, request }) => {
+  await page.goto('/#/all');
+  const m = await byTitle(request, 'Maintenance');
+  const total = (await (await request.get('/api/items')).json()).filter((i) => i.parent_id === m.id).length;
+  const maint = () => page.locator('.row.parent', { hasText: 'Maintenance' });
+  await expect(page.locator('.row.task', { hasText: 'Clean gutters' })).toBeVisible();
+  await page.locator('#search-text').fill('gutters');
+  await expect(page.locator('.row.task')).toHaveCount(1);
+  await maint().locator('.caret').click();
+  await expect(maint().locator('.task-count')).toHaveText('(1)');
+  await expect(maint().locator('.task-count')).toHaveAttribute('title', `1 hidden task(s) (${total - 1} of ${total} hidden by the filters)`);
+  await expect(maint().locator('.caret')).toHaveAttribute('title', 'Show 1 task(s)');
+  await page.locator('#search-text').fill('');
+  await expect(maint().locator('.task-count')).toHaveText(`(${total})`);
+  await expect(maint().locator('.task-count')).toHaveAttribute('title', `${total} hidden task(s)`);
+  await maint().locator('.caret').click();
+  await expect(page.locator('.row.task', { hasText: 'Clean gutters' })).toBeVisible();
+});
+
+test('the header row stays under the title bar while the page scrolls, in every view', async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 420 });
+  await page.goto('/#/all');
+  const edges = () => page.evaluate(() => ({
+    bar: document.querySelector('.topbar').getBoundingClientRect().bottom,
+    header: document.querySelector('.row.header').getBoundingClientRect().top,
+    z: Number(getComputedStyle(document.querySelector('.row.header')).zIndex),
+  }));
+  for (const view of ['table', 'timeline', 'matrix']) {
+    await page.locator(`button[data-view=${view}]`).click();
+    await expect(page.locator('.row[data-id]').first()).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.evaluate(() => window.scrollBy(0, 300));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
+    const e = await edges();
+    expect(Math.abs(e.header - e.bar)).toBeLessThan(1);
+    expect(e.z).toBeGreaterThan(0);
+    expect(e.z).toBeLessThan(20); // under menus (20), the item tooltip (50) and the colour popover (60)
+  }
   await page.locator('button[data-view=table]').click();
+  // The table is not a scroll container (that would pin the header to it, not the window).
+  expect(await page.locator('.table').evaluate((e) => getComputedStyle(e).overflowX)).toBe('visible');
+  await page.evaluate(() => window.scrollTo(0, 0));
+});
+
+test('the carets, buttons and drag handle sit in the first and last columns', async ({ page, request }) => {
+  await page.goto('/#/all');
+  const kitchen = page.locator('.row.parent', { hasText: 'Kitchen remodel' });
+  const task = page.locator('.row.task', { hasText: 'Order countertops' });
+  // First column: the collapse caret on parents, empty on tasks; nothing inside the title cell before the text.
+  await expect(kitchen.locator(':scope > *').first()).toHaveClass(/collapse-cell/);
+  await expect(kitchen.locator(':scope > .collapse-cell .caret[data-collapse]')).toHaveCount(1);
+  await expect(task.locator(':scope > .collapse-cell')).toBeEmpty();
+  await expect(kitchen.locator('.title .caret, .title .color-swatch')).toHaveCount(0);
+  await expect(kitchen.locator('.key .drag-handle')).toHaveCount(0);
+  await expect(kitchen.locator('.key')).toHaveText(/^P-\d+$/);
+  // Last column: [details caret] [+] [Delete] [drag handle] on a parent, [details caret] [move] [Delete] [drag handle] on a task.
+  const names = (row) => row.locator(':scope > .actions > *').evaluateAll((els) => els.map((e) => e.classList.contains('toggle') ? 'toggle' : e.classList.contains('drag-handle') ? 'drag' : e.title));
+  expect(await names(kitchen)).toEqual(['toggle', 'Add task', 'Delete', 'drag']);
+  expect(await names(task)).toEqual(['toggle', 'Move to another Ongoing or Project', 'Delete', 'drag']);
+  // Icon buttons: square, SVG inside, no text glyphs.
+  for (const b of await kitchen.locator('.actions > button').all()) {
+    const box = await b.boundingBox();
+    expect(Math.abs(box.width - box.height)).toBeLessThan(1);
+    await expect(b.locator('svg')).toHaveCount(1);
+    expect((await b.textContent()).trim()).toBe('');
+  }
+  await expect(kitchen.locator('.actions .toggle button')).toHaveAttribute('aria-expanded', 'false');
+  await kitchen.locator('.actions .toggle button').click();
+  await expect(kitchen.locator('.actions .toggle button')).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.row.description[data-desc-for]')).toHaveCount(1);
+  await kitchen.locator('.actions .toggle button').click();
+  // Title-only (Timeline): the details caret at the end of the title cell, always visible; the buttons fade in on hover.
+  await page.locator('button[data-view=timeline]').click();
+  const k2 = page.locator('.table.title-only .row.parent', { hasText: 'Kitchen remodel' });
+  await expect(k2.locator('.title .toggle button')).toBeVisible();
+  await page.mouse.move(5, 5);
+  expect(await k2.locator('.title .toggle').evaluate((e) => getComputedStyle(e).opacity)).toBe('1');
+  expect(await k2.locator('.title .actions').evaluate((e) => getComputedStyle(e).opacity)).toBe('0');
+  expect(await names(k2.locator('.title'))).toEqual(['Add task', 'Delete', 'drag']);
+  const toggle = await k2.locator('.title .toggle').boundingBox(), acts = await k2.locator('.title .actions').boundingBox(), text = await k2.locator('.title-text').boundingBox();
+  expect(toggle.x).toBeGreaterThanOrEqual(text.x + text.width);
+  expect(acts.x).toBeGreaterThanOrEqual(toggle.x + toggle.width);
+  // The handle at the right still reorders: drag Replace HVAC filter above Clean gutters, then undo.
+  await page.locator('button[data-view=table]').click();
+  const maint = await byTitle(request, 'Maintenance');
+  const order = async () => (await (await request.get('/api/items')).json()).filter((i) => i.parent_id === maint.id).map((i) => i.title);
+  const before = await order();
+  const handle = page.locator('.row.task', { hasText: 'Replace HVAC filter' }).locator('.actions > .drag-handle:last-child');
+  await expect(handle).toHaveAttribute('draggable', 'true');
+  await dragRow(page, handle, page.locator('.row.task', { hasText: 'Clean gutters' }));
+  await expect.poll(order).toEqual(['Replace HVAC filter', 'Clean gutters', ...before.filter((t) => !['Replace HVAC filter', 'Clean gutters'].includes(t))]);
+  await page.waitForTimeout(350);
+  await page.keyboard.press('Control+z');
+  await expect.poll(order).toEqual(before);
 });

@@ -307,12 +307,16 @@ export function levelColor(n, field) {
 }
 
 /** Urgency / importance: a number input; a single key sets the value
- *  (1-9, 0 = 10, ` = 0) and saves immediately. */
+ *  (1-9, 0 = 10, ` = 0) and saves immediately. Any other printable
+ *  character is refused (a number input would otherwise accept e, +, -, .
+ *  and, in some browsers, letters); navigation and editing keys pass. Text
+ *  that arrives another way (paste, drop, IME) is dropped unless it is a
+ *  whole value from 0 to 10. */
 export function levelControl(item, field, saver) {
   if (item.type !== 'task') return el('div', { class: 'num' });
   const color = isClosed(item.status) ? '' : levelColor(item[field], field);
   const inp = el('input', {
-    type: 'number', name: field, min: 0, max: 10, class: `cell-input num-input ${color ? 'hl-level' : ''}`,
+    type: 'number', name: field, min: 0, max: 10, inputmode: 'numeric', class: `cell-input num-input ${color ? 'hl-level' : ''}`,
     value: item[field] ?? '', 'aria-label': field,
   });
   if (color) Object.assign(inp.style, { background: color, color: contrastText(color) });
@@ -327,10 +331,18 @@ export function levelControl(item, field, saver) {
     if (e.key === '`') v = 0;
     else if (e.key === '0') v = 10;
     else if (/^[1-9]$/.test(e.key)) v = Number(e.key);
-    if (v == null) { if (e.key === 'Enter') inp.blur(); return; }
+    if (v == null) {
+      if (e.key === 'Enter') inp.blur();
+      else if (e.key.length === 1) e.preventDefault(); // a printable character that is not a digit
+      return;
+    }
     e.preventDefault();
     inp.value = String(v);
     commit();
+  });
+  // Pasted or dropped text: keep it only when it is a value on its own.
+  inp.addEventListener('input', () => {
+    if (!/^(10|[0-9])$/.test(inp.value)) inp.value = item[field] ?? '';
   });
   inp.addEventListener('change', commit);
   return el('div', { class: 'num' }, inp);

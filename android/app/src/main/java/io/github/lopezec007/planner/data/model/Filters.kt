@@ -32,8 +32,10 @@ private data class CriteriaJson(
     val statuses: List<String> = emptyList(),
     @SerialName("recent_days") val recentDays: Int = 0,
     @SerialName("hide_empty_parents") val hideEmptyParents: Boolean = false,
-    val owner: String = "",
-    val assignee: String = "",
+    val owner: String = "",       // legacy single choice, read when `owners` is absent
+    val assignee: String = "",    // legacy single choice, read when `assignees` is absent
+    val owners: List<String> = emptyList(),
+    val assignees: List<String> = emptyList(),
     val blocked: String = "",
     @SerialName("end_after") val endAfter: String = "",
     @SerialName("end_before") val endBefore: String = "",
@@ -45,20 +47,20 @@ data class Criteria(
     val statuses: Set<Status> = emptySet(),
     val recentDays: Int = 0,          // also match items closed within this many days (0 = off)
     val hideEmptyParents: Boolean = false,
-    val owner: String = "",           // "" any | "none" | user id
-    val assignee: String = "",        // "" any | "none" | user id
+    val owners: Set<String> = emptySet(),    // empty = any; else "none" and/or user ids, any of which matches
+    val assignees: Set<String> = emptySet(), // empty = any; else "none" and/or user ids, any of which matches
     val blocked: String = "",         // "" any | "yes" | "no"
     val endAfter: LocalDate? = null,  // inclusive
     val endBefore: LocalDate? = null, // inclusive
 ) {
     val isActive: Boolean
         get() = text.isNotBlank() || types.isNotEmpty() || statuses.isNotEmpty() || recentDays > 0 || hideEmptyParents ||
-            owner.isNotEmpty() || assignee.isNotEmpty() || blocked.isNotEmpty() || endAfter != null || endBefore != null
+            owners.isNotEmpty() || assignees.isNotEmpty() || blocked.isNotEmpty() || endAfter != null || endBefore != null
 
     /** Filters other than the search text, as a count for the badge. */
     val filterCount: Int
         get() = (if (types.isNotEmpty()) 1 else 0) + (if (statuses.isNotEmpty() || recentDays > 0) 1 else 0) +
-            (if (owner.isNotEmpty()) 1 else 0) + (if (assignee.isNotEmpty()) 1 else 0) + (if (blocked.isNotEmpty()) 1 else 0) +
+            (if (owners.isNotEmpty()) 1 else 0) + (if (assignees.isNotEmpty()) 1 else 0) + (if (blocked.isNotEmpty()) 1 else 0) +
             (if (endAfter != null || endBefore != null) 1 else 0)
 
     /** The template whose status/recent/type filters are exactly in effect, or null. */
@@ -82,12 +84,8 @@ data class Criteria(
         }
         if (types.isNotEmpty() && it.type !in types) return false
         if (!statusMatches(it)) return false
-        if (owner.isNotEmpty()) {
-            if (if (owner == "none") it.ownerId != null else it.ownerId?.toString() != owner) return false
-        }
-        if (assignee.isNotEmpty()) {
-            if (if (assignee == "none") it.assigneeId != null else it.assigneeId?.toString() != assignee) return false
-        }
+        if (owners.isNotEmpty() && !userMatches(it.ownerId, owners)) return false
+        if (assignees.isNotEmpty() && !userMatches(it.assigneeId, assignees)) return false
         if (blocked.isNotEmpty() && (blocked == "yes") != it.isBlocked(byId)) return false
         if (endAfter != null || endBefore != null) {
             val end = it.endDate ?: return false
@@ -96,6 +94,10 @@ data class Criteria(
         }
         return true
     }
+
+    /** A user filter matches an unset user through "none" and a set one through its id. */
+    private fun userMatches(userId: Long?, chosen: Set<String>): Boolean =
+        if (userId == null) "none" in chosen else userId.toString() in chosen
 
     /** Status filter on the item's own status; Ongoing rows are never excluded. */
     private fun statusMatches(it: Item): Boolean {
@@ -123,13 +125,21 @@ data class Criteria(
     fun toJson(): String = json.encodeToString(
         CriteriaJson(
             types = types.map { it.wire }, statuses = statuses.map { it.wire }, recentDays = recentDays,
-            hideEmptyParents = hideEmptyParents, owner = owner, assignee = assignee, blocked = blocked,
+            hideEmptyParents = hideEmptyParents,
+            // The list is the stored form; the single key keeps the web shape for a lone choice.
+            owners = owners.toList(), assignees = assignees.toList(),
+            owner = owners.singleOrNull() ?: "", assignee = assignees.singleOrNull() ?: "",
+            blocked = blocked,
             endAfter = Dates.format(endAfter) ?: "", endBefore = Dates.format(endBefore) ?: "",
         ),
     )
 
     companion object {
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+        /** The list when present, else the legacy single choice; blanks dropped. */
+        private fun userSet(list: List<String>, single: String): Set<String> =
+            (list.ifEmpty { listOf(single) }).filter { it.isNotBlank() }.toSet()
 
         /** Parses the stored form; the Active template when blank or malformed. */
         fun fromJson(s: String?): Criteria {
@@ -140,7 +150,7 @@ data class Criteria(
                 statuses = p.statuses.mapNotNull { Status.fromWire(it) }.toSet(),
                 recentDays = p.recentDays.coerceAtLeast(0),
                 hideEmptyParents = p.hideEmptyParents,
-                owner = p.owner, assignee = p.assignee,
+                owners = userSet(p.owners, p.owner), assignees = userSet(p.assignees, p.assignee),
                 blocked = if (p.blocked == "yes" || p.blocked == "no") p.blocked else "",
                 endAfter = Dates.parse(p.endAfter), endBefore = Dates.parse(p.endBefore),
             )

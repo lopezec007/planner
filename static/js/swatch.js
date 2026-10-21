@@ -1,11 +1,15 @@
-// The colour swatch before the title of an Ongoing or Project row.
+// The colour swatch of an Ongoing or Project: it sits in the "Colour" box of
+// the item's expanded row (see table.js detailRow).
 //
 //   colorSwatch(item, saver) -> <button> showing the item's effective colour
+//   colorLabel(item)         -> the text beside it: the colour's hex, or
+//                               "Ongoing colour" / "Project colour" when
+//                               the item has none of its own
 //
-// Clicking it opens a small popover: a palette, a Custom… button (the
-// browser's colour picker) and "<Type> colour" to drop the item's own colour
-// again. The colour is saved on the item (shared by everyone); whether it
-// shows is the per-user "parent_colors" preference (see colors.js).
+// Clicking the swatch opens a small popover: a palette, a Custom… button
+// (the browser's colour picker) and "<Type> colour" to drop the item's own
+// colour again. The colour is saved on the item (shared by everyone);
+// whether it shows is the per-user "parent_colors" preference (see colors.js).
 
 import { el } from './util.js';
 import { ownColor } from './colors.js';
@@ -60,6 +64,12 @@ function openPopover(anchor, item, saver) {
   document.addEventListener('keydown', onKey, true);
   current = { pop, onDown, onKey };
   (pop.querySelector('[aria-pressed="true"]') || grid.firstElementChild).focus();
+}
+
+/** The text shown beside the swatch. */
+export function colorLabel(item) {
+  const typeName = item.type === 'ongoing' ? 'Ongoing' : 'Project';
+  return item.color ? item.color : `${typeName} colour`;
 }
 
 export function colorSwatch(item, saver) {
