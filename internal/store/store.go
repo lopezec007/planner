@@ -381,6 +381,9 @@ var SettingDefaults = map[string]string{
 	// 0-10), each "#rrggbb" or "" for no highlight.
 	"urgency_colors":    DefaultRamp,
 	"importance_colors": DefaultRamp,
+	// Status given to new projects and tasks when the filters in effect admit
+	// it (the client falls back to a filter-derived status otherwise).
+	"default_status": StatusTodo,
 }
 
 // LevelCount is the number of urgency/importance values (0-10).
@@ -439,6 +442,10 @@ func validSetting(k, v string) error {
 	case "date_warn_days", "date_alert_days":
 		if n, err := strconv.Atoi(v); err != nil || n < -1 || n > 365 {
 			return verr("%s must be -1 to 365 (-1 disables it)", k)
+		}
+	case "default_status":
+		if !validStatuses[v] {
+			return verr("default_status must be one of idea, backlog, todo, in-progress, done, cancelled")
 		}
 	default:
 		return verr("unknown setting %q", k)

@@ -12,7 +12,7 @@
 //   opts.collapsed Set<number> of parent ids whose tasks are hidden (caller-owned)
 //   opts.onCollapse(parentId, collapsed)  called when the caret is clicked
 //   opts.flat      true: no parent rows; each task row carries its parent's
-//                  key and title in extra leading columns
+//                  key (as its type chip) and title in extra leading columns
 //   opts.sort      [{ key, dir }] column sort (see sort.js); [] = user-defined
 //   opts.blockedLast  true: blocked items sink to the bottom of their group
 //   opts.onSort(sort)  called when a column header is clicked
@@ -59,7 +59,7 @@ import {
 } from './cells.js';
 import { SORT_COLUMNS, normalizeSort, compareItems, toggleSort, defaultDir } from './sort.js';
 import { visibleColumns, gridTemplate } from './columns.js';
-import { rowTint } from './colors.js';
+import { rowTint, typeChip } from './colors.js';
 import { colorSwatch, colorLabel } from './swatch.js';
 import { icon } from './icons.js';
 import { prefs } from './prefs.js';
@@ -241,12 +241,15 @@ function dragHandle(ctx) {
   return el('span', { class: 'drag-handle', title: 'Drag to reorder', draggable: 'true', 'aria-label': 'Drag to reorder' }, icon('grip'));
 }
 
+/** The key cell: plain text for a task; for an Ongoing or Project the type
+ *  chip (colors.js typeChip), so the kind of parent shows whatever tint the
+ *  row has. A new row's key is its prefix and "?". */
 function keyCell(item) {
-  if (isDraft(item)) {
-    const prefix = item.type === 'ongoing' ? 'N' : item.type === 'project' ? 'P' : 'T';
-    return el('div', { class: 'key' }, el('span', { class: 'key-text new-key' }, `${prefix}-?`));
-  }
-  return el('div', { class: 'key' }, el('span', { class: 'key-text' }, item.key));
+  const fresh = isDraft(item);
+  const label = fresh ? `${item.type === 'ongoing' ? 'N' : item.type === 'project' ? 'P' : 'T'}-?` : item.key;
+  const keyClass = fresh ? 'key-text new-key' : 'key-text';
+  const text = item.type === 'task' ? el('span', { class: keyClass }, label) : typeChip(item, { label, keyClass });
+  return el('div', { class: 'key' }, text);
 }
 
 /** How many of a parent's tasks this table shows (opts.groups, after the
@@ -321,7 +324,7 @@ function itemRow(item, kind, mode, expanded, ctx) {
   const parent = ctx.flat && item.parent_id != null ? state.itemsById.get(item.parent_id) : null;
   const build = {
     collapse: () => collapseCell(item, kind, ctx),
-    pkey: () => el('div', { class: 'key parent-ref' }, parent ? parent.key : ''),
+    pkey: () => el('div', { class: 'key parent-ref' }, parent ? typeChip(parent, { keyClass: 'parent-key-text' }) : ''),
     key: () => keyCell(item),
     ptitle: () => el('div', { class: 'title parent-ref', title: parent ? `${parent.key} ${parent.title}` : '' }, parent ? parent.title : ''),
     title: () => titleCell(item, mode, ctx, saver, kind, expanded),

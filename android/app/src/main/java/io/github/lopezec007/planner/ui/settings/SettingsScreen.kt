@@ -72,6 +72,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lopezec007.planner.BuildConfig
 import io.github.lopezec007.planner.data.db.SyncLogEntity
 import io.github.lopezec007.planner.data.model.AppSettings
+import io.github.lopezec007.planner.data.model.Status
 import io.github.lopezec007.planner.data.model.User
 import io.github.lopezec007.planner.data.sync.SyncPhase
 import io.github.lopezec007.planner.data.sync.SyncState
@@ -79,6 +80,7 @@ import io.github.lopezec007.planner.prefs.AppPrefs
 import io.github.lopezec007.planner.ui.PlannerViewModel
 import io.github.lopezec007.planner.ui.components.ColorDot
 import io.github.lopezec007.planner.ui.components.FieldRow
+import io.github.lopezec007.planner.ui.components.StatusChip
 import io.github.lopezec007.planner.ui.components.UserChip
 import io.github.lopezec007.planner.ui.nav.Nav
 import io.github.lopezec007.planner.ui.nav.Screen
@@ -698,6 +700,7 @@ private fun UserDialog(
 @Composable
 private fun PlannerSettingsSection(settings: AppSettings, onChange: (key: String, value: String) -> Unit) {
     var weekMenu by remember { mutableStateOf(false) }
+    var statusMenu by remember { mutableStateOf(false) }
     var colorKey by remember { mutableStateOf<String?>(null) }
 
     SectionTitle("Planner settings")
@@ -717,6 +720,31 @@ private fun PlannerSettingsSection(settings: AppSettings, onChange: (key: String
                     },
                     leadingIcon = {
                         if (i == settings.weekStart) {
+                            Icon(Icons.Filled.Check, contentDescription = null)
+                        } else {
+                            Spacer(Modifier.size(24.dp))
+                        }
+                    },
+                )
+            }
+        }
+    }
+
+    // The status a new project or task starts with (when the status filter admits it).
+    Box {
+        FieldRow(label = "Default status", onClick = { statusMenu = true }) {
+            StatusChip(settings.defaultStatus)
+        }
+        DropdownMenu(expanded = statusMenu, onDismissRequest = { statusMenu = false }) {
+            for (st in Status.entries) {
+                DropdownMenuItem(
+                    text = { Text(st.label) },
+                    onClick = {
+                        statusMenu = false
+                        if (st != settings.defaultStatus) onChange("default_status", st.wire)
+                    },
+                    leadingIcon = {
+                        if (st == settings.defaultStatus) {
                             Icon(Icons.Filled.Check, contentDescription = null)
                         } else {
                             Spacer(Modifier.size(24.dp))

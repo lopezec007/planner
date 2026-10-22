@@ -1,6 +1,7 @@
-// Room tables. Items, users, attachments and settings mirror the server;
-// pending_ops is the offline queue; sync_log keeps dropped ops for Settings;
-// status_history caches /history answers so the detail screen works offline.
+// Room tables. Items, users, attachments, settings and the scratch pads
+// mirror the server; pending_ops is the offline queue; sync_log keeps
+// dropped ops for Settings; status_history caches /history answers so the
+// detail screen works offline.
 package io.github.lopezec007.planner.data.db
 
 import androidx.room.ColumnInfo
@@ -68,6 +69,18 @@ data class AttachmentEntity(
 
 @Entity(tableName = "settings")
 data class SettingEntity(@PrimaryKey val key: String, val value: String)
+
+/**
+ * The cached text of one scratch pad, keyed like the server ("global" or
+ * "user:<id>", see ScratchScope). A local edit lands here at once and in
+ * the queue; [updatedAt] is the server's stamp, "" until it has one.
+ */
+@Entity(tableName = "scratch")
+data class ScratchEntity(
+    @PrimaryKey val scope: String,
+    val text: String,
+    val updatedAt: String,
+)
 
 @Entity(tableName = "status_history", indices = [Index("itemId")])
 data class StatusHistoryEntity(

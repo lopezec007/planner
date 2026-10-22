@@ -38,7 +38,7 @@
 import { el, toast } from './util.js';
 import { api } from './api.js';
 import { state, isClosed, isBlocked, dependencyEdges, parseYMD, today, daysFromToday, addDays } from './state.js';
-import { BAR_COLOR_MODES, barColor, barLegend, rowTint } from './colors.js';
+import { BAR_COLOR_MODES, barColor, barLegend, rowTint, typeChip } from './colors.js';
 
 const DAY_MS = 86400000;
 const MAX_PPD = 80;        // max pixels per day
@@ -675,7 +675,7 @@ export function renderTimeline(panel, handle, ctx) {
   function showTip(it, d) {
     const parent = it.type === 'task' && it.parent_id != null ? state.itemsById.get(it.parent_id) : null;
     tooltip.replaceChildren(
-      ...(parent ? [el('div', { class: 'timeline-tip-parent' }, el('span', { class: 'key' }, parent.key), ' ', parent.title)] : []),
+      ...(parent ? [el('div', { class: 'timeline-tip-parent' }, typeChip(parent, { keyClass: 'parent-key-text' }), ' ', parent.title)] : []),
       el('div', { class: 'timeline-tip-title' }, el('span', { class: 'key' }, it.key), ' ', it.title),
       el('div', { class: 'timeline-tip-dates' }, `Start: ${fmtDate(d.start, it.start_firm, d.derivedStart)}  ·  End: ${fmtDate(d.end, it.end_firm, d.derivedEnd)}`),
     );

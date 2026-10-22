@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 const weekday = (ymd) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).getDay(); };
 
 test.afterEach(async ({ request }) => {
-  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d', date_warn_days: '7', date_alert_days: '0', urgency_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]', importance_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]' } });
+  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d', date_warn_days: '7', date_alert_days: '0', urgency_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]', importance_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]', default_status: 'todo' } });
 });
 
 test('settings page hosts the users list and the old #/users route still works', async ({ page }) => {
@@ -147,4 +147,61 @@ test('urgency and importance have their own colour ramps, with presets', async (
   expect(JSON.parse(settings.urgency_colors)[0]).toBe('');
   await page.goto('/');
   await expect(page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.num .hl-level')).toHaveCount(2); // 7 (traffic) and 4 (importance ramp)
+});
+
+// ---- default status for new items ----
+// A task is added under the seeded "Maintenance" parent and deleted again so
+// the item counts other specs rely on are unchanged.
+
+const newRow = (page) => page.locator('.row[data-editing="new"]:not(.description)');
+
+/** Add a task titled `title` under Maintenance and return it from the API. */
+async function addTask(page, request, title) {
+  await page.locator('.row.parent', { hasText: 'Maintenance' }).locator('button[title="Add task"]').click();
+  await expect(newRow(page)).toBeVisible();
+  const draftStatus = await newRow(page).locator('select[name=status]').inputValue();
+  await newRow(page).locator('input[name=title]').fill(title);
+  await newRow(page).locator('input[name=title]').press('Enter');
+  await expect(newRow(page)).toHaveCount(0);
+  const it = (await (await request.get('/api/items')).json()).find((i) => i.title === title);
+  expect(it).toBeTruthy();
+  await request.delete(`/api/items/${it.id}`);
+  return { ...it, draftStatus };
+}
+
+test('default status for new items is a setting that saves and reloads', async ({ page, request }) => {
+  await page.goto('/#/settings');
+  const sel = page.locator('#setting-default-status');
+  await expect(sel).toHaveValue('todo');
+  await expect(sel.locator('option')).toHaveCount(6);
+  await expect(sel.locator('option[value=in-progress]')).toHaveText('In-Progress');
+  await sel.selectOption('backlog');
+  await expect(sel).toHaveValue('backlog');
+  await expect.poll(async () => (await (await request.get('/api/settings')).json()).default_status).toBe('backlog');
+  await page.reload();
+  await expect(page.locator('#setting-default-status')).toHaveValue('backlog');
+});
+
+test('a new task takes the default status when no status filter is on', async ({ page, request }) => {
+  await request.patch('/api/settings', { data: { default_status: 'backlog' } });
+  await page.goto('/#/all');
+  const it = await addTask(page, request, 'E2E Default Backlog');
+  expect(it.draftStatus).toBe('backlog'); // the draft row preselects it
+  expect(it.status).toBe('backlog');
+});
+
+test('a default the filters do not show falls back to a status they do', async ({ page, request }) => {
+  await request.patch('/api/settings', { data: { default_status: 'backlog' } });
+  await page.goto('/#/active'); // To-Do and In-Progress: Backlog would vanish, so To-Do wins
+  const it = await addTask(page, request, 'E2E Default Under Active');
+  expect(it.draftStatus).toBe('todo');
+  expect(it.status).toBe('todo');
+});
+
+test('a default the filters show is used under a template', async ({ page, request }) => {
+  await request.patch('/api/settings', { data: { default_status: 'in-progress' } });
+  await page.goto('/#/active');
+  const it = await addTask(page, request, 'E2E Default In-Progress');
+  expect(it.draftStatus).toBe('in-progress');
+  expect(it.status).toBe('in-progress');
 });

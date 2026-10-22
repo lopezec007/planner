@@ -11,6 +11,7 @@ import io.github.lopezec007.planner.data.db.AttachmentEntity
 import io.github.lopezec007.planner.data.db.ItemEntity
 import io.github.lopezec007.planner.data.db.PendingOpEntity
 import io.github.lopezec007.planner.data.db.PlannerDatabase
+import io.github.lopezec007.planner.data.db.ScratchEntity
 import io.github.lopezec007.planner.data.db.SettingEntity
 import io.github.lopezec007.planner.data.db.UserEntity
 import io.github.lopezec007.planner.data.db.decodeIds
@@ -20,6 +21,7 @@ import io.github.lopezec007.planner.data.model.AppSettings
 import io.github.lopezec007.planner.data.model.Attachment
 import io.github.lopezec007.planner.data.model.Item
 import io.github.lopezec007.planner.data.model.ItemType
+import io.github.lopezec007.planner.data.model.Scratch
 import io.github.lopezec007.planner.data.model.Status
 import io.github.lopezec007.planner.data.model.StatusChange
 import io.github.lopezec007.planner.data.model.User
@@ -351,4 +353,39 @@ class PlannerRepository(
 
     /** Model for a single user, for screens that only need one. */
     suspend fun user(id: Long): User? = db.users().get(id)?.toModel()
+
+    // ---------------------------------------------------------------- scratch pads
+
+    /** The cached text of a pad; null until it has been fetched or edited once. */
+    fun scratch(scope: String): Flow<Scratch?> =
+        db.scratch().observe(scope).map { e -> e?.let { Scratch(it.scope, it.text, it.updatedAt) } }
+
+    /** Whether an edit of the pad is still waiting to reach the server. */
+    fun scratchQueued(scope: String): Flow<Boolean> = db.pendingOps().observeAll().map { ops ->
+        ops.any { e -> (runCatching { Op.decode(e.payload) }.getOrNull() as? Op.PutScratch)?.scope == scope }
+    }
+
+    /**
+     * Saves a pad's text: the cache takes it at once, and the queue holds
+     * one put-scratch op per scope, whose text a later save replaces, so
+     * typing does not grow the queue.
+     */
+    suspend fun saveScratch(scope: String, text: String) {
+        db.withTransaction {
+            val cur = db.scratch().get(scope)
+            db.scratch().upsert(ScratchEntity(scope, text, cur?.updatedAt ?: ""))
+            val queued = db.pendingOps().all().firstOrNull { e ->
+                (runCatching { Op.decode(e.payload) }.getOrNull() as? Op.PutScratch)?.scope == scope
+            }
+            if (queued != null) {
+                db.pendingOps().update(queued.copy(payload = Op.encode(Op.PutScratch(scope, text)), attempts = 0, lastError = null))
+            } else {
+                enqueue(Op.PutScratch(scope, text))
+            }
+        }
+        after()
+    }
+
+    /** Fetches a pad from the server into the cache (kept as is while an edit is queued); the error, or null. */
+    suspend fun refreshScratch(scope: String): Exception? = sync.refreshScratch(scope)
 }

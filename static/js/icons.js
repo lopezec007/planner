@@ -1,7 +1,8 @@
-// Inline SVG icons for the toolbar and the row action buttons (16×16, drawn
-// with the current text colour so they follow the theme). icon(name) returns
-// a fresh <svg>. Action buttons use icons rather than text glyphs so they
-// centre the same way in every font and at every screen density.
+// Inline SVG icons for the toolbar, the row action buttons and the
+// Ongoing/Project key chips (16×16, drawn with the current text colour so
+// they follow the theme). icon(name) returns a fresh <svg>. Action buttons
+// use icons rather than text glyphs so they centre the same way in every
+// font and at every screen density.
 //
 // Buttons that show only an icon must carry an aria-label and a title: the
 // label names the control for assistive technology and the title is the
@@ -43,6 +44,11 @@ const PATHS = {
   trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5M6.8 7v4M9.2 7v4"/>',
   check: '<path d="M3 8.5l3.2 3.2L13 5"/>',
   cross: '<path d="M4 4l8 8M12 4l-8 8"/>',
+  // Type glyphs in the Ongoing/Project key chips (colors.js typeChip, drawn
+  // at 12px so the strokes are heavier): a loop for an Ongoing, a flag for
+  // a Project.
+  ongoing: '<path d="M8 8C6.6 6 5.6 4.9 4.1 4.9a3.1 3.1 0 0 0 0 6.2C5.6 11.1 6.6 10 8 8c1.4-2 2.4-3.1 3.9-3.1a3.1 3.1 0 0 1 0 6.2C10.4 11.1 9.4 10 8 8z" stroke-width="2"/>',
+  project: '<path d="M3.5 14.5V2" stroke-width="2"/><path d="M3.5 2.5h9l-2.4 3.3 2.4 3.3h-9z" fill="currentColor" stroke="none"/>',
   grip: '<circle cx="5.5" cy="3.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="10.5" cy="3.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="5.5" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="10.5" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="5.5" cy="12.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="10.5" cy="12.5" r="1.3" fill="currentColor" stroke="none"/>',
 };
 

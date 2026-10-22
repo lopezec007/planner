@@ -56,6 +56,14 @@ sealed class Op {
     @Serializable @SerialName("delete_user")
     data class DeleteUser(val id: Long) : Op()
 
+    /**
+     * The full text of one scratch pad (last writer wins on the server).
+     * At most one is queued per scope: a later edit replaces its text
+     * instead of adding an entry (PlannerRepository.saveScratch).
+     */
+    @Serializable @SerialName("put_scratch")
+    data class PutScratch(val scope: String, val text: String) : Op()
+
     /** A short description for the sync log. */
     fun describe(): String = when (this) {
         is CreateItem -> "create item ${body["title"]?.let { (it as? JsonPrimitive)?.content } ?: ""}"
@@ -72,6 +80,7 @@ sealed class Op {
         is CreateUser -> "create user"
         is PatchUser -> "edit user $id"
         is DeleteUser -> "delete user $id"
+        is PutScratch -> "scratch pad $scope"
     }
 
     /** Whether this op refers to the item [id] (and so must wait for its create). */

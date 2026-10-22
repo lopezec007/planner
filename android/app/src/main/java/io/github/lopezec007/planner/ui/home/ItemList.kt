@@ -1,16 +1,20 @@
-// The list view: parents as section rows with their tasks beneath (Nested),
-// or tasks only with the parent named on each row (Flat). Rows carry the
-// same highlights as the web table: status, assignee, end date, urgency and
-// importance; blocked rows are dimmed; closed rows carry no highlighting.
-// Pull down to sync. Swipe is deliberately absent (no edit mode here: tap
-// a row to open it).
+// The list view: in Nested mode each parent with its tasks is one rounded,
+// outlined card (the parent row is its tinted header, a collapsed parent a
+// single-row card), like the web table's groups; Flat is a plain list of
+// tasks with the parent named on each row and a heavier rule per group.
+// Rows carry the same highlights as the web table: status, assignee, end
+// date, urgency and importance; blocked rows are dimmed; closed rows carry
+// no highlighting. Pull down to sync. Swipe is deliberately absent (no edit
+// mode here: tap a row to open it).
 package io.github.lopezec007.planner.ui.home
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -68,6 +73,9 @@ private sealed class ListRow {
     data class Task(val item: Item, val parent: Item?, val flat: Boolean, val firstOfParent: Boolean) : ListRow()
 }
 
+/** One card of the nested list: the parent row and, unless collapsed, its task rows. */
+private data class ListCard(val parent: ListRow.Parent, val tasks: List<ListRow.Task>)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ItemList(
@@ -93,47 +101,66 @@ fun ItemList(
         }
     }
 
-    val rows = remember(groups, flat, collapsed) { buildRows(groups, flat, collapsed) }
-
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true }, modifier = modifier) {
-        if (rows.isEmpty()) {
+        if (groups.isEmpty() || (flat && groups.all { it.tasks.isEmpty() })) {
             EmptyState(snapshot, sync.phase)
-        } else {
+        } else if (flat) {
+            val rows = remember(groups) { buildFlatRows(groups) }
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(rows, key = { rowKey(it) }) { row ->
-                    when (row) {
-                        is ListRow.Parent -> ParentRow(
-                            row, snapshot,
-                            onOpen = { onOpen(row.item.id) },
-                            onToggle = { vm.toggleCollapsed(row.item.id) },
-                            onAddTask = { onAddTask(row.item.id) },
-                        )
-                        is ListRow.Task -> TaskRow(row, snapshot, onOpen = { onOpen(row.item.id) })
-                    }
-                }
+                items(rows, key = { "t${it.item.id}" }) { row -> TaskRow(row, snapshot, onOpen = { onOpen(row.item.id) }) }
                 item { Spacer(Modifier.height(88.dp)) } // room above the FAB
+            }
+        } else {
+            // One LazyColumn item per card: a group is small (one parent's
+            // tasks), and the card's outline is then a single shape.
+            val cards = remember(groups, collapsed) { buildCards(groups, collapsed) }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(cards, key = { "p${it.parent.item.id}" }) { card ->
+                    GroupCard(
+                        card, snapshot,
+                        onOpen = onOpen,
+                        onToggle = { vm.toggleCollapsed(card.parent.item.id) },
+                        onAddTask = { onAddTask(card.parent.item.id) },
+                    )
+                }
+                item { Spacer(Modifier.height(80.dp)) } // room above the FAB
             }
         }
     }
 }
 
-private fun rowKey(r: ListRow) = when (r) {
-    is ListRow.Parent -> "p${r.item.id}"
-    is ListRow.Task -> "t${r.item.id}"
+private fun buildFlatRows(groups: List<Group>): List<ListRow.Task> {
+    val out = ArrayList<ListRow.Task>()
+    for (g in groups) g.tasks.forEachIndexed { i, t -> out.add(ListRow.Task(t, g.parent, flat = true, firstOfParent = i == 0)) }
+    return out
 }
 
-private fun buildRows(groups: List<Group>, flat: Boolean, collapsed: Set<Long>): List<ListRow> {
-    val out = ArrayList<ListRow>()
-    for (g in groups) {
-        if (flat) {
-            g.tasks.forEachIndexed { i, t -> out.add(ListRow.Task(t, g.parent, flat = true, firstOfParent = i == 0)) }
-        } else {
-            val isCollapsed = g.parent.id in collapsed
-            out.add(ListRow.Parent(g.parent, g.tasks.size, isCollapsed))
-            if (!isCollapsed) g.tasks.forEachIndexed { i, t -> out.add(ListRow.Task(t, g.parent, flat = false, firstOfParent = i == 0)) }
+private fun buildCards(groups: List<Group>, collapsed: Set<Long>): List<ListCard> = groups.map { g ->
+    val isCollapsed = g.parent.id in collapsed
+    ListCard(
+        parent = ListRow.Parent(g.parent, g.tasks.size, isCollapsed),
+        tasks = if (isCollapsed) emptyList() else g.tasks.mapIndexed { i, t -> ListRow.Task(t, g.parent, flat = false, firstOfParent = i == 0) },
+    )
+}
+
+/** A parent and its tasks in one rounded, outlined card; the shape clips the header's tint. */
+@Composable
+private fun GroupCard(card: ListCard, snapshot: Snapshot, onOpen: (Long) -> Unit, onToggle: () -> Unit, onAddTask: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            ParentRow(card.parent, snapshot, onOpen = { onOpen(card.parent.item.id) }, onToggle = onToggle, onAddTask = onAddTask)
+            for (t in card.tasks) TaskRow(t, snapshot, onOpen = { onOpen(t.item.id) })
         }
     }
-    return out
 }
 
 @Composable
@@ -154,7 +181,6 @@ private fun ParentRow(row: ListRow.Parent, snapshot: Snapshot, onOpen: () -> Uni
     val palette = LocalPalette.current
     val tint = hexColor(snapshot.colors.ownColor(item), MaterialTheme.colorScheme.primary)
     val blocked = snapshot.isBlocked(item)
-    HorizontalDivider(thickness = 2.dp, color = palette.parentBorder)
     Row(
         modifier = Modifier
             .fillMaxWidth()

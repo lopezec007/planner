@@ -1,6 +1,7 @@
 // The form for a new Ongoing, Project or task (README "Using it" step 2):
-// title required, the rest optional with the web UI's defaults (status from
-// the filters in effect, owner = the account, urgency and importance 5).
+// title required, the rest optional with the web UI's defaults (status: the
+// `default_status` setting when the filters in effect admit it, owner = the
+// account, urgency and importance 5).
 // Create writes the item to Room with a temporary id and replaces this
 // screen with its detail; the key shows "…" until the server answers.
 package io.github.lopezec007.planner.ui.detail
@@ -72,8 +73,12 @@ fun NewItemScreen(vm: PlannerViewModel, nav: Nav, type: ItemType, parentId: Long
 
     var title by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
-    // Defaults as the web UI's new row: the status the filters imply, the account as owner.
-    var status by remember { mutableStateOf(prefs?.criteria?.newStatus() ?: Status.TODO) }
+    // Defaults as the web UI's new row: the planner's default status when the
+    // filters admit it (else one they show), the account as owner. The
+    // default is read live until the user picks a status, since the settings
+    // may still be loading when the screen opens.
+    var pickedStatus by remember { mutableStateOf<Status?>(null) }
+    val status = pickedStatus ?: (prefs?.criteria?.newStatus(snap.settings.defaultStatus) ?: Status.TODO)
     var ownerId by remember { mutableStateOf(prefs?.accountId) }
     var assigneeId by remember { mutableStateOf<Long?>(null) }
     var startDate by remember { mutableStateOf<LocalDate?>(null) }
@@ -231,7 +236,7 @@ fun NewItemScreen(vm: PlannerViewModel, nav: Nav, type: ItemType, parentId: Long
     }
 
     if (pickStatus) {
-        StatusPickerDialog(selected = status, onPick = { status = it }, onDismiss = { pickStatus = false })
+        StatusPickerDialog(selected = status, onPick = { pickedStatus = it }, onDismiss = { pickStatus = false })
     }
     if (pickOwner) {
         UserPickerDialog(

@@ -17,6 +17,7 @@ import io.github.lopezec007.planner.data.sync.SyncState
 import io.github.lopezec007.planner.prefs.AppPrefs
 import io.github.lopezec007.planner.prefs.Prefs
 import io.github.lopezec007.planner.prefs.View
+import io.github.lopezec007.planner.ui.scratch.ScratchEditor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -68,6 +69,18 @@ class PlannerViewModel(val graph: Graph) : ViewModel() {
     fun setAccount(id: Long?) = viewModelScope.launch { prefsStore.setAccount(id) }
     fun setNotify(enabled: Boolean, hour: Int, minute: Int) = viewModelScope.launch { prefsStore.setNotify(enabled, hour, minute) }
     fun setNotifyDays(days: Int) = viewModelScope.launch { prefsStore.setNotifyDays(days) }
+    fun setScratchWrap(wrap: Boolean) = viewModelScope.launch { prefsStore.setScratchWrap(wrap) }
+
+    // ---- scratch pads
+
+    /** One editor per pad, kept here so a save still lands after the screen is left. */
+    private val scratchEditors = HashMap<String, ScratchEditor>()
+
+    fun scratchEditor(scope: String): ScratchEditor =
+        scratchEditors.getOrPut(scope) { ScratchEditor(scope, repo, viewModelScope) }
+
+    /** Saves whatever is typed but not yet saved (on leaving the Scratch screen). */
+    fun flushScratch() = viewModelScope.launch { for (e in scratchEditors.values) e.flush() }
 
     /** Points the app at a server (and account). A changed address drops the local copy and the queue. */
     fun setServer(url: String, accountId: Long?) = viewModelScope.launch {

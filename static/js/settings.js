@@ -5,7 +5,7 @@
 // the network sees the same values.
 
 import { api } from './api.js';
-import { state } from './state.js';
+import { state, STATUSES, STATUS_LABEL } from './state.js';
 import { renderUsers } from './users.js';
 import { el, toast, contrastText } from './util.js';
 
@@ -91,6 +91,18 @@ function weekStartRow(ctx) {
     el('span', { class: 'settings-help' }, 'Used for the week boundaries in the Timeline.'));
 }
 
+/** Status given to new projects and tasks (when the filters in effect admit it). */
+function defaultStatusRow(ctx) {
+  const current = STATUSES.includes(state.settings.default_status) ? state.settings.default_status : 'todo';
+  const sel = el('select', { id: 'setting-default-status', 'aria-label': 'Default status for new projects and tasks' });
+  for (const s of STATUSES) sel.append(el('option', { value: s, selected: s === current ? true : null }, STATUS_LABEL[s]));
+  sel.addEventListener('change', () => save({ default_status: sel.value }, ctx));
+  return el('div', { class: 'settings-row' },
+    el('label', { for: 'setting-default-status' }, 'Default status for new projects and tasks'),
+    sel,
+    el('span', { class: 'settings-help' }, 'Used when the current filters show it; otherwise a new row takes a status the filters show (Backlog under the Backlog template).'));
+}
+
 function colorRow(key, label, help, ctx) {
   const current = state.settings[key] || '';
   const isDefault = current === DEFAULT_COLORS[key];
@@ -132,7 +144,7 @@ export function renderSettings(main, ctx) {
   const usersBox = el('div', { id: 'settings-users' });
   main.replaceChildren(
     el('h1', {}, 'Settings'),
-    section('General', weekStartRow(ctx)),
+    section('General', weekStartRow(ctx), defaultStatusRow(ctx)),
     section('Row colours',
       el('p', { class: 'settings-help' }, 'Rows are tinted with these colours in both light and dark themes.'),
       colorRow('color_ongoing', 'Ongoing rows', '', ctx),

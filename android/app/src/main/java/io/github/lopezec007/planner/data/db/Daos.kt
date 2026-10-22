@@ -155,9 +155,34 @@ interface StatusHistoryDao {
 }
 
 @Dao
+interface ScratchDao {
+    @Query("SELECT * FROM scratch WHERE scope = :scope")
+    fun observe(scope: String): Flow<ScratchEntity?>
+
+    @Query("SELECT * FROM scratch WHERE scope = :scope")
+    suspend fun get(scope: String): ScratchEntity?
+
+    /** Every pad cached so far (the ones a sync refreshes). */
+    @Query("SELECT scope FROM scratch")
+    suspend fun scopes(): List<String>
+
+    @Upsert
+    suspend fun upsert(s: ScratchEntity)
+
+    @Query("DELETE FROM scratch")
+    suspend fun deleteAll()
+}
+
+@Dao
 interface PendingOpDao {
     @Query("SELECT * FROM pending_ops ORDER BY id")
     suspend fun all(): List<PendingOpEntity>
+
+    @Query("SELECT * FROM pending_ops ORDER BY id")
+    fun observeAll(): Flow<List<PendingOpEntity>>
+
+    @Query("SELECT * FROM pending_ops WHERE id = :id")
+    suspend fun get(id: Long): PendingOpEntity?
 
     @Query("SELECT COUNT(*) FROM pending_ops")
     fun observeCount(): Flow<Int>

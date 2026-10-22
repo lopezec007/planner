@@ -114,12 +114,17 @@ function togglePreset(name) {
   applyPresets(PRESET_ORDER.filter((k) => on.has(k)));
 }
 
-/** Default status for a new project/task under the current filters. */
+/** Status for a new project/task: the configured default (the default_status
+ *  setting) whenever the status filter in effect admits it, so the new row
+ *  stays visible; otherwise the single filtered status, then To-Do when it is
+ *  admitted, then the first admitted status. */
 export function newStatus() {
   const st = criteria.statuses;
+  const def = STATUSES.includes(state.settings.default_status) ? state.settings.default_status : 'todo';
+  if (!st.size || st.has(def)) return def;
   if (st.size === 1) return [...st][0];
-  if (st.has('todo') || !st.size) return 'todo';
-  return STATUSES.find((s) => st.has(s)) || 'todo';
+  if (st.has('todo')) return 'todo';
+  return STATUSES.find((s) => st.has(s)) || def;
 }
 
 /** Whether the type filter lets a newly created item of this type show. */

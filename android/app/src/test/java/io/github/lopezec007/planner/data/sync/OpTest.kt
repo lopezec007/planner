@@ -21,6 +21,7 @@ class OpTest {
             Op.DeleteAttachment(4), Op.RestoreAttachment(4),
             Op.PatchSettings(mapOf("week_start" to "1")),
             Op.CreateUser(-2, buildJsonObject { put("name", "Amy") }), Op.PatchUser(2, buildJsonObject { put("color", "#000000") }), Op.DeleteUser(2),
+            Op.PutScratch("global", "line one\n\tline \"two\" ✓"), Op.PutScratch("user:7", ""),
         )
         for (op in ops) assertEquals(op, Op.decode(Op.encode(op)))
         assertTrue(Op.encode(ops[0]).contains("\"kind\":\"create_item\""))
@@ -60,5 +61,14 @@ class OpTest {
         assertTrue(Op.Reorder(listOf(1, 5)).mentionsItem(5))
         assertFalse(Op.PatchSettings(emptyMap()).mentionsItem(5))
         assertFalse(Op.DeleteItem(6).mentionsItem(5))
+        assertFalse(Op.PutScratch("global", "5").mentionsItem(5))
+    }
+
+    @Test
+    fun scratchOpsAreUntouchedByRemaps() {
+        val op = Op.PutScratch("user:-2", "x")
+        assertSame(op, op.remapItem(-2, 9))
+        assertSame(op, op.remapUser(-2, 9))  // the scope is fixed when the op is made; users created offline have no pad yet
+        assertEquals("scratch pad user:-2", op.describe())
     }
 }

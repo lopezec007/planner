@@ -67,5 +67,12 @@ data class VersionDto(
     val build: String = "",
 )
 
+/** A scratch pad (GET/PUT /api/scratch and /api/users/{id}/scratch). */
+@Serializable
+data class ScratchDto(
+    val text: String = "",
+    val updated_at: String = "",
+)
+
 @Serializable
 data class ErrorDto(val error: String = "")

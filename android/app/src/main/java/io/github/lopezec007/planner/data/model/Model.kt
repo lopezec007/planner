@@ -110,6 +110,8 @@ data class AppSettings(val values: Map<String, String>) {
     val colorProject: String get() = values["color_project"] ?: "#5b6cff"
     val colorTask: String get() = values["color_task"] ?: ""
     val colorUnassigned: String get() = values["color_unassigned"] ?: "#9aa3ad"
+    /** The status a new project or task starts with when the filters allow it (server default "todo"). */
+    val defaultStatus: Status get() = Status.fromWire(values["default_status"]) ?: Status.TODO
 
     /** The ramp for urgency or importance: index = value 0..10, "" = no colour. */
     fun ramp(field: String): List<String> = parseRamp(values["${field}_colors"])
@@ -133,3 +135,17 @@ data class AppSettings(val values: Map<String, String>) {
         }
     }
 }
+
+/**
+ * The scratch pads' scopes, named as the server's scratch table keys: the
+ * pad everyone shares and one per user. Also the Room key of the cache.
+ */
+object ScratchScope {
+    const val GLOBAL = "global"
+    fun user(id: Long) = "user:$id"
+    /** The user id of a per-user scope, or null for the shared one. */
+    fun userId(scope: String): Long? = scope.removePrefix("user:").takeIf { it != scope }?.toLongOrNull()
+}
+
+/** One scratch pad's text; [updatedAt] is the server's stamp, "" until it has been written there. */
+data class Scratch(val scope: String, val text: String, val updatedAt: String)

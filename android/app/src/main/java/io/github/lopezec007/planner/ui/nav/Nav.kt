@@ -13,6 +13,8 @@ sealed class Screen {
     data class New(val type: ItemType, val parentId: Long?) : Screen()
     object Settings : Screen()
     object Setup : Screen()
+    /** The scratch pads (shared and the account's own). */
+    object Scratch : Screen()
 }
 
 class Nav(start: Screen) {

@@ -146,17 +146,20 @@ func jsonNum(i int64) string {
 func TestSettingsEndpoint(t *testing.T) {
 	srv := setup(t)
 	var st map[string]string
-	if c := call(t, srv, "GET", "/api/settings", nil, &st); c != 200 || st["week_start"] != "6" {
+	if c := call(t, srv, "GET", "/api/settings", nil, &st); c != 200 || st["week_start"] != "6" || st["default_status"] != "todo" {
 		t.Fatalf("get: %d %v", c, st)
 	}
-	if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"week_start": "0", "color_ongoing": "#abcdef"}, &st); c != 200 {
+	if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"week_start": "0", "color_ongoing": "#abcdef", "default_status": "backlog"}, &st); c != 200 {
 		t.Fatalf("patch: %d", c)
 	}
-	if st["week_start"] != "0" || st["color_ongoing"] != "#abcdef" {
+	if st["week_start"] != "0" || st["color_ongoing"] != "#abcdef" || st["default_status"] != "backlog" {
 		t.Fatalf("patched: %v", st)
 	}
 	if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"week_start": "9"}, nil); c != 400 {
 		t.Fatalf("expected 400, got %d", c)
+	}
+	if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"default_status": "open"}, nil); c != 400 {
+		t.Fatalf("expected 400 for a bad default_status, got %d", c)
 	}
 }
 

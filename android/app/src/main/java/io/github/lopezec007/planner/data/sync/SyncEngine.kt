@@ -11,9 +11,11 @@ import io.github.lopezec007.planner.data.api.ApiException
 import io.github.lopezec007.planner.data.api.PlannerApi
 import io.github.lopezec007.planner.data.db.PendingOpEntity
 import io.github.lopezec007.planner.data.db.PlannerDatabase
+import io.github.lopezec007.planner.data.db.ScratchEntity
 import io.github.lopezec007.planner.data.db.SettingEntity
 import io.github.lopezec007.planner.data.db.SyncLogEntity
 import io.github.lopezec007.planner.data.db.toEntity
+import io.github.lopezec007.planner.data.model.ScratchScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -114,7 +116,11 @@ class SyncEngine(
             }
             try {
                 execute(api, op)
-                db.pendingOps().delete(entity)
+                // A scratch pad edit made while its op was in flight replaced
+                // the payload (saveScratch collapses per scope); that newer
+                // text must still go, so only an unchanged entry is removed.
+                val fresh = db.pendingOps().get(entity.id)
+                if (fresh == null || fresh.payload == entity.payload) db.pendingOps().delete(entity)
             } catch (e: ApiException) {
                 if (e.isClientError) {
                     drop(entity, op.describe(), e.message ?: "HTTP ${e.code}")
@@ -194,6 +200,14 @@ class SyncEngine(
             }
             is Op.PatchUser -> api.updateUser(op.id, op.body)
             is Op.DeleteUser -> api.deleteUser(op.id)
+            is Op.PutScratch -> {
+                val dto = api.putScratch(op.scope, op.text)
+                // Take the server's stamp unless the pad was edited again meanwhile.
+                db.withTransaction {
+                    val cur = db.scratch().get(op.scope)
+                    if (cur == null || cur.text == op.text) db.scratch().upsert(ScratchEntity(op.scope, dto.text, dto.updated_at))
+                }
+            }
         }
     }
 
@@ -225,7 +239,40 @@ class SyncEngine(
             db.settings().deleteAll()
             db.settings().insertAll(settings.map { (k, v) -> SettingEntity(k, v) })
         }
+        // The pads shown so far (the shared one always). The queue is empty
+        // here, so nothing local is newer; a pad in the middle of being typed
+        // is protected by the screen, which keeps unsaved text (ScratchEditor).
+        for (scope in (db.scratch().scopes() + ScratchScope.GLOBAL).distinct()) {
+            val dto = try {
+                api.getScratch(scope)
+            } catch (e: ApiException) {
+                continue  // an older server without the pads, or a user gone since: not worth failing the pull
+            }
+            db.scratch().upsert(ScratchEntity(scope, dto.text, dto.updated_at))
+        }
     }
+
+    /**
+     * Refreshes one scratch pad from the server into the cache, unless an
+     * edit of it is still queued (the local text is then the newer one).
+     * Errors are returned, not thrown.
+     */
+    suspend fun refreshScratch(scope: String): Exception? {
+        val api = apiProvider() ?: return IllegalStateException("not configured")
+        return try {
+            val dto = api.getScratch(scope)
+            db.withTransaction {
+                if (!scratchQueued(scope)) db.scratch().upsert(ScratchEntity(scope, dto.text, dto.updated_at))
+            }
+            null
+        } catch (e: Exception) {
+            e
+        }
+    }
+
+    /** Whether an edit of the pad [scope] is waiting in the queue. */
+    suspend fun scratchQueued(scope: String): Boolean =
+        db.pendingOps().all().any { e -> (runCatching { Op.decode(e.payload) }.getOrNull() as? Op.PutScratch)?.scope == scope }
 
     /** Refreshes one item's status history cache; errors are returned, not thrown. */
     suspend fun refreshHistory(itemId: Long): Exception? {
@@ -252,6 +299,7 @@ class SyncEngine(
             db.attachments().deleteSynced()
             db.settings().deleteAll()
             db.history().deleteAll()
+            db.scratch().deleteAll()
         }
         _state.value = SyncState()
     }

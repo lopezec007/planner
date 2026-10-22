@@ -23,6 +23,7 @@ import io.github.lopezec007.planner.ui.detail.NewItemScreen
 import io.github.lopezec007.planner.ui.home.HomeScreen
 import io.github.lopezec007.planner.ui.nav.Nav
 import io.github.lopezec007.planner.ui.nav.Screen
+import io.github.lopezec007.planner.ui.scratch.ScratchScreen
 import io.github.lopezec007.planner.ui.settings.SettingsScreen
 import io.github.lopezec007.planner.ui.setup.SetupScreen
 import io.github.lopezec007.planner.ui.theme.PlannerTheme
@@ -83,6 +84,7 @@ class MainActivity : ComponentActivity() {
             is Screen.Detail -> DetailScreen(vm, nav, s.itemId)
             is Screen.New -> NewItemScreen(vm, nav, s.type, s.parentId)
             Screen.Settings -> SettingsScreen(vm, nav)
+            Screen.Scratch -> ScratchScreen(vm, nav)
         }
     }
 }

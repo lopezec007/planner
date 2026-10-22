@@ -1,6 +1,7 @@
 // The queue replay against a fake server: temporary ids are remapped, a
 // 4xx drops one op and the rest still go, a network failure keeps the
-// queue, and a pull replaces the local copy. Runs on Robolectric so Room
+// queue, a pull replaces the local copy, and scratch pad edits collapse to
+// one queued op per pad. Runs on Robolectric so Room
 // can be used in-memory; a plain Application keeps the app's own Graph out.
 package io.github.lopezec007.planner.data.sync
 
@@ -13,6 +14,7 @@ import io.github.lopezec007.planner.data.api.PlannerApi
 import io.github.lopezec007.planner.data.db.ItemEntity
 import io.github.lopezec007.planner.data.db.PlannerDatabase
 import io.github.lopezec007.planner.data.model.ItemType
+import io.github.lopezec007.planner.data.model.ScratchScope
 import io.github.lopezec007.planner.data.model.Status
 import io.github.lopezec007.planner.data.repo.ItemPatch
 import io.github.lopezec007.planner.data.repo.PlannerRepository
@@ -23,6 +25,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -36,6 +42,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.IOException
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], application = Application::class)
@@ -50,6 +57,13 @@ class SyncEngineTest {
     /** A tiny fake planner: items are stored by id and title; new ids start at 100. */
     private val items = LinkedHashMap<Long, String>()
     private var nextId = 100L
+
+    /** The scratch pads by scope ("global", "user:1"); each PUT gets a new stamp. */
+    private val scratch = HashMap<String, String>()
+    private var scratchStamp = 0
+
+    private fun scratchJson(scope: String) =
+        """{"text":${Json.encodeToString(String.serializer(), scratch[scope] ?: "")},"updated_at":"${if (scope in scratch) "2026-10-21T10:00:0${scratchStamp}Z" else ""}"}"""
     private val requests = ArrayList<RecordedRequest>()
 
     private fun itemJson(id: Long, title: String) =
@@ -100,6 +114,15 @@ class SyncEngineTest {
                         json.setBody(itemJson(id, items[id]!!))
                     }
                     path == "/api/dependencies" -> MockResponse().setResponseCode(204)
+                    path == "/api/scratch" || Regex("/api/users/\\d+/scratch").matches(path) -> {
+                        val scope = if (path == "/api/scratch") "global" else "user:" + path.removePrefix("/api/users/").removeSuffix("/scratch")
+                        if (request.method == "PUT") {
+                            val text = Json.parseToJsonElement(request.body.readUtf8()).jsonObject["text"]!!.jsonPrimitive.content
+                            scratch[scope] = text
+                            scratchStamp++
+                        }
+                        json.setBody(scratchJson(scope))
+                    }
                     else -> json.setResponseCode(404).setBody("""{"error":"not found"}""")
                 }
             }
@@ -171,6 +194,60 @@ class SyncEngineTest {
         assertEquals(1, db.pendingOps().count())
         assertEquals(SyncPhase.OFFLINE, engine.state.value.phase)
         assertEquals("x", db.items().get(1)!!.title) // the optimistic edit stays
+    }
+
+    @Test
+    fun scratchEditsCollapseIntoOneOpPerPadAndPushTheLastText() = runBlocking {
+        api = null // typing offline
+        repo.saveScratch(ScratchScope.GLOBAL, "a")
+        repo.saveScratch(ScratchScope.GLOBAL, "ab")
+        repo.saveScratch(ScratchScope.user(1), "mine")
+        repo.saveScratch(ScratchScope.GLOBAL, "abc")
+        assertEquals(2, db.pendingOps().count())
+        assertEquals("abc", db.scratch().get("global")!!.text)
+        assertEquals("", db.scratch().get("global")!!.updatedAt) // no server stamp yet
+        assertTrue(repo.scratchQueued("global").first())
+
+        connect()
+        assertEquals(SyncResult.Done, engine.sync())
+        assertEquals(0, db.pendingOps().count())
+        val puts = requests.filter { it.method == "PUT" && it.path!!.endsWith("scratch") }
+        assertEquals(listOf("/api/scratch", "/api/users/1/scratch"), puts.map { it.path })
+        assertEquals("abc", scratch["global"])
+        assertEquals("mine", scratch["user:1"])
+        assertTrue(db.scratch().get("global")!!.updatedAt.isNotBlank())
+        assertEquals(false, repo.scratchQueued("global").first())
+    }
+
+    @Test
+    fun refreshKeepsAQueuedEditAndThePullTakesTheServerText() = runBlocking {
+        scratch["global"] = "from server"
+        api = null
+        repo.saveScratch("global", "typed offline")
+        connect()
+        assertNull(repo.refreshScratch("global")) // answered, but the queued edit is the newer text
+        assertEquals("typed offline", db.scratch().get("global")!!.text)
+
+        assertEquals(SyncResult.Done, engine.sync())
+        assertEquals("typed offline", scratch["global"])
+        // Written elsewhere since: the next pull brings it into the cache.
+        scratch["global"] = "edited elsewhere"
+        assertEquals(SyncResult.Done, engine.sync())
+        assertEquals("edited elsewhere", db.scratch().get("global")!!.text)
+    }
+
+    @Test
+    fun refreshScratchFillsTheCacheAndReportsBeingOffline() = runBlocking {
+        scratch["user:1"] = "notes"
+        assertNull(repo.refreshScratch("user:1"))
+        assertEquals("notes", db.scratch().get("user:1")!!.text)
+        // The pull refreshes every pad shown so far, and the shared one always.
+        assertEquals(SyncResult.Done, engine.sync())
+        assertEquals(setOf("global", "user:1"), db.scratch().scopes().toSet())
+
+        server.shutdown()
+        assertTrue(repo.refreshScratch("user:1") is IOException)
+        assertEquals("notes", db.scratch().get("user:1")!!.text)
     }
 
     @Test

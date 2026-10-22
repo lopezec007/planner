@@ -69,10 +69,16 @@ data class Criteria(
             statuses == p.statuses && recentDays == p.recentDays && types.isEmpty() && hideEmptyParents == p.hideEmptyParents
         }
 
-    /** Default status for a new project/task under these filters (search.js newStatus). */
-    fun newStatus(): Status {
+    /**
+     * Status for a new project/task under these filters (search.js newStatus):
+     * the planner's [default] (the `default_status` setting) when the status
+     * filter is empty or admits it, else a status the filter does show so the
+     * new row is not hidden at once.
+     */
+    fun newStatus(default: Status = Status.TODO): Status {
+        if (statuses.isEmpty() || default in statuses) return default
         if (statuses.size == 1) return statuses.first()
-        if (Status.TODO in statuses || statuses.isEmpty()) return Status.TODO
+        if (Status.TODO in statuses) return Status.TODO
         return Status.entries.first { it in statuses }
     }
 

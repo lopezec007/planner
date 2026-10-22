@@ -383,7 +383,7 @@ func TestSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st["week_start"] != "6" || st["color_task"] != "" {
+	if st["week_start"] != "6" || st["color_task"] != "" || st["default_status"] != StatusTodo {
 		t.Fatalf("defaults: %v", st)
 	}
 	st, err = s.UpdateSettings(map[string]string{"week_start": "1", "color_task": "#123456"})
@@ -393,7 +393,7 @@ func TestSettings(t *testing.T) {
 	if st["week_start"] != "1" || st["color_task"] != "#123456" || st["color_ongoing"] != SettingDefaults["color_ongoing"] {
 		t.Fatalf("updated: %v", st)
 	}
-	for _, bad := range []map[string]string{{"week_start": "7"}, {"color_project": "blue"}, {"nope": "x"}, {"urgency_colors": `["#fff"]`}, {"importance_colors": `["x","","","","","","","","","",""]`}, {"date_alert_days": "x"}, {"hl_warn_color": ""}} {
+	for _, bad := range []map[string]string{{"week_start": "7"}, {"color_project": "blue"}, {"nope": "x"}, {"urgency_colors": `["#fff"]`}, {"importance_colors": `["x","","","","","","","","","",""]`}, {"date_alert_days": "x"}, {"hl_warn_color": ""}, {"default_status": "open"}, {"default_status": ""}, {"default_status": "Todo"}} {
 		var ve *ValidationError
 		if _, err := s.UpdateSettings(bad); !errors.As(err, &ve) {
 			t.Fatalf("%v: expected validation error, got %v", bad, err)
@@ -418,6 +418,13 @@ func TestSettings(t *testing.T) {
 	st, _ = s.UpdateSettings(map[string]string{"color_task": ""})
 	if st["color_task"] != "" {
 		t.Fatal("clear failed")
+	}
+	// Every status is an acceptable default for new items.
+	for _, want := range []string{StatusIdea, StatusBacklog, StatusTodo, StatusInProgress, StatusDone, StatusCancelled} {
+		st, err = s.UpdateSettings(map[string]string{"default_status": want})
+		if err != nil || st["default_status"] != want {
+			t.Fatalf("default_status %q: %v %v", want, st["default_status"], err)
+		}
 	}
 }
 

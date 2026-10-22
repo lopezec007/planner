@@ -1,4 +1,4 @@
-// Item tooltip: for a task, its Ongoing/Project (key and title, muted) above
+// Item tooltip: for a task, its Ongoing/Project (its key chip and title, muted) above
 // the key and title; then the urgency/importance/status/assignee/blocked
 // line and the rendered description. One shared element on the body, placed
 // beside an anchor element; used by the Matrix points and the dependency
@@ -7,6 +7,7 @@
 import { state, isClosed, isBlocked, openBlockers, STATUS_LABEL } from './state.js';
 import { renderMarkdown } from './markdown.js';
 import { el } from './util.js';
+import { typeChip } from './colors.js';
 
 const level = (n) => (n == null ? 5 : Math.max(0, Math.min(10, Number(n))));
 
@@ -43,7 +44,7 @@ export function itemTooltip() {
       const by = openBlockers(item).map((b) => b.key);
       meta.append(el('span', { class: 'tip-blocked' }, by.length ? `Blocked by ${by.join(', ')}` : 'Blocked'));
     }
-    tip.replaceChildren(...(parent ? [el('div', { class: 'tip-parent' }, el('span', { class: 'tip-parent-key' }, parent.key), ' ', parent.title)] : []), header, meta);
+    tip.replaceChildren(...(parent ? [el('div', { class: 'tip-parent' }, typeChip(parent, { keyClass: 'tip-parent-key' }), ' ', parent.title)] : []), header, meta);
     if (item.description && item.description.trim()) {
       const md = el('div', { class: 'md tip-desc' });
       md.innerHTML = renderMarkdown(item.description);

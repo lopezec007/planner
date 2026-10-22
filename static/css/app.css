@@ -157,10 +157,11 @@ main { padding: 12px 16px; flex: 1; }
 }
 .table:not(.flat) > .empty { border: 1px solid var(--border); border-radius: var(--radius); margin-top: 6px; }
 .table.title-only { --cols: 28px 92px minmax(200px, 1fr); }
-/* Flat: tasks only, with the parent's key and title as leading columns (and
-   no collapse column: there are no parent rows). */
-.table.flat { --cols: 72px 72px minmax(150px, 0.8fr) minmax(200px, 1.2fr) 110px 136px 136px 150px 150px 44px 44px 80px 124px; }
-.table.flat.title-only { --cols: 72px 72px minmax(140px, 0.8fr) minmax(180px, 1.2fr); }
+/* Flat: tasks only, with the parent's key (its type chip, hence the wider
+   first column) and title as leading columns (and no collapse column: there
+   are no parent rows). */
+.table.flat { --cols: 84px 72px minmax(150px, 0.8fr) minmax(200px, 1.2fr) 110px 136px 136px 150px 150px 44px 44px 80px 124px; }
+.table.flat.title-only { --cols: 84px 72px minmax(140px, 0.8fr) minmax(180px, 1.2fr); }
 .table.flat .row.task .key, .table.flat .row.task .title, .table.flat .row.kind-task > .title { padding-left: 8px; }
 .row .parent-ref { color: var(--fg-muted); font-weight: 400; }
 .row.header .parent-ref { font-weight: 600; }
@@ -230,6 +231,23 @@ main { padding: 12px 16px; flex: 1; }
 .row.expanded:not(.editing):has(+ .row.description:hover) { background: var(--bg-hover); }
 .row.task .key, .row.task .title, .row.kind-task > .title { padding-left: calc(8px + var(--indent)); }
 .row .key { font-family: var(--mono); color: var(--fg-muted); font-size: 12px; }
+/* Ongoing/Project keys are chips (colors.js typeChip): the type glyph and
+   the key on the type colour from Settings, whatever tint the row has, so
+   the kind of parent is read at a glance; an outline when Settings gives
+   the type no colour. The background and the contrasting text colour are
+   inline. The chip dims with a closed row; the blocked mask covers it. */
+.type-chip {
+  display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; max-width: 100%;
+  height: 20px; padding: 0 7px 0 5px; border-radius: 10px; vertical-align: middle;
+  font-family: var(--mono); font-size: 11.5px; font-weight: 600; line-height: 1; white-space: nowrap;
+}
+.type-chip.plain { background: transparent; color: var(--fg-muted); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.type-chip > .icon { width: 12px; height: 12px; flex: 0 0 auto; }
+.type-chip > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.row.closed .type-chip { opacity: 0.55; }
+/* A touch smaller in the parent line of the tooltips (tooltip.js, timeline.js). */
+.item-tip .type-chip, .timeline-tip-parent .type-chip { height: 17px; font-size: 10.5px; padding: 0 6px 0 4px; margin-right: 2px; }
+.item-tip .type-chip > .icon, .timeline-tip-parent .type-chip > .icon { width: 11px; height: 11px; }
 .row .title { white-space: nowrap; }
 .row .title .title-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .row .num { justify-content: center; font-variant-numeric: tabular-nums; }
@@ -377,9 +395,9 @@ main { padding: 12px 16px; flex: 1; }
 }
 .item-tip[hidden] { display: none; }
 .item-tip .tip-head { display: flex; gap: 8px; align-items: baseline; }
-/* A task's Ongoing/Project, named above its own key and title. */
+/* A task's Ongoing/Project, named above its own key and title (the key as
+   its type chip, see .type-chip above). */
 .item-tip .tip-parent { color: var(--fg-muted); font-size: 11px; margin-bottom: 2px; }
-.item-tip .tip-parent .tip-parent-key { font-family: var(--mono); margin-right: 2px; }
 .item-tip .tip-key { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); flex: none; }
 .item-tip .tip-title { font-weight: 600; }
 .item-tip .tip-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; color: var(--fg-muted); font-size: 12px; }

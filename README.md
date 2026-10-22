@@ -40,7 +40,9 @@ the single SQLite file. The directory containing it must already exist.
    so items can be added to them. Filters apply to each item's own status.
    Click **+ Ongoing** or **+ Project** to add a blank row;
    fill in the title (required) and anything else, then press Enter or the ✓
-   button (✕ or Escape discards). Use the **+** on an Ongoing or Project row
+   button (✕ or Escape discards). A new project or task starts in the
+   default status from Settings (To-Do unless changed) when the filters in
+   effect would show it, otherwise in a status they do show. Use the **+** on an Ongoing or Project row
    to add a task beneath it.
 3. There is no edit mode: click any field to change it and it saves at once.
    Titles, dates and the description become inputs when clicked (Enter or
@@ -116,11 +118,16 @@ the single SQLite file. The directory containing it must already exist.
    plots tasks by urgency and importance and stays in view while the list
    scrolls; hover a point for its description; the Keys / Titles toggle
    above the plot labels points with the task key or its title.
-   Settings has the first day of the week, the row tint colours for
+   Settings has the first day of the week, the default status for new
+   projects and tasks, the row tint colours for
    Ongoing, Project and Task rows, the end-date highlight colours and
    windows, and a colour for each urgency and importance value (two ramps,
    with presets).
-   **Item colours**: every Ongoing and Project can have a colour of its own.
+   **Item colours**: the key of every Ongoing and Project is a chip in the
+   type colour from Settings with a type glyph (a loop for Ongoing, a flag
+   for Project), whatever the row's tint, so the type is always obvious;
+   task keys are plain. Beyond that, every Ongoing and Project can have a
+   colour of its own.
    Expand the row and click the swatch in its Colour box for a palette, a
    custom colour, or back
    to the type colour; the colour is stored on the item, so everyone sees
@@ -333,7 +340,7 @@ API summary (all JSON):
     PUT    /api/order {ids: [...]}    reorder siblings
     POST   /api/dependencies {blocker_id, blocked_id}   400 on self/ongoing/cycle
     DELETE /api/dependencies/{blocker}/{blocked}
-    GET    /api/settings              PATCH /api/settings {key: value}  (week_start, color_*)
+    GET    /api/settings              PATCH /api/settings {key: value}  (week_start, default_status, color_*, ...)
 
 Item JSON fields: id, type (ongoing|project|task), key, num, parent_id, title,
 description, owner_id, assignee_id, status, start_date,

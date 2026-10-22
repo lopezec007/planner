@@ -5,10 +5,12 @@
 //   POINT_COLOR_MODES        the same for the Matrix (assignee, owner, parent)
 //   barColor(item, mode)     CSS colour for an item's bar in that mode
 //   barLegend(mode)          data for a legend, or null when none is needed
+//   typeColor(type)          the Ongoing or Project colour from Settings
 //   ownColor(parent)         an Ongoing's/Project's effective colour
 //   parentColor(item)        the colour of the Ongoing/Project an item is under
 //   rowTint(item, kind)      inline --row-color for a table/timeline row, or null
 //   renderColorsMenu(slot, ctx)  the toolbar's Colours menu
+//   typeChip(parent, opts)   an Ongoing's/Project's key as a chip in its type colour
 //
 // Every Ongoing and Project may carry a colour of its own (item.color, shared
 // by everyone; picked with the swatch in its expanded details, see swatch.js
@@ -33,7 +35,7 @@
 import { state } from './state.js';
 import { levelColor } from './cells.js';
 import { prefs } from './prefs.js';
-import { el } from './util.js';
+import { el, contrastText } from './util.js';
 import { icon } from './icons.js';
 
 export const BAR_COLOR_MODES = [
@@ -59,8 +61,31 @@ export const POINT_COLOR_MODES = [
 export function ownColor(parent) {
   if (!parent || parent.type === 'task') return '';
   if (parent.color && prefs.get('parent_colors') !== 'type') return parent.color;
+  return typeColor(parent.type);
+}
+
+/** The colour Settings gives the type ('ongoing' or 'project'); '' when it
+ *  has none (or for any other type). */
+export function typeColor(type) {
   const s = state.settings || {};
-  return (parent.type === 'ongoing' ? s.color_ongoing : s.color_project) || '';
+  return (type === 'ongoing' ? s.color_ongoing : type === 'project' ? s.color_project : '') || '';
+}
+
+/** An Ongoing's or Project's key as a chip that tells its type (app.css
+ *  .type-chip): the type glyph (icons.js) before the key, on the type colour
+ *  from Settings whatever the colour preferences and the item's own colour
+ *  say, so two parents tinted in their own colours are still told apart. A
+ *  neutral outline chip when Settings has no colour for the type. `label`
+ *  replaces the key text (a new row's "N-?") and `keyClass` the class of
+ *  the text span. The title names the type. */
+export function typeChip(item, { label = item.key, keyClass = 'key-text' } = {}) {
+  const color = typeColor(item.type);
+  return el('span', {
+    class: `type-chip${color ? '' : ' plain'}`,
+    dataset: { type: item.type },
+    style: color ? { background: color, color: contrastText(color) } : null,
+    title: `${item.type === 'ongoing' ? 'Ongoing' : 'Project'} ${label}`,
+  }, icon(item.type), el('span', { class: keyClass }, label));
 }
 
 /** The colour of the Ongoing/Project `item` belongs to (a parent: its own). */

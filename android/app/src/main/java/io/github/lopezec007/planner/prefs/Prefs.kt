@@ -38,6 +38,7 @@ data class AppPrefs(
     val notifyHour: Int = 8,
     val notifyMinute: Int = 0,
     val notifyDays: Int = DEFAULT_NOTIFY_DAYS, // the notification also lists items due within this many days
+    val scratchWrap: Boolean = true,       // the scratch pads wrap long lines
     val setupDone: Boolean = false,
 ) {
     val isConfigured get() = serverUrl.isNotBlank() && setupDone
@@ -64,6 +65,7 @@ class Prefs(private val context: Context) {
         val notifyHour = intPreferencesKey("notify_hour")
         val notifyMinute = intPreferencesKey("notify_minute")
         val notifyDays = intPreferencesKey("notify_days")
+        val scratchWrap = booleanPreferencesKey("scratch_wrap")
         val setupDone = booleanPreferencesKey("setup_done")
     }
 
@@ -86,6 +88,7 @@ class Prefs(private val context: Context) {
         notifyHour = p[K.notifyHour] ?: 8,
         notifyMinute = p[K.notifyMinute] ?: 0,
         notifyDays = p[K.notifyDays] ?: AppPrefs.DEFAULT_NOTIFY_DAYS,
+        scratchWrap = p[K.scratchWrap] ?: true,
         setupDone = p[K.setupDone] ?: false,
     )
 
@@ -111,4 +114,5 @@ class Prefs(private val context: Context) {
         it[K.notifyMinute] = minute.coerceIn(0, 59)
     }
     suspend fun setNotifyDays(days: Int) = context.dataStore.edit { it[K.notifyDays] = days.coerceIn(0, 365) }
+    suspend fun setScratchWrap(wrap: Boolean) = context.dataStore.edit { it[K.scratchWrap] = wrap }
 }

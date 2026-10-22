@@ -52,6 +52,10 @@ The following statuses apply to "Project" and "Task" (this concept isn't applica
 - Done
 - Cancelled
 
+A global setting chooses the status new projects and tasks start in (To-Do by default); when the filters in
+effect would hide that status, a new item instead starts in a status they show, so it does not vanish on
+creation.
+
 A project of status "Idea" can be thought of as "superbacklogged".  Both "Done" and "Cancelled" should be considered
 closed items for UI purposes.  There are no constraints on how statuses can be changed (i.e. no "workflows").
 
@@ -244,6 +248,11 @@ above the plot (a per-user preference) labels the points with the task key or wi
 place in the viewport while the list beside it scrolls.
 
 ##### Highlighting
+The key of every "Ongoing" and "Project" row is a rounded chip in that type's colour from Settings, with a type
+glyph (a loop for "Ongoing", a flag for "Project"), shown whatever the row's own tint and the user's colour
+preferences, so the type of a parent is always obvious; task keys are plain text.  The same chip names a task's
+parent in the Timeline and Matrix tooltips.
+
 Every "Ongoing" and "Project" may be given a colour of its own (a "Colour" box in its expanded row opens a palette,
 a custom colour, or back to none); the colour is stored with the item and shared by everyone.  How it shows is per
 user, in a "Colours" menu in the toolbar: "Ongoing"/"Project" rows tinted with their own colour when they have one
@@ -281,7 +290,7 @@ and never excludes Ongoing rows.  Filters also apply to the "Plan" (Timeline) an
 
 ## Android app
 A phone client for the same server, kept in `android/` of this repository and built against the same JSON API
-(the server is not changed for it).  See `android/README.md` for the design.
+(the server gains nothing specific to it).  See `android/README.md` for the design.
 
 ### Platforms and access
 - Android 16 and 17, and the current GrapheneOS.  Portrait only; no landscape layouts.
@@ -302,8 +311,13 @@ A phone client for the same server, kept in `android/` of this repository and bu
 - Setup: server address and account (one of the server's users; no password), both changeable in Settings.
 - List: the Active / Backlog / Ideas templates, search and filters with the same semantics as the web UI (owner
   and assignee filters accept several choices, any of which matches);
-  Nested (parents with their tasks) or Flat; the same highlighting rules.  A detail screen edits every field in
-  place with no edit mode, and shows dependencies, attachments and the status history.
+  Nested (each parent with its tasks in a rounded outlined card, as in the web UI) or Flat; the same
+  highlighting rules.  New items take the default status from Settings under the same filter rule as the web
+  UI.  A detail screen edits every field in place with no edit mode, and shows dependencies, attachments and
+  the status history.
+- Scratch pads: the shared pad and the account's own pad, monospaced and editable with a wrap toggle, cached on
+  the phone and saved through the offline queue (one queued write per pad), refreshed on open and on every sync;
+  a remote change never replaces text being typed.
 - Timeline and Matrix: full-screen versions of the web views (no adjacent table), with the same drawing rules,
   colouring modes, zoom/pan, and drag editing.  In the Matrix, tapping the selected task's title opens it.
 - Attachments: files and photos from the device, and photos taken with the camera.

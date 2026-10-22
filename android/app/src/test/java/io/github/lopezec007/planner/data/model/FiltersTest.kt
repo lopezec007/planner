@@ -163,4 +163,16 @@ class FiltersTest {
         assertEquals(Status.TODO, Preset.ACTIVE.criteria().newStatus())
         assertEquals(Status.IDEA, Criteria(statuses = setOf(Status.IDEA, Status.DONE)).newStatus())
     }
+
+    @Test
+    fun newStatusTakesTheDefaultWhenTheFiltersAdmitIt() {
+        // No status filter, or one that includes the default: the default.
+        assertEquals(Status.BACKLOG, Criteria().newStatus(Status.BACKLOG))
+        assertEquals(Status.IDEA, Preset.IDEAS.criteria().newStatus(Status.IDEA))
+        assertEquals(Status.IN_PROGRESS, Criteria(statuses = setOf(Status.TODO, Status.IN_PROGRESS)).newStatus(Status.IN_PROGRESS))
+        // Otherwise the filter-derived choice, so the new row stays visible.
+        assertEquals(Status.BACKLOG, Preset.BACKLOG.criteria().newStatus(Status.IDEA))
+        assertEquals(Status.TODO, Preset.ACTIVE.criteria().newStatus(Status.BACKLOG))
+        assertEquals(Status.IDEA, Criteria(statuses = setOf(Status.IDEA, Status.DONE)).newStatus(Status.BACKLOG))
+    }
 }

@@ -1,6 +1,6 @@
 // The main screen: the shared toolbar (search, Active/Backlog/Ideas,
-// filters), the view switcher (List / Timeline / Matrix) in a bottom bar,
-// and the content for the chosen view. The sync state shows as a thin
+// filters, the scratch pads), the view switcher (List / Timeline / Matrix)
+// in a bottom bar, and the content for the chosen view. The sync state shows as a thin
 // banner under the toolbar when something is worth knowing.
 package io.github.lopezec007.planner.ui.home
 
@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Refresh
@@ -128,6 +129,7 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
                         IconButton(onClick = { nav.push(Screen.Settings) }) { Icon(Icons.Filled.Settings, "Settings") }
                     },
                     actions = {
+                        IconButton(onClick = { nav.push(Screen.Scratch) }) { Icon(Icons.Filled.EditNote, "Scratch pad") }
                         BadgedBox(badge = { if (p.criteria.filterCount > 0) Badge { Text(p.criteria.filterCount.toString()) } }) {
                             IconButton(onClick = { filtersOpen = true }) { Icon(Icons.Filled.FilterList, "Filters") }
                         }

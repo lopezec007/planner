@@ -318,7 +318,6 @@
 }
 .timeline-tooltip[hidden] { display: none; }
 .timeline-tip-parent { color: var(--fg-muted); font-size: 11px; }
-.timeline-tip-parent .key { font-family: var(--mono); margin-right: 2px; }
 .timeline-tip-title { font-weight: 600; font-size: 13px; }
 .timeline-tip-title .key { font-family: var(--mono); color: var(--fg-muted); font-weight: 500; margin-right: 2px; }
 .timeline-tip-dates { font-variant-numeric: tabular-nums; }

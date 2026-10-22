@@ -12,7 +12,7 @@ the wrapper.
 
     cd android
     ./gradlew assembleDebug            # app/build/outputs/apk/debug/app-debug.apk
-    ./gradlew test                     # JVM unit tests (sync, filters, dates)
+    ./gradlew test                     # JVM unit tests (sync, filters, dates, scratch pads, schema migration)
     ./gradlew connectedAndroidTest     # instrumented tests on a device/emulator
     ./gradlew installDebug             # onto the device on adb
 
@@ -26,9 +26,10 @@ GitHub releases, which Obtainium installs and updates from. Without that file
 ### Server contract
 
 The app is a second client of the same JSON API the web UI uses (see
-"API summary" in the top-level README). The server was not changed for it.
-Nothing in the API is specific to a client; the only things that live on the
-phone are its own view preferences and the offline queue.
+"API summary" in the top-level README), including the scratch pads
+(`/api/scratch`, `/api/users/{id}/scratch`) and the `default_status`
+setting. Nothing in the API is specific to a client; the only things that
+live on the phone are its own view preferences and the offline queue.
 
 ### Network policy
 
@@ -51,8 +52,10 @@ Local data lives in Room (`data/db`). The app reads only from Room; the
 network never blocks a screen.
 
 - **Pull**: `GET /api/users`, `/api/items`, `/api/settings` are fetched
-  together and replace the local tables in one transaction. The dataset is
-  small (one household), so there is no delta protocol.
+  together and replace the local tables in one transaction, then the scratch
+  pads shown so far (always the shared one) are fetched into the `scratch`
+  table. The dataset is small (one household), so there is no delta
+  protocol.
 - **Push**: every change is applied to Room at once (optimistically) and
   appended to the `pending_ops` table. `SyncEngine.sync()` replays the queue
   in order, then pulls. A network failure stops the replay and keeps the rest
@@ -72,6 +75,22 @@ network never blocks a screen.
   into the cache directory and opened with the system viewer. Uploads
   (file picker, photo picker, camera) are copied into `filesDir/outbox` and
   queued like any other op.
+- **Scratch pads**: the `scratch` table caches each pad's text by scope
+  (`global`, `user:<id>`), so the Scratch screen shows it at once. An edit
+  is written to the cache about a second after typing stops (and on blur or
+  leaving the screen) and queued as one `put_scratch` op carrying the whole
+  text; a later edit of the same pad replaces that op's text instead of
+  adding an entry, so typing never grows the queue. An op whose text was
+  replaced while it was in flight is sent again. A pad is refreshed from
+  the server when the screen opens, on its Refresh action and by every pull;
+  the server's text replaces the cache unless an edit of that pad is still
+  queued, and it replaces the field only while the field is neither focused
+  nor holds unsaved typing (then it waits for the blur, and a local edit
+  made meanwhile wins, as the server's last-writer-wins would have it).
+- **Schema changes**: `PlannerDatabase` carries a migration per version
+  (`MIGRATION_1_2` added `scratch`), tested in `PlannerDatabaseTest` against
+  the exported schema in `app/schemas`; the destructive fallback only
+  applies to a version without one.
 
 ### Screens
 
@@ -83,11 +102,17 @@ network never blocks a screen.
   on its own fields; a parent shows when it or a task matches; Active hides
   parents without matching tasks). Owner and Assignee are multi-select
   chips: any chosen user, or "No owner" / "Unassigned", matches, and no
-  choice means any. Parents are section headers with their
-  tasks beneath; Flat is a toggle. Row chips: status, assignee, end date
+  choice means any. Nested: each parent and its tasks is one rounded,
+  outlined card, the parent row its tinted header (a collapsed parent is a
+  single-row card); Flat is a plain list of tasks with the parent named on
+  each row. Row chips: status, assignee, end date
   (orange within 7 days, red today/overdue), urgency/importance per the
   server's colour ramps; blocked rows are dimmed; closed rows carry no
   highlighting.
+- **New item**: title, then the fields with the web UI's defaults: the
+  status is the server's `default_status` setting when the status filter is
+  empty or includes it, else one the filter shows (so the new row is not
+  hidden at once); the owner is the account.
 - **Detail**: every field editable in place (no edit mode): title, status,
   owner, assignee, dates with firm toggles, urgency, importance, blocked,
   description (Markdown preview, tap to edit), dependencies (blocked by /
@@ -102,9 +127,17 @@ network never blocks a screen.
   tasks, Eisenhower orientation, deterministic jitter, dependency arrows;
   tap a point for its card (its underlined title, like the Open button,
   opens the task), drag a point to change its values.
+- **Scratch**: from the toolbar's note icon. Two tabs, "Shared" and the
+  account's name (a note instead when there is no account), each a
+  monospaced text field filling the screen; Wrap in the top bar folds long
+  lines or lets them scroll sideways (a phone preference). The status line
+  says whether the text is being edited, saved on the phone and waiting for
+  the server, or when the server last took it. Refresh pushes the queue and
+  fetches both pads. See "Offline tolerance" for the saving rules.
 - **Settings**: server and account, sync status and errors, notification
-  time and look-ahead window, users (name, colour, chip label), app
-  settings (week start, colours), about.
+  time and look-ahead window, users (name, colour, chip label), planner
+  settings shared with the web UI (week start, default status for new
+  items, colours), about.
 
 ### Due-date notifications
 
@@ -128,11 +161,13 @@ days"). It needs no network, so it works offline. Tapping opens the item
       data/sync/               PendingOp, SyncEngine, SyncWorker, ConnectivityProbe
       data/repo/               PlannerRepository: Flows for the UI, mutations that
                                write Room and enqueue ops
-      prefs/                   DataStore: server URL, account, view prefs, notify time and window
+      prefs/                   DataStore: server URL, account, view prefs, notify time and window,
+                               scratch pad wrap
       ui/theme/                Material 3 theme (dynamic colour off; follows system
                                light/dark)
       ui/nav/                  Screen stack (no Navigation library)
-      ui/list/  ui/detail/  ui/timeline/  ui/matrix/  ui/settings/  ui/setup/
+      ui/home/  ui/detail/  ui/timeline/  ui/matrix/  ui/settings/  ui/setup/
+      ui/scratch/              the scratch pads screen and ScratchEditor (the saving rules)
       ui/components/           chips, user avatars, pickers, Markdown view
       notify/                  DueWorker, scheduling, channel
       attach/                  pickers, camera capture, open-with, outbox
@@ -148,4 +183,6 @@ days"). It needs no network, so it works offline. Tapping opens the item
   "closed within N days" rule.
 - Status strings are the server's (`idea`, `backlog`, `todo`, `in-progress`,
   `done`, `cancelled`); `Status` is the enum with those wire values.
+- Scratch pad scopes are the server's (`global`, `user:<id>`, see
+  `ScratchScope`) and key the cache and the queued op alike.
 - Colours arrive as `#rrggbb` strings; `parseColor()` is tolerant of "".

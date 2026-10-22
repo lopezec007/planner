@@ -4,6 +4,7 @@
 // ApiException; callers decide what is retryable.
 package io.github.lopezec007.planner.data.api
 
+import io.github.lopezec007.planner.data.model.ScratchScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
@@ -207,6 +208,20 @@ class PlannerApi(val baseUrl: HttpUrl, client: OkHttpClient? = null) {
 
     suspend fun restoreAttachment(id: Long): AttachmentDto =
         call(Request.Builder().url(url("attachments", id.toString(), "restore")).post(ByteArray(0).toRequestBody(null)).build())
+
+    // ---- scratch pads
+
+    /** /api/scratch for the shared pad, /api/users/{id}/scratch for a user's own. */
+    private fun scratchUrl(scope: String): HttpUrl {
+        val userId = ScratchScope.userId(scope)
+        return if (userId == null) url("scratch") else url("users", userId.toString(), "scratch")
+    }
+
+    suspend fun getScratch(scope: String): ScratchDto = call(Request.Builder().url(scratchUrl(scope)).get().build())
+
+    /** Replaces the pad's text (last writer wins; the server caps it at 1 MiB). */
+    suspend fun putScratch(scope: String, text: String): ScratchDto =
+        call(Request.Builder().url(scratchUrl(scope)).put(jsonBody(buildJsonObject { put("text", text) })).build())
 
     // ---- prefs (unused by the phone UI, kept for completeness)
 
