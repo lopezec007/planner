@@ -1,6 +1,8 @@
 // Item tooltip: for a task, its Ongoing/Project (its key chip and title, muted) above
-// the key and title; then the urgency/importance/status/assignee/blocked
-// line and the rendered description. One shared element on the body, placed
+// the key and title; then the urgency/importance/effort/status/assignee/
+// blocked line and the rendered description. Importance may be -1 and shows
+// as such; the effort (15m, 2h, see formatEffort) appears only when the task
+// has one. One shared element on the body, placed
 // beside an anchor element; used by the Matrix points and the dependency
 // chips. itemTooltip() returns { show(item, anchor), hide() }.
 
@@ -8,8 +10,11 @@ import { state, isClosed, isBlocked, openBlockers, STATUS_LABEL } from './state.
 import { renderMarkdown } from './markdown.js';
 import { el } from './util.js';
 import { typeChip } from './colors.js';
+import { formatEffort } from './effort.js';
 
-const level = (n) => (n == null ? 5 : Math.max(0, Math.min(10, Number(n))));
+const urgLevel = (n) => (n == null ? 5 : Math.max(0, Math.min(10, Number(n))));
+const impLevel = (n) => (n == null ? 5 : Math.max(-1, Math.min(10, Number(n))));
+
 
 function assigneeName(item) {
   if (item.assignee_id == null) return null;
@@ -33,8 +38,9 @@ export function itemTooltip() {
     const meta = el('div', { class: 'tip-meta' });
     if (item.type === 'task') {
       meta.append(
-        el('span', {}, el('b', {}, String(level(item.urgency))), ' urgency'),
-        el('span', {}, el('b', {}, String(level(item.importance))), ' importance'));
+        el('span', {}, el('b', {}, String(urgLevel(item.urgency))), ' urgency'),
+        el('span', {}, el('b', {}, String(impLevel(item.importance))), ' importance'));
+      if (item.effort != null && formatEffort(item.effort)) meta.append(el('span', { class: 'tip-effort' }, el('b', {}, formatEffort(item.effort)), ' effort'));
     }
     if (item.status) meta.append(el('span', { class: isClosed(item.status) ? 'tip-closed' : '' }, STATUS_LABEL[item.status] || item.status));
     const who = assigneeName(item);

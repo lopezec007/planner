@@ -26,3 +26,14 @@ p.settings-help { margin: 0 0 8px; }
 .ramp { margin-bottom: 14px; }
 .ramp-cell input[type="color"] { width: 40px; height: 24px; padding: 1px; }
 .ramp-clear { font-size: 11px; padding: 1px 6px; }
+/* Effort options: one chip per configured duration with its remove button,
+   then the add field and the reset. */
+.effort-options { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 8px; }
+.effort-chip {
+  display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 9px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--bg-alt);
+  font-variant-numeric: tabular-nums; font-size: 13px;
+}
+.effort-chip .effort-remove { border: none; background: transparent; padding: 0 5px; cursor: pointer; color: var(--fg-muted); line-height: 1; font-size: 14px; }
+.effort-chip .effort-remove:hover { color: var(--hl-alert); background: transparent; }
+.effort-add { width: 90px; }

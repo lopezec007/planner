@@ -34,6 +34,9 @@ test('matrix view plots one point per visible task and no parents', async ({ pag
   expect(svgText).toContain('Importance');
   const ticks = await page.locator('.matrix-plot .ticks text').allTextContents();
   for (let v = 0; v <= 10; v++) expect(ticks).toContain(String(v));
+  // The importance axis runs down to -1 (urgency stays 0..10): one -1 tick, on the y axis.
+  expect(ticks.filter((t) => t === '-1')).toHaveLength(1);
+  expect(await page.locator('.matrix-plot .ticks text', { hasText: /^-1$/ }).getAttribute('text-anchor')).toBe('end');
 
   expect(errors).toEqual([]);
 });
@@ -58,6 +61,9 @@ async function plotGeometry(page) {
     const ticks = [...svg.querySelectorAll('.ticks text')]
       .filter((t) => t.getAttribute('text-anchor') === 'middle') // x-axis ticks
       .map((t) => ({ v: +t.textContent, x: +t.getAttribute('x') }));
+    const yTicks = [...svg.querySelectorAll('.ticks text')]
+      .filter((t) => t.getAttribute('text-anchor') === 'end') // y-axis ticks
+      .map((t) => ({ v: +t.textContent, y: +t.getAttribute('y') }));
     const label = svg.querySelector('.quad-label');
     return {
       svg: { x: box.x, y: box.y, width: box.width, height: box.height, attrW: +svg.getAttribute('width'), attrH: +svg.getAttribute('height') },
@@ -65,6 +71,7 @@ async function plotGeometry(page) {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       bg: rect('.plot-bg'), hot: rect('.quad-hot'), cold: rect('.quad-cold'),
       xTicks: Object.fromEntries(ticks.map((t) => [t.v, t.x])),
+      yTicks: Object.fromEntries(yTicks.map((t) => [t.v, t.y])),
       label: { x: +label.getAttribute('x'), y: +label.getAttribute('y'), anchor: label.getAttribute('text-anchor') },
     };
   });
@@ -96,15 +103,22 @@ test('x axis is reversed: urgency 10 at the left, 0 at the right; hot quadrant t
     const g = await plotGeometry(page);
     // Tick labels run 10..0 left to right.
     for (let v = 1; v <= 10; v++) expect(g.xTicks[v]).toBeLessThan(g.xTicks[v - 1]);
-    // Hot wash occupies the top-left quarter of the frame, cold the bottom-right.
+    // Hot wash occupies the top-left of the frame down to the importance-5
+    // midline, cold the bottom-right from it. The y axis runs -1..10, so the
+    // midline sits below the frame's centre and the hot wash is the smaller.
+    const midY = g.yTicks[5];
     expect(g.hot.x).toBeCloseTo(g.bg.x, 3);
     expect(g.hot.y).toBeCloseTo(g.bg.y, 3);
     expect(g.hot.w).toBeCloseTo(g.bg.w / 2, 3);
-    expect(g.hot.h).toBeCloseTo(g.bg.h / 2, 3);
+    expect(g.hot.h).toBeCloseTo(midY - g.bg.y, 3);
+    expect(g.hot.h).toBeLessThan(g.bg.h / 2);
     expect(g.cold.x).toBeCloseTo(g.bg.x + g.bg.w / 2, 3);
-    expect(g.cold.y).toBeCloseTo(g.bg.y + g.bg.h / 2, 3);
+    expect(g.cold.y).toBeCloseTo(midY, 3);
     expect(g.cold.w).toBeCloseTo(g.bg.w / 2, 3);
-    expect(g.cold.h).toBeCloseTo(g.bg.h / 2, 3);
+    expect(g.cold.h).toBeCloseTo(g.bg.y + g.bg.h - midY, 3);
+    // Ticks run -1 (bottom) to 10 (top), evenly spaced.
+    for (let v = 0; v <= 10; v++) expect(g.yTicks[v]).toBeLessThan(g.yTicks[v - 1]);
+    expect(g.yTicks[-1] - g.yTicks[0]).toBeCloseTo(g.yTicks[4] - g.yTicks[5], 3);
     // The urgency-10/importance-10 point sits inside the hot wash.
     expect(u10.cx).toBeGreaterThan(g.hot.x);
     expect(u10.cx).toBeLessThan(g.hot.x + g.hot.w);
@@ -274,16 +288,16 @@ test('matrix view on backlog and ideas pages shows only those tasks', async ({ p
 
 // ---- dependency lines ----
 
-const POINT_R = 5;
+const POINT_R = 5; // radius of a dot with no effort
 
 /** Dependency lines keyed "blocker->blocked", each with its endpoints, the
- *  two dot centres and styling. */
+ *  two dot centres (with their radii) and styling. */
 async function depLines(page) {
   const raw = await page.locator('.matrix-plot .deps .dep').evaluateAll((els) => els.map((l) => {
     const svg = l.ownerSVGElement;
     const centre = (id) => {
       const d = svg.querySelector(`.pt[data-id="${id}"] .dot`);
-      return { x: +d.getAttribute('cx'), y: +d.getAttribute('cy') };
+      return { x: +d.getAttribute('cx'), y: +d.getAttribute('cy'), r: +d.getAttribute('r') };
     };
     const key = (id) => svg.querySelector(`.pt[data-id="${id}"]`).dataset.key;
     return {
@@ -298,17 +312,17 @@ async function depLines(page) {
   return Object.fromEntries(raw.map((l) => [l.edge, l]));
 }
 
-/** The line runs along the centre-to-centre direction, starting POINT_R from
- *  the blocker's centre and ending POINT_R short of the blocked centre. */
+/** The line runs along the centre-to-centre direction, starting at the edge
+ *  of the blocker's dot and ending at the edge of the blocked dot. */
 function expectOnDotEdges(l) {
-  expect(Math.hypot(l.x1 - l.a.x, l.y1 - l.a.y)).toBeCloseTo(POINT_R, 3);
-  expect(Math.hypot(l.x2 - l.b.x, l.y2 - l.b.y)).toBeCloseTo(POINT_R, 3);
+  expect(Math.hypot(l.x1 - l.a.x, l.y1 - l.a.y)).toBeCloseTo(l.a.r, 3);
+  expect(Math.hypot(l.x2 - l.b.x, l.y2 - l.b.y)).toBeCloseTo(l.b.r, 3);
   const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, len = Math.hypot(dx, dy);
   // Start point lies on the segment a->b (cross product ~0, positive projection).
   expect(Math.abs((l.x1 - l.a.x) * dy - (l.y1 - l.a.y) * dx) / len).toBeLessThan(0.01);
   expect((l.x1 - l.a.x) * dx + (l.y1 - l.a.y) * dy).toBeGreaterThan(0);
   expect(Math.abs((l.x2 - l.a.x) * dy - (l.y2 - l.a.y) * dx) / len).toBeLessThan(0.01);
-  expect(Math.hypot(l.x2 - l.x1, l.y2 - l.y1)).toBeCloseTo(len - 2 * POINT_R, 3);
+  expect(Math.hypot(l.x2 - l.x1, l.y2 - l.y1)).toBeCloseTo(len - l.a.r - l.b.r, 3);
 }
 
 const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`; };
@@ -329,6 +343,7 @@ test('dependency lines run between the dots of blocking tasks, beneath the point
     const lines = await depLines(page);
     expect(Object.keys(lines).sort()).toEqual(['T-10->T-11', 'T-7->T-6', 'T-8->T-13', 'T-9->T-10']);
     for (const l of Object.values(lines)) {
+      expect(l.a.r).toBe(POINT_R); // no seeded task has an effort
       expectOnDotEdges(l);
       expect(l.marker).toMatch(/^url\(["']?#mx-dep-arrow(-open)?["']?\)$/);
       expect(l.lit).toBe(false);
@@ -480,4 +495,134 @@ test('the plot stays in view while the list scrolls and fits the viewport below 
   await expect.poll(async () => (await measure()).attrH).toBeLessThan(before.attrH - 50);
   const shorter = await measure();
   expect(shorter.svgBottom).toBeLessThanOrEqual(shorter.vh);
+});
+
+// ---- effort (dot size) and the importance axis ----
+
+/** Radius, hit radius, classes and ring/halo presence of each dot, by key. */
+async function dotSizes(page) {
+  const list = await page.locator('.matrix-plot .pt').evaluateAll((els) => els.map((g) => ({
+    key: g.dataset.key,
+    r: +g.querySelector('.dot').getAttribute('r'),
+    hit: +g.querySelector('.hit').getAttribute('r'),
+    ring: g.querySelector('.ring') ? +g.querySelector('.ring').getAttribute('r') : null,
+    halo: g.querySelector('.halo') ? +g.querySelector('.halo').getAttribute('r') : null,
+    noEffort: g.classList.contains('no-effort'),
+    varR: g.style.getPropertyValue('--r').trim(),
+    labelX: +g.querySelector('.label').getAttribute('x'),
+    cx: +g.querySelector('.dot').getAttribute('cx'),
+  })));
+  return Object.fromEntries(list.map((d) => [d.key, d]));
+}
+
+test('dot size grows with effort on a log scale; a task without effort keeps the default size and is marked', async ({ page, request }) => {
+  const items = await (await request.get('/api/items')).json();
+  const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+  // Default options 15m..64h: 15m is the smallest dot, 64h the largest, 1h a
+  // quarter of the way up (log2(4)/log2(256) = 2/8).
+  const efforts = { 'T-9': 15, 'T-7': 60, 'T-1': 3840, 'T-13': 3840 };
+  for (const [k, e] of Object.entries(efforts)) expect((await request.patch(`/api/items/${byKey[k].id}`, { data: { effort: e } })).ok()).toBe(true);
+  try {
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await openMatrix(page);
+    const d = await dotSizes(page);
+    expect(d['T-9'].r).toBeCloseTo(4, 3);
+    expect(d['T-7'].r).toBeCloseTo(4 + 7 * (2 / 8), 3);
+    expect(d['T-1'].r).toBeCloseTo(11, 3);
+    expect(d['T-9'].r).toBeLessThan(d['T-7'].r);
+    expect(d['T-7'].r).toBeLessThan(d['T-1'].r);
+    for (const k of Object.keys(efforts)) {
+      expect(d[k].noEffort).toBe(false);
+      expect(d[k].halo).toBeNull();
+      expect(d[k].varR).toBe(`${d[k].r}px`);
+      // Hit area and label offset follow the dot's radius.
+      expect(d[k].hit).toBeCloseTo(d[k].r + 8, 3);
+    }
+    expect(d['T-1'].labelX - d['T-1'].cx).toBeCloseTo(11 + 4, 3);
+    expect(d['T-9'].labelX - d['T-9'].cx).toBeCloseTo(4 + 4, 3);
+    // No effort: the default radius, the marker class and the halo under the dashed dot.
+    expect(d['T-6'].r).toBe(POINT_R);
+    expect(d['T-6'].noEffort).toBe(true);
+    expect(d['T-6'].halo).toBeCloseTo(POINT_R + 1.75, 3);
+    expect(d['T-6'].hit).toBe(POINT_R + 8);
+    expect(d['T-6'].ring).toBeCloseTo(POINT_R + 3.5, 3); // blocked ring follows the radius too
+    const dash = await page.locator('.matrix-plot .pt[data-key="T-6"] .dot').evaluate((e) => getComputedStyle(e).strokeDasharray);
+    expect(dash).not.toBe('none');
+    expect(await page.locator('.matrix-plot .pt[data-key="T-9"] .dot').evaluate((e) => getComputedStyle(e).strokeDasharray)).toBe('none');
+
+    // Dependency lines stop at the actual dot edges (T-9 r=4 -> T-10 r=5; T-7 r=5.75 -> T-6 r=5).
+    const lines = await depLines(page);
+    expect(lines['T-9->T-10'].a.r).toBeCloseTo(4, 3);
+    expect(lines['T-7->T-6'].a.r).toBeCloseTo(5.75, 3);
+    for (const l of Object.values(lines)) expectOnDotEdges(l);
+
+    // A cluster with a large dot is jittered by the largest radius: the
+    // three urgency-5/importance-5 points (T-13 is now 11px) stay apart.
+    const cluster = ['T-4', 'T-13', 'T-17'].map((k) => d[k]);
+    const dots = await dotsByKey(page);
+    for (let i = 0; i < cluster.length; i++) {
+      for (let j = i + 1; j < cluster.length; j++) {
+        const a = dots[cluster[i].key], b = dots[cluster[j].key];
+        expect(Math.hypot(a.cx - b.cx, a.cy - b.cy)).toBeGreaterThanOrEqual(cluster[i].r + cluster[j].r);
+      }
+    }
+
+    // The controls strip explains the encoding; the tooltip shows the effort.
+    const legend = page.locator('.matrix-controls .matrix-size-legend');
+    await expect(legend).toContainText('dot size: effort');
+    await expect(legend).toHaveAttribute('title', /15m smallest, 64h largest/);
+    await page.locator('.matrix-plot .pt[data-key="T-7"]').hover();
+    const tip = page.locator('.item-tip');
+    await expect(tip).toBeVisible();
+    await expect(tip.locator('.tip-effort')).toHaveText('1h effort');
+    await page.locator('.matrix-plot .pt[data-key="T-1"]').hover();
+    await expect(tip.locator('.tip-effort')).toHaveText('64h effort');
+    await page.locator('.matrix-plot .pt[data-key="T-6"] .dot').hover();
+    await expect(tip).toContainText('Pay insurance');
+    await expect(tip.locator('.tip-effort')).toHaveCount(0);
+    // Hover grows the dot relative to its own size.
+    await page.locator('.matrix-plot .pt[data-key="T-1"] .dot').hover();
+    await expect.poll(() => page.locator('.matrix-plot .pt[data-key="T-1"] .dot').evaluate((e) => parseFloat(getComputedStyle(e).r))).toBeCloseTo(13, 1);
+    expect(errors).toEqual([]);
+  } finally {
+    for (const k of Object.keys(efforts)) await request.patch(`/api/items/${byKey[k].id}`, { data: { effort: null } });
+  }
+});
+
+test('the importance axis reaches -1: a point dragged to the bottom gets importance -1 and the tooltip shows it', async ({ page, request }) => {
+  const items = await (await request.get('/api/items')).json();
+  const gutters = items.find((i) => i.title === 'Clean gutters'); // urgency 7, importance 4
+  try {
+    await openMatrix(page);
+    const bg = await page.locator('.matrix-plot .plot-bg').boundingBox();
+    const dot = page.locator(`.matrix-plot .pt[data-id="${gutters.id}"] .dot`);
+    const d = await dot.boundingBox();
+    const cx = d.x + d.width / 2, cy = d.y + d.height / 2;
+    // Straight down to just inside the frame's bottom edge: the -1 row.
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx, bg.y + bg.height - 3, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(async () => {
+      const it = (await (await request.get('/api/items')).json()).find((i) => i.id === gutters.id);
+      return [it.urgency, it.importance];
+    }).toEqual([7, -1]);
+    // Redrawn at the -1 tick, below every 0 point would be, and the tooltip says -1.
+    const after = page.locator(`.matrix-plot .pt[data-id="${gutters.id}"] .dot`);
+    await expect.poll(async () => Math.abs(+(await after.getAttribute('cy')) - (await plotGeometry(page)).yTicks[-1])).toBeLessThan(0.01);
+    await after.hover();
+    const tip = page.locator('.item-tip');
+    await expect(tip).toContainText('Clean gutters');
+    await expect(tip.locator('.tip-meta span').nth(1)).toHaveText('-1 importance');
+    // And back up: dragging above the frame's top clamps to 10.
+    const d2 = await after.boundingBox();
+    await page.mouse.move(d2.x + d2.width / 2, d2.y + d2.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(d2.x + d2.width / 2, bg.y - 30, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(async () => (await (await request.get('/api/items')).json()).find((i) => i.id === gutters.id).importance).toBe(10);
+  } finally {
+    await request.patch(`/api/items/${gutters.id}`, { data: { urgency: gutters.urgency, importance: gutters.importance } });
+  }
 });

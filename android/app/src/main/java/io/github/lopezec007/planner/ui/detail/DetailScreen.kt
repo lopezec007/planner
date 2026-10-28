@@ -82,6 +82,7 @@ import io.github.lopezec007.planner.data.repo.Snapshot
 import io.github.lopezec007.planner.data.repo.set
 import io.github.lopezec007.planner.ui.PlannerViewModel
 import io.github.lopezec007.planner.ui.components.DatePickerDialogFor
+import io.github.lopezec007.planner.ui.components.EffortField
 import io.github.lopezec007.planner.ui.components.EndDateText
 import io.github.lopezec007.planner.ui.components.FieldRow
 import io.github.lopezec007.planner.ui.components.KeyText
@@ -396,7 +397,7 @@ private fun TitleField(title: String, onSave: (String) -> Unit) {
     LaunchedEffect(Unit) { focus.requestFocus() }
 }
 
-/** Status, owner, assignee, dates, levels, blocked and colour, as the type allows. */
+/** Status, owner, assignee, dates, levels, effort, blocked and colour, as the type allows. */
 @Composable
 private fun Fields(item: Item, snap: Snapshot, patch: (ItemPatch) -> Unit) {
     var pickStatus by remember { mutableStateOf(false) }
@@ -444,6 +445,12 @@ private fun Fields(item: Item, snap: Snapshot, patch: (ItemPatch) -> Unit) {
                 value = item.importance,
                 onChange = { patch(ItemPatch(importance = set(it))) },
                 modifier = Modifier.padding(horizontal = 16.dp),
+                min = -1, // importance runs -1..10 (urgency 0..10)
+            )
+            EffortField(
+                value = item.effort,
+                options = snap.settings.effortOptions,
+                onChange = { patch(ItemPatch(effort = set(it))) },
             )
         }
         if (dated) {

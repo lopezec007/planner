@@ -47,10 +47,13 @@ object Dates {
         return diff in 0 until days
     }
 
+    // Built once: a formatter is parsed from its pattern, and human() runs for every list row.
+    private val thisYear: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM")
+    private val otherYear: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")
+
     /** Short human form: "Mon 3 Nov" this year, "3 Nov 2027" otherwise. */
     fun human(d: LocalDate?): String {
         if (d == null) return ""
-        val fmt = if (d.year == today().year) DateTimeFormatter.ofPattern("EEE d MMM") else DateTimeFormatter.ofPattern("d MMM yyyy")
-        return d.format(fmt)
+        return d.format(if (d.year == today().year) thisYear else otherYear)
     }
 }

@@ -1,7 +1,8 @@
 // The Filters bottom sheet: the same criteria as the web Filters panel
 // (type, status with "or closed within N days", owner, assignee, blocked,
-// end-date range, hide empty parents) plus the phone's Flat toggle. Owner
-// and assignee are multi-select: any chosen user (or "none") matches.
+// end-date range, hide empty parents). Owner and assignee are multi-select:
+// any chosen user (or "none") matches. (The Nested/Flat layout toggle is
+// in the top bar, not here: it is not a filter.)
 package io.github.lopezec007.planner.ui.home
 
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +25,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -50,8 +50,6 @@ import java.time.LocalDate
 fun FilterSheet(
     criteria: Criteria,
     users: List<User>,
-    flat: Boolean,
-    onFlat: (Boolean) -> Unit,
     onChange: (Criteria) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -70,14 +68,6 @@ fun FilterSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Filters", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 TextButton(onClick = { onChange(Criteria()) }, enabled = c.isActive) { Text("Clear") }
-            }
-
-            Section("Layout") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Switch(checked = flat, onCheckedChange = onFlat)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Flat: tasks only, with their Ongoing/Project")
-                }
             }
 
             Section("Type") {

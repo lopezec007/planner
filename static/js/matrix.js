@@ -12,14 +12,20 @@
 //           is labelled with, via the Keys | Titles toggle beside it.
 //
 // Classic Eisenhower orientation: urgency runs 10 on the left to 0 on the
-// right, importance 0 at the bottom to 10 at the top, so the urgent-and-
-// important quadrant is top-left. The panel is sticky under the title bar
+// right, importance -1 at the bottom to 10 at the top (the quadrant midline
+// stays at 5 on both axes), so the urgent-and-important quadrant is
+// top-left. The panel is sticky under the title bar
 // (app.css), so the plot fills the panel's width and the viewport height
 // left below that sticky position; the plot area is generally not square,
 // each axis uses its own pixel extent, and it is redrawn on panel or window
 // resize.
 //
 // Only rows of kind 'task' are plotted (parents have no urgency/importance).
+// A dot's radius shows the task's effort on a log scale between the smallest
+// and largest configured effort options (R_MIN..R_MAX px; the default 15m to
+// 64h); a task with no effort keeps the default radius and is drawn hollow
+// with a dashed outline (.no-effort) so "unknown" reads differently from
+// "small". A line in the controls strip explains the encoding.
 // Tasks sharing the same (urgency, importance) are spread evenly around the
 // grid point, ordered by id, so the layout is deterministic and every point
 // stays visibly attached to its integer value. Labels sit on the outward
@@ -41,12 +47,16 @@ import { api } from './api.js';
 import { el, toast } from './util.js';
 import { itemTooltip } from './tooltip.js';
 import { POINT_COLOR_MODES, parentColor } from './colors.js';
+import { effortOptions, formatEffort } from './effort.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const MAX = 10;
+const IMP_MIN = -1;        // importance runs IMP_MIN..MAX; urgency 0..MAX
 const MARGIN = { top: 14, right: 18, bottom: 46, left: 52 };
-const POINT_R = 5;
-const HIT_R = 13;
+const POINT_R = 5;         // radius of a dot with no effort (px)
+const R_MIN = 4;           // radius at the smallest effort option (px)
+const R_MAX = 11;          // radius at the largest effort option (px)
+const HIT_PAD = 8;         // hit radius beyond the dot's radius (px)
 const MIN_PLOT = 320;      // minimum plot-area width and height (px)
 const BOTTOM_GAP = 16;     // viewport margin kept below the plot (px)
 const MIN_DEP_LEN = 6;     // shortest dependency line worth drawing (px)
@@ -70,42 +80,61 @@ function svg(tag, attrs = {}, ...children) {
   return node;
 }
 
-const level = (n) => (n == null ? 5 : Math.max(0, Math.min(MAX, Number(n))));
+const urgLevel = (n) => (n == null ? 5 : Math.max(0, Math.min(MAX, Number(n))));
+const impLevel = (n) => (n == null ? 5 : Math.max(IMP_MIN, Math.min(MAX, Number(n))));
 
-/** Jitter radius (px) so that n points spread evenly on a circle do not touch. */
-function jitterRadius(n, cell) {
+// ---------------------------------------------------------------- effort
+
+/** Dot radius (px) for an effort in minutes: a log scale between the
+ *  smallest and largest options (clamped outside them); POINT_R when the
+ *  task has no effort. */
+function pointRadius(effort, opts) {
+  if (effort == null || !(Number(effort) > 0)) return POINT_R;
+  const min = opts[0], max = opts[opts.length - 1];
+  if (!(max > min)) return (R_MIN + R_MAX) / 2;
+  const t = Math.log2(Number(effort) / min) / Math.log2(max / min);
+  return R_MIN + (R_MAX - R_MIN) * Math.max(0, Math.min(1, t));
+}
+
+/** Jitter radius (px) so that n points spread evenly on a circle do not
+ *  touch, `r` being the largest dot radius in the cluster. */
+function jitterRadius(n, cell, r = POINT_R) {
   if (n <= 1) return 0;
-  const gap = POINT_R * 2 + 3; // diameter plus the surface ring
-  const r = gap / (2 * Math.sin(Math.PI / n));
+  const gap = r * 2 + 3; // diameter plus the surface ring
+  const jr = gap / (2 * Math.sin(Math.PI / n));
   // Keep the cluster inside ~40% of a cell so it still reads as the integer value.
-  return Math.max(POINT_R + 4, Math.min(r, cell * 0.4));
+  return Math.max(r + 4, Math.min(jr, cell * 0.4));
 }
 
 /** Pixel scales for the plot area; half a cell of inner padding on each axis
- *  keeps points at 0 and 10 clear of the frame. The x axis is reversed
- *  (urgency 10 at the left). `cell` is the smaller of the two cell sizes and
- *  is what jitter is based on, so clusters stay inside a cell on both axes. */
+ *  keeps points at the ends of the ranges clear of the frame. The x axis is
+ *  reversed (urgency 10 at the left); the y axis spans IMP_MIN..MAX. `cell`
+ *  is the smaller of the two cell sizes and is what jitter is based on, so
+ *  clusters stay inside a cell on both axes. */
 function scales(plotW, plotH) {
+  const spanY = MAX - IMP_MIN;
   const cellX = plotW / (MAX + 1);
-  const cellY = plotH / (MAX + 1);
+  const cellY = plotH / (spanY + 1);
   const padX = cellX / 2;
   const padY = cellY / 2;
   return {
     cell: Math.min(cellX, cellY),
     sx: (u) => MARGIN.left + padX + ((MAX - u) / MAX) * (plotW - 2 * padX),
-    sy: (i) => MARGIN.top + padY + ((MAX - i) / MAX) * (plotH - 2 * padY),
+    sy: (i) => MARGIN.top + padY + ((MAX - i) / spanY) * (plotH - 2 * padY),
     // Inverses (unrounded) for dragging points.
     ux: (x) => MAX - ((x - MARGIN.left - padX) / (plotW - 2 * padX)) * MAX,
-    iy: (y) => MAX - ((y - MARGIN.top - padY) / (plotH - 2 * padY)) * MAX,
+    iy: (y) => MAX - ((y - MARGIN.top - padY) / (plotH - 2 * padY)) * spanY,
   };
 }
 
-/** Lay out points: returns [{ item, row, x, y, angle }] in pixel coordinates. */
+/** Lay out points: returns [{ item, row, x, y, r, angle }] in pixel
+ *  coordinates, r being the dot radius for the task's effort. */
 function layout(rows, plotW, plotH) {
   const { cell, sx, sy } = scales(plotW, plotH);
+  const opts = effortOptions();
   const groups = new Map();
   for (const row of rows) {
-    const k = `${level(row.item.urgency)},${level(row.item.importance)}`;
+    const k = `${urgLevel(row.item.urgency)},${impLevel(row.item.importance)}`;
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(row);
   }
@@ -113,7 +142,8 @@ function layout(rows, plotW, plotH) {
   for (const group of groups.values()) {
     group.sort((a, b) => a.item.id - b.item.id);
     const n = group.length;
-    const jr = jitterRadius(n, cell);
+    const radii = group.map((row) => pointRadius(row.item.effort, opts));
+    const jr = jitterRadius(n, cell, Math.max(...radii));
     // Deterministic start angle derived from the first id, so clusters at
     // different grid points do not all line up the same way.
     const start = -Math.PI / 2 + ((group[0].item.id * 0.61803) % 1) * ((2 * Math.PI) / Math.max(n, 1));
@@ -123,8 +153,9 @@ function layout(rows, plotW, plotH) {
       const dy = n > 1 ? Math.sin(angle) * jr : 0;
       out.push({
         item: row.item, row,
-        x: sx(level(row.item.urgency)) + dx,
-        y: sy(level(row.item.importance)) + dy,
+        x: sx(urgLevel(row.item.urgency)) + dx,
+        y: sy(impLevel(row.item.importance)) + dy,
+        r: radii[k],
         angle: n > 1 ? angle : 0,
       });
     });
@@ -147,6 +178,7 @@ function pointClass(item) {
   const cls = ['pt'];
   if (isClosed(item.status)) cls.push('closed');
   if (isBlocked(item)) cls.push('blocked');
+  if (item.effort == null) cls.push('no-effort');
   return cls.join(' ');
 }
 
@@ -183,13 +215,13 @@ function drawDependencies(pts) {
     if (!a || !b) continue;
     const dx = b.x - a.x, dy = b.y - a.y;
     const len = Math.hypot(dx, dy);
-    if (len < 2 * POINT_R + MIN_DEP_LEN) continue; // dots overlap: nothing to draw between them
+    if (len < a.r + b.r + MIN_DEP_LEN) continue; // dots overlap: nothing to draw between them
     const ux = dx / len, uy = dy / len;
     const open = !isClosed(blocker.status);
     const line = svg('line', {
       class: `dep${open ? ' open' : ''}`,
-      x1: a.x + ux * POINT_R, y1: a.y + uy * POINT_R,
-      x2: b.x - ux * POINT_R, y2: b.y - uy * POINT_R,
+      x1: a.x + ux * a.r, y1: a.y + uy * a.r,
+      x2: b.x - ux * b.r, y2: b.y - uy * b.r,
       'marker-end': `url(#${open ? 'mx-dep-arrow-open' : 'mx-dep-arrow'})`,
       dataset: { blocker: blocker.id, blocked: blocked.id },
     });
@@ -215,27 +247,33 @@ function drawPlot(root, rows, width, height, colorMode, labelMode) {
   const node = svg('svg', { class: 'matrix-plot', width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Urgency versus importance matrix' });
 
   // Quadrants: the top-left (urgent and important) gets a faint red wash and
-  // the bottom-right (neither) a grey one; the emphasised midlines separate
-  // the other two.
+  // the bottom-right (neither) a grey one; the emphasised midlines (5 on
+  // both axes; the y axis runs down to -1, so its midline sits below the
+  // frame's centre) separate the other two.
   const mid = MAX / 2;
+  const midY = sy(mid);
   node.append(svg('rect', { class: 'plot-bg', x: x0, y: y1, width: plotW, height: plotH }));
-  node.append(svg('rect', { class: 'quad quad-hot', x: x0, y: y1, width: halfW, height: halfH }));
-  node.append(svg('rect', { class: 'quad quad-cold', x: sx(mid), y: sy(mid), width: halfW, height: halfH }));
+  node.append(svg('rect', { class: 'quad quad-hot', x: x0, y: y1, width: halfW, height: midY - y1 }));
+  node.append(svg('rect', { class: 'quad quad-cold', x: sx(mid), y: midY, width: halfW, height: y0 - midY }));
 
   const grid = svg('g', { class: 'grid' });
   const ticks = svg('g', { class: 'ticks' });
   for (let v = 0; v <= MAX; v++) {
     const major = v === mid || v === 0 || v === MAX;
     grid.append(svg('line', { class: major ? 'major' : '', x1: sx(v), y1: y0, x2: sx(v), y2: y1 }));
-    grid.append(svg('line', { class: major ? 'major' : '', x1: x0, y1: sy(v), x2: x1, y2: sy(v) }));
     ticks.append(svg('text', { x: sx(v), y: y0 + 16, 'text-anchor': 'middle' }, v));
+  }
+  for (let v = IMP_MIN; v <= MAX; v++) {
+    const major = v === mid || v === IMP_MIN || v === MAX;
+    grid.append(svg('line', { class: major ? 'major' : '', x1: x0, y1: sy(v), x2: x1, y2: sy(v) }));
     ticks.append(svg('text', { x: x0 - 8, y: sy(v), 'text-anchor': 'end', 'dominant-baseline': 'middle' }, v));
   }
   node.append(grid, ticks);
 
+  const yMid = y1 + halfH;
   node.append(
     svg('text', { class: 'axis-label', x: sx(mid), y: H - 8, 'text-anchor': 'middle' }, 'Urgency'),
-    svg('text', { class: 'axis-label', x: 14, y: sy(mid), 'text-anchor': 'middle', transform: `rotate(-90 14 ${sy(mid)})` }, 'Importance'),
+    svg('text', { class: 'axis-label', x: 14, y: yMid, 'text-anchor': 'middle', transform: `rotate(-90 14 ${yMid})` }, 'Importance'),
     svg('text', { class: 'quad-label', x: x0 + 6, y: y1 + 14, 'text-anchor': 'start' }, 'urgent & important'),
   );
 
@@ -251,7 +289,8 @@ function drawPlot(root, rows, width, height, colorMode, labelMode) {
     const g = svg('g', {
       class: pointClass(p.item),
       dataset: { id: p.item.id, key: p.item.key },
-      style: color ? `--pt: ${color}` : null,
+      // --r lets the stylesheet grow the dot on hover relative to its size.
+      style: `--r: ${p.r}px${color ? `; --pt: ${color}` : ''}`,
     });
     // Label sits on the outward side of the jitter so clustered labels fan
     // out. When it would run past the right edge (low urgency) it flips to
@@ -259,17 +298,21 @@ function drawPlot(root, rows, width, height, colorMode, labelMode) {
     // urgency) it is forced to the right. The reach depends on the label's
     // length, so long titles flip where short keys would still fit.
     const text = labelText(p.item, labelMode);
-    const reach = POINT_R + labelWidth(text);
+    const reach = p.r + labelWidth(text);
     const vertical = p.angle !== 0 && Math.abs(Math.cos(p.angle)) <= 0.2;
     const nearRight = p.x + reach > x1;
     const nearLeft = p.x - reach < x0;
     const left = nearRight || (Math.cos(p.angle) < -0.2 && !nearLeft);
-    const lx = vertical ? p.x : p.x + (left ? -(POINT_R + LABEL_GAP) : POINT_R + LABEL_GAP);
-    const ly = vertical ? p.y + (Math.sin(p.angle) < 0 ? -(POINT_R + 5) : POINT_R + 5) : p.y;
+    const lx = vertical ? p.x : p.x + (left ? -(p.r + LABEL_GAP) : p.r + LABEL_GAP);
+    const ly = vertical ? p.y + (Math.sin(p.angle) < 0 ? -(p.r + 5) : p.r + 5) : p.y;
+    // A no-effort dot is hollow with a dashed outline in its own colour; the
+    // halo beneath it stands in for the surface ring the dot's stroke gives
+    // the others.
     g.append(
-      svg('circle', { class: 'hit', cx: p.x, cy: p.y, r: HIT_R }),
-      isBlocked(p.item) ? svg('circle', { class: 'ring', cx: p.x, cy: p.y, r: POINT_R + 3.5 }) : null,
-      svg('circle', { class: 'dot', cx: p.x, cy: p.y, r: POINT_R }),
+      svg('circle', { class: 'hit', cx: p.x, cy: p.y, r: p.r + HIT_PAD }),
+      isBlocked(p.item) ? svg('circle', { class: 'ring', cx: p.x, cy: p.y, r: p.r + 3.5 }) : null,
+      p.item.effort == null ? svg('circle', { class: 'halo', cx: p.x, cy: p.y, r: p.r + 1.75 }) : null,
+      svg('circle', { class: 'dot', cx: p.x, cy: p.y, r: p.r }),
       svg('text', {
         class: `label ${labelMode === 'title' ? 'title' : 'key'}`, x: lx, y: ly,
         'text-anchor': vertical ? 'middle' : (left ? 'end' : 'start'),
@@ -285,6 +328,13 @@ function drawPlot(root, rows, width, height, colorMode, labelMode) {
 }
 
 // ---------------------------------------------------------------- entry
+
+/** A dot of radius r for the size legend (hollow: the no-effort style). */
+function legendDot(r, hollow = false) {
+  const size = 2 * R_MAX + 2;
+  return svg('svg', { class: 'legend-dot', width: size, height: size, viewBox: `0 0 ${size} ${size}`, 'aria-hidden': 'true' },
+    svg('circle', { class: hollow ? 'dot hollow' : 'dot', cx: size / 2, cy: size / 2, r }));
+}
 
 export function renderMatrix(panel, handle, ctx) {
   // Tear down the observer and window listener left by a previous render.
@@ -311,7 +361,14 @@ export function renderMatrix(panel, handle, ctx) {
       onClick: () => { if (m !== labelMode) ctx.setLabelMode?.(m); },
     }, label));
   }
-  const controls = el('div', { class: 'matrix-controls', role: 'group', 'aria-label': 'Matrix controls' }, colorSel, labelsGroup);
+  // Dot size legend: the smallest and largest effort options, and the
+  // hollow dashed dot for tasks without one.
+  const opts = effortOptions();
+  const sizeLegend = el('span', {
+    class: 'matrix-size-legend',
+    title: `Dot size shows effort: ${formatEffort(opts[0])} smallest, ${formatEffort(opts[opts.length - 1])} largest (log scale). A hollow dashed dot has no effort set.`,
+  }, legendDot(R_MIN), legendDot(R_MAX), 'dot size: effort', legendDot(POINT_R, true), 'none');
+  const controls = el('div', { class: 'matrix-controls', role: 'group', 'aria-label': 'Matrix controls' }, sizeLegend, colorSel, labelsGroup);
   const plotRoot = el('div', { class: 'matrix-plot-wrap' });
   wrap.append(controls, plotRoot);
   const tip = itemTooltip();
@@ -397,8 +454,8 @@ export function renderMatrix(panel, handle, ctx) {
           for (const l of p.lines) l.classList.remove('moving');
           if (!dragged) return;
           const u = Math.max(0, Math.min(MAX, Math.round(ux(p.x + dx))));
-          const i = Math.max(0, Math.min(MAX, Math.round(iy(p.y + dy))));
-          if (u === level(p.item.urgency) && i === level(p.item.importance)) {
+          const i = Math.max(IMP_MIN, Math.min(MAX, Math.round(iy(p.y + dy))));
+          if (u === urgLevel(p.item.urgency) && i === impLevel(p.item.importance)) {
             p.g.removeAttribute('transform');
             dragged = false;
             return;

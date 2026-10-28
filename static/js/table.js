@@ -15,6 +15,7 @@
 //                  key (as its type chip) and title in extra leading columns
 //   opts.sort      [{ key, dir }] column sort (see sort.js); [] = user-defined
 //   opts.blockedLast  true: blocked items sink to the bottom of their group
+//   opts.closedLast   true: done/cancelled items sink below the blocked ones
 //   opts.onSort(sort)  called when a column header is clicked
 //   opts.hidden    Set of hidden column names (see columns.js)
 //
@@ -27,11 +28,18 @@
 // Columns: the visible columns (columns.js) decide the grid template, set on
 // the table element, and every row appends only those cells in that order.
 //
-// Ordering: with no column sort and "blocked last" off, rows follow the
-// user-defined order (sort_order) and can be dragged. Otherwise parents are
-// sorted among themselves and tasks within each parent (in Flat, all tasks
-// together), ties keeping the user-defined order, and dragging is disabled
-// because the positions no longer mean anything.
+// Ordering: with no column sort and both "blocked last" and "done /
+// cancelled last" off, rows follow the user-defined order (sort_order) and
+// can be dragged. Otherwise parents are sorted among themselves and tasks
+// within each parent (in Flat, all tasks together), ties keeping the
+// user-defined order, and dragging is disabled because the positions no
+// longer mean anything.
+//
+// Effort (full table only): a task row has a dropdown of the configured
+// durations (cells.js effortControl); a parent row shows the sum over the
+// tasks listed beneath it that are not done/cancelled, the breakdown in its
+// tooltip; the column header carries the same sum over every task the table
+// lists (collapsed parents included) as a small badge under its label.
 //
 // Columns, left to right: the parent collapse caret (shows or hides a
 // parent's tasks; empty on task rows; absent in Flat), the key, the title...
@@ -54,9 +62,10 @@ import { api, group } from './api.js';
 import { el, contrastText, toast } from './util.js';
 import {
   draft, discardNew, commitNew, isDraft, makeSaver, closeOnOutsidePointer,
-  titleControl, statusControl, userControl, dateControl, levelControl, blockedControl,
+  titleControl, statusControl, userControl, dateControl, levelControl, blockedControl, effortControl,
   descriptionControl, dependencyPanel, attachmentsPanel, attachmentBadge,
 } from './cells.js';
+import { formatEffort, effortSums } from './effort.js';
 import { SORT_COLUMNS, normalizeSort, compareItems, toggleSort, defaultDir } from './sort.js';
 import { visibleColumns, gridTemplate } from './columns.js';
 import { rowTint, typeChip } from './colors.js';
@@ -215,9 +224,32 @@ function headerCells(ctx) {
     end: h('end', 'End'),
     urgency: (() => { const c = h('urgency', 'Urg', 'num'); c.title = `Urgency. ${c.title}`; return c; })(),
     importance: (() => { const c = h('importance', 'Imp', 'num'); c.title = `Importance. ${c.title}`; return c; })(),
+    effort: h('effort', 'Effort', 'num effort-cell'),
     blocked: h('blocked', 'Blocked', 'blocked-cell'),
     actions: el('div'),
   };
+}
+
+/** A parent's Effort cell: the sum over its tasks listed here that are not
+ *  done/cancelled; the tooltip gives the breakdown and, when the filters
+ *  hide some tasks, the sum over all of them. Empty when nothing is open. */
+function parentEffortCell(item, ctx) {
+  const cell = el('div', { class: 'num effort-cell effort-sum' });
+  if (isDraft(item)) return cell;
+  const shown = effortSums(ctx.groupTasks.get(item.id) || []);
+  const all = effortSums(state.childrenOf.get(item.id) || []);
+  const parts = [];
+  if (shown.open) parts.push(`${formatEffort(shown.open)} open`);
+  if (shown.closed) parts.push(`${formatEffort(shown.closed)} done or cancelled`);
+  let title = parts.join(', ');
+  if (all.open + all.closed !== shown.open + shown.closed) {
+    title += `${title ? '; ' : ''}${formatEffort(all.open + all.closed)} over all its tasks${all.open !== shown.open ? ` (${formatEffort(all.open)} open)` : ''}`;
+  }
+  if (title) cell.title = title;
+  cell.dataset.open = shown.open;
+  cell.dataset.closed = shown.closed;
+  if (shown.open) cell.append(el('span', { class: 'effort-text' }, formatEffort(shown.open)));
+  return cell;
 }
 
 function headerRow(ctx) {
@@ -236,7 +268,7 @@ function rowClasses(item, kind, expanded) {
 
 function dragHandle(ctx) {
   if (ctx.sorting) {
-    return el('span', { class: 'drag-handle disabled', title: 'Rows cannot be dragged while sorted by a column or with blocked items last; choose User-defined in the Sort menu to reorder', 'aria-hidden': 'true' }, icon('grip'));
+    return el('span', { class: 'drag-handle disabled', title: 'Rows cannot be dragged while sorted by a column or with blocked or done / cancelled items last; choose User-defined in the Sort menu to reorder', 'aria-hidden': 'true' }, icon('grip'));
   }
   return el('span', { class: 'drag-handle', title: 'Drag to reorder', draggable: 'true', 'aria-label': 'Drag to reorder' }, icon('grip'));
 }
@@ -335,6 +367,7 @@ function itemRow(item, kind, mode, expanded, ctx) {
     end: () => dateControl(item, 'end', saver, { highlight: true }),
     urgency: () => levelControl(item, 'urgency', saver),
     importance: () => levelControl(item, 'importance', saver),
+    effort: () => (kind === 'parent' ? parentEffortCell(item, ctx) : effortControl(item, saver)),
     blocked: () => blockedControl(item, saver),
     actions: () => actionButtons(item, ctx, { expanded }),
   };
@@ -403,29 +436,30 @@ function restoreFocus(container, f) {
   }
 }
 
-/** Apply the column sort and "blocked last" to the groups. Returns
- *  { groups, flatTasks, grouped }: `flatTasks` is the single list shown in
- *  Flat, `grouped` whether consecutive tasks there still share a parent. */
-function orderGroups(groups, sort, blockedLast, flat) {
+/** Apply the column sort, "blocked last" and "done / cancelled last" to the
+ *  groups. Returns { groups, flatTasks, grouped }: `flatTasks` is the single
+ *  list shown in Flat, `grouped` whether consecutive tasks there still share
+ *  a parent. */
+function orderGroups(groups, sort, blockedLast, closedLast, flat) {
   const keys = normalizeSort(sort);
-  const sorting = keys.length > 0 || blockedLast;
+  const sorting = keys.length > 0 || blockedLast || closedLast;
   if (!sorting) {
     return { groups, flatTasks: groups.flatMap((g) => g.tasks), grouped: true, sorting };
   }
-  const cmp = compareItems(keys, blockedLast);
+  const cmp = compareItems(keys, blockedLast, closedLast);
   const ordered = groups.map((g) => ({ parent: g.parent, tasks: [...g.tasks].sort(cmp) })).sort((a, b) => cmp(a.parent, b.parent));
   let flatTasks = ordered.flatMap((g) => g.tasks);
   // In Flat every task takes part in one sort; the parent column (the first
   // sort key or no sort) is what keeps tasks grouped by parent.
   if (flat) flatTasks = flatTasks.sort(cmp);
-  const grouped = !blockedLast && (!keys.length || keys[0].key === 'parent');
+  const grouped = !blockedLast && !closedLast && (!keys.length || keys[0].key === 'parent');
   return { groups: ordered, flatTasks, grouped, sorting };
 }
 
 export function renderTable(container, opts) {
-  const { groups, mode = 'full', expanded = new Set(), actions, collapsed = new Set(), flat = false, sort = [], blockedLast = false, hidden = new Set() } = opts;
+  const { groups, mode = 'full', expanded = new Set(), actions, collapsed = new Set(), flat = false, sort = [], blockedLast = false, closedLast = false, hidden = new Set() } = opts;
   const handle = { rows: [], rerender: () => renderTable(container, opts) };
-  const order = orderGroups(groups, sort, blockedLast, flat);
+  const order = orderGroups(groups, sort, blockedLast, closedLast, flat);
   const columns = visibleColumns(mode, flat, hidden);
 
   // Tints: when tasks take their parent's colour, parents and tasks mix it
@@ -436,6 +470,7 @@ export function renderTable(container, opts) {
     actions,
     collapsed,
     shown: new Map(groups.map((g) => [g.parent.id, g.tasks.length])), // tasks per parent after the filters
+    groupTasks: new Map(groups.map((g) => [g.parent.id, g.tasks])),   // the tasks listed under each parent
     flat,
     mode,
     columns,

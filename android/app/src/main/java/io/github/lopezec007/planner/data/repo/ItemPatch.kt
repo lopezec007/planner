@@ -31,6 +31,7 @@ data class ItemPatch(
     val endFirm: Opt<Boolean> = Opt.Unset,
     val urgency: Opt<Int> = Opt.Unset,
     val importance: Opt<Int> = Opt.Unset,
+    val effort: Opt<Int> = Opt.Unset,      // minutes; Set(null) clears
     val blocked: Opt<Boolean> = Opt.Unset,
     val color: Opt<String> = Opt.Unset,
 ) {
@@ -53,6 +54,7 @@ data class ItemPatch(
         field("end_firm", endFirm) { JsonPrimitive(it) }
         field("urgency", urgency) { JsonPrimitive(it) }
         field("importance", importance) { JsonPrimitive(it) }
+        field("effort", effort) { JsonPrimitive(it) }
         field("blocked", blocked) { JsonPrimitive(it) }
         field("color", color) { JsonPrimitive(it) }
     }
@@ -84,6 +86,7 @@ data class ItemPatch(
         (endFirm as? Opt.Set)?.let { out = out.copy(endFirm = it.value ?: false) }
         (urgency as? Opt.Set)?.let { out = out.copy(urgency = it.value) }
         (importance as? Opt.Set)?.let { out = out.copy(importance = it.value) }
+        (effort as? Opt.Set)?.let { out = out.copy(effort = it.value) }
         (blocked as? Opt.Set)?.let { out = out.copy(blocked = it.value ?: false) }
         (color as? Opt.Set)?.let { out = out.copy(color = it.value ?: "") }
         return out.copy(updatedAt = nowIso)

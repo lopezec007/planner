@@ -12,7 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserEntity::class, ItemEntity::class, AttachmentEntity::class, SettingEntity::class,
         StatusHistoryEntity::class, PendingOpEntity::class, SyncLogEntity::class, ScratchEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class PlannerDatabase : RoomDatabase() {
@@ -33,7 +33,14 @@ abstract class PlannerDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS = arrayOf<Migration>(MIGRATION_1_2)
+        /** 2 -> 3: the effort column on items (minutes, null = none). */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `items` ADD COLUMN `effort` INTEGER")
+            }
+        }
+
+        val MIGRATIONS = arrayOf<Migration>(MIGRATION_1_2, MIGRATION_2_3)
 
         fun build(context: Context, name: String = "planner.db"): PlannerDatabase =
             Room.databaseBuilder(context.applicationContext, PlannerDatabase::class.java, name)

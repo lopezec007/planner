@@ -21,15 +21,22 @@ Release builds are signed with the key named in `android/keystore.properties`
 GitHub releases, which Obtainium installs and updates from. Without that file
 `assembleRelease` produces an unsigned APK.
 
+Use a release build on the phone you actually use: the debug build runs
+Compose with its runtime checks and without R8 (`isMinifyEnabled` and
+resource shrinking are on for release only), which makes list scrolling and
+the Timeline noticeably heavier than the release APK on the same device.
+
 ## Design
 
 ### Server contract
 
 The app is a second client of the same JSON API the web UI uses (see
 "API summary" in the top-level README), including the scratch pads
-(`/api/scratch`, `/api/users/{id}/scratch`) and the `default_status`
-setting. Nothing in the API is specific to a client; the only things that
-live on the phone are its own view preferences and the offline queue.
+(`/api/scratch`, `/api/users/{id}/scratch`), the `default_status` setting,
+the task `effort` field (minutes, one of the `effort_options` setting's
+values, null to clear) and importance from -1 to 10. Nothing in the API is
+specific to a client; the only things that live on the phone are its own
+view preferences and the offline queue.
 
 ### Network policy
 
@@ -88,9 +95,10 @@ network never blocks a screen.
   nor holds unsaved typing (then it waits for the blur, and a local edit
   made meanwhile wins, as the server's last-writer-wins would have it).
 - **Schema changes**: `PlannerDatabase` carries a migration per version
-  (`MIGRATION_1_2` added `scratch`), tested in `PlannerDatabaseTest` against
-  the exported schema in `app/schemas`; the destructive fallback only
-  applies to a version without one.
+  (`MIGRATION_1_2` added `scratch`, `MIGRATION_2_3` the `effort` column on
+  items), tested in `PlannerDatabaseTest` against the exported schema in
+  `app/schemas`; the destructive fallback only applies to a version without
+  one.
 
 ### Screens
 
@@ -102,31 +110,43 @@ network never blocks a screen.
   on its own fields; a parent shows when it or a task matches; Active hides
   parents without matching tasks). Owner and Assignee are multi-select
   chips: any chosen user, or "No owner" / "Unassigned", matches, and no
-  choice means any. Nested: each parent and its tasks is one rounded,
-  outlined card, the parent row its tinted header (a collapsed parent is a
-  single-row card); Flat is a plain list of tasks with the parent named on
-  each row. Row chips: status, assignee, end date
-  (orange within 7 days, red today/overdue), urgency/importance per the
-  server's colour ramps; blocked rows are dimmed; closed rows carry no
-  highlighting.
+  choice means any. The Nested/Flat toggle is in the top bar (tinted while
+  Flat; also governs the Timeline, hidden on the Matrix), not in the filter
+  sheet. Nested: each parent and its tasks is one rounded, outlined card,
+  the parent row its tinted header (a collapsed parent is a single-row
+  card); Flat is a plain list of tasks with the parent named on each row.
+  Row chips: status, assignee, end date (orange within 7 days, red
+  today/overdue), urgency/importance per the server's colour ramps, the
+  task's effort ("1h 30m"); blocked rows are dimmed; closed rows carry no
+  highlighting. A parent row shows the effort of its open tasks shown
+  under it ("3h", or "3h · 5h with closed" when Done/Cancelled tasks add
+  to it), and a strip above the list gives the task count and the same
+  sums over every visible task.
 - **New item**: title, then the fields with the web UI's defaults: the
   status is the server's `default_status` setting when the status filter is
   empty or includes it, else one the filter shows (so the new row is not
-  hidden at once); the owner is the account.
+  hidden at once); the owner is the account; a task's effort is "None"
+  until picked.
 - **Detail**: every field editable in place (no edit mode): title, status,
-  owner, assignee, dates with firm toggles, urgency, importance, blocked,
-  description (Markdown preview, tap to edit), dependencies (blocked by /
-  blocks), attachments, status history. Delete with undo via the snackbar
-  (the restore endpoint).
+  owner, assignee, dates with firm toggles, urgency (0-10), importance
+  (-1 to 10), effort (a menu of the planner's options plus None; a value
+  that is no longer an option is still listed so it can be kept or
+  changed), blocked, description (Markdown preview, tap to edit),
+  dependencies (blocked by / blocks), attachments, status history. Delete
+  with undo via the snackbar (the restore endpoint).
 - **Timeline**: full-screen Gantt. Rows are the visible items in list
   order, with the title drawn in the row; a two-tier date axis; pinch to
   zoom, drag to pan, long-press and drag a bar to move it, drag an end to
   resize. Bar edges follow the spec (firm: hard, approximate: soft, missing:
   long fade). Colour modes as in the web UI.
 - **Matrix**: full-screen urgency × importance scatter of the visible
-  tasks, Eisenhower orientation, deterministic jitter, dependency arrows;
-  tap a point for its card (its underlined title, like the Open button,
-  opens the task), drag a point to change its values.
+  tasks, Eisenhower orientation (the importance axis runs -1 to 10, so it
+  has one more row than urgency), deterministic jitter, dependency arrows;
+  a dot's radius grows with the task's effort (log2 of effort over 15
+  minutes: 4dp at 15m to 11dp at 64h; 6dp without one), and the jitter
+  spacing and hit radius follow the dot size. Tap a point for its card (its
+  underlined title, like the Open button, opens the task), drag a point to
+  change its values.
 - **Scratch**: from the toolbar's note icon. Two tabs, "Shared" and the
   account's name (a note instead when there is no account), each a
   monospaced text field filling the screen; Wrap in the top bar folds long
@@ -137,7 +157,29 @@ network never blocks a screen.
 - **Settings**: server and account, sync status and errors, notification
   time and look-ahead window, users (name, colour, chip label), planner
   settings shared with the web UI (week start, default status for new
-  items, colours), about.
+  items, colours, the effort options: a chip per option, tapped to remove
+  it, and Add for a new one in minutes), about. Removing an effort option
+  that an open task uses is refused on the phone with the server's
+  wording ("effort option 15m is used by T-1"), and should the server
+  refuse a settings change anyway, its message shows as a snackbar on
+  this screen as well as in the sync log.
+
+### List performance
+
+The list is a `LazyColumn` with one item per row (parent header or task),
+keyed by item id and typed `parent` / `task`, rather than one item per card:
+a big group then composes a row at a time as it scrolls in, and rows are
+reused by type. The card is drawn per row (`cardShape` / `cardEdge` in
+`ItemList`): the first and last rows carry the rounded corners (the only
+rows that need a clip), every row draws its share of the outline. The row
+builder (`buildRows`) resolves everything a row shows (assignee, blocked
+state, parent colour, effort sums) once per snapshot change, and the model
+classes are `@Immutable`, so a row whose item did not change is skipped
+when a new snapshot arrives. The chips draw their rounded background with
+`background(colour, shape)` instead of `clip(shape)` (a clip is a graphics
+layer, and a row has several chips), and only a blocked row pays for an
+alpha layer. Date formatters are built once. See also the note under
+"Build" on debug versus release builds.
 
 ### Due-date notifications
 
@@ -155,7 +197,7 @@ days"). It needs no network, so it works offline. Tapping opens the item
     app/src/main/java/io/github/lopezec007/planner/
       PlannerApp.kt            Application: builds the dependency graph (Graph)
       MainActivity.kt          single activity, Compose content, notification intents
-      data/model/              Item, User, Attachment, AppSettings, enums, dates
+      data/model/              Item, User, Attachment, AppSettings, Effort, enums, dates
       data/api/                PlannerApi (OkHttp + kotlinx.serialization), wire DTOs
       data/db/                 Room database, entities, DAOs
       data/sync/               PendingOp, SyncEngine, SyncWorker, ConnectivityProbe
@@ -168,7 +210,8 @@ days"). It needs no network, so it works offline. Tapping opens the item
       ui/nav/                  Screen stack (no Navigation library)
       ui/home/  ui/detail/  ui/timeline/  ui/matrix/  ui/settings/  ui/setup/
       ui/scratch/              the scratch pads screen and ScratchEditor (the saving rules)
-      ui/components/           chips, user avatars, pickers, Markdown view
+      ui/components/           chips (incl. effort badges), user avatars, pickers (incl. the
+                               effort menu), Markdown view
       notify/                  DueWorker, scheduling, channel
       attach/                  pickers, camera capture, open-with, outbox
 

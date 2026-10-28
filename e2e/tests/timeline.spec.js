@@ -448,3 +448,29 @@ test('in Nested the chart has no frame of its own; the axis and each parent grou
   expect(await border(page.locator('.timeline-scroll'))).toBe('1px');
   await page.locator('#btn-nested').click();
 });
+
+test('the tooltip shows a task\'s effort when it has one, and importance -1 as such', async ({ page, request }) => {
+  const items = await (await request.get('/api/items')).json();
+  const counter = items.find((i) => i.title === 'Order countertops'); // dated task, importance 9
+  expect((await request.patch(`/api/items/${counter.id}`, { data: { effort: 120, importance: -1 } })).ok()).toBe(true);
+  try {
+    await openPlan(page);
+    const tip = page.locator('.timeline-tooltip');
+    await (await barFor(page, 'Order countertops')).hover();
+    await expect(tip).toBeVisible();
+    await expect(tip.locator('.timeline-tip-effort')).toHaveText('Effort: 2h');
+    // A task without an effort has no such line.
+    await (await barFor(page, 'Clean gutters')).hover();
+    await expect(tip).toContainText('Clean gutters');
+    await expect(tip.locator('.timeline-tip-effort')).toHaveCount(0);
+    // In the combo colour mode the levels are named; -1 is shown, not clamped.
+    await page.locator('.timeline-controls select.timeline-color').selectOption('combo');
+    await expect(page.locator('.timeline-legend.combo')).toBeVisible();
+    await (await barFor(page, 'Order countertops')).hover();
+    await expect(tip).toContainText('Importance: -1');
+    await expect(tip.locator('.timeline-tip-effort')).toHaveText('Effort: 2h');
+  } finally {
+    await page.locator('.timeline-controls select.timeline-color').selectOption('assignee').catch(() => {});
+    await request.patch(`/api/items/${counter.id}`, { data: { effort: null, importance: counter.importance } });
+  }
+});

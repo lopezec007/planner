@@ -15,6 +15,7 @@ import { renderMarkdown } from './markdown.js';
 import { el, toast, contrastText } from './util.js';
 import { pin } from './search.js';
 import { itemTooltip } from './tooltip.js';
+import { formatEffort, effortOptions } from './effort.js';
 
 // ---------------------------------------------------------------- new-row draft
 
@@ -27,7 +28,7 @@ export function beginNew({ type, parentId = null, status = 'todo' }) {
     owner_id: null, assignee_id: null,
     status: type === 'ongoing' ? null : status,
     start_date: null, start_firm: false, end_date: null, end_firm: false,
-    urgency: type === 'task' ? 5 : null, importance: type === 'task' ? 5 : null, blocked: false,
+    urgency: type === 'task' ? 5 : null, importance: type === 'task' ? 5 : null, effort: null, blocked: false,
     blocked_by: [], blocks: [],
   };
   return true;
@@ -47,6 +48,7 @@ function createBody(d) {
     body.parent_id = d.parent_id;
     if (d.urgency != null) body.urgency = d.urgency;
     if (d.importance != null) body.importance = d.importance;
+    if (d.effort != null) body.effort = d.effort;
     body.blocked = !!d.blocked;
   }
   return body;
@@ -293,9 +295,10 @@ export function dateControl(item, field, saver, { highlight = false } = {}) {
   return cell;
 }
 
-/** Colour for an urgency or importance value from that field's ramp, or ''. */
+/** Colour for an urgency or importance value from that field's ramp, or ''
+ *  (also for values off the ramp, such as importance -1). */
 export function levelColor(n, field) {
-  if (n == null) return '';
+  if (n == null || !Number.isInteger(Number(n)) || n < 0 || n > 10) return '';
   const key = `${field}_colors`;
   const cache = state.settings?._ramps || (state.settings ? (state.settings._ramps = {}) : {});
   let ramp = cache[key];
@@ -307,22 +310,24 @@ export function levelColor(n, field) {
 }
 
 /** Urgency / importance: a number input; a single key sets the value
- *  (1-9, 0 = 10, ` = 0) and saves immediately. Any other printable
- *  character is refused (a number input would otherwise accept e, +, -, .
- *  and, in some browsers, letters); navigation and editing keys pass. Text
- *  that arrives another way (paste, drop, IME) is dropped unless it is a
- *  whole value from 0 to 10. */
+ *  (1-9, 0 = 10, ` = 0; for importance "-" = -1, a task that matters less
+ *  than nothing) and saves immediately. Any other printable character is
+ *  refused (a number input would otherwise accept e, +, -, . and, in some
+ *  browsers, letters); navigation and editing keys pass. Text that arrives
+ *  another way (paste, drop, IME) is dropped unless it is a whole value in
+ *  the field's range. */
 export function levelControl(item, field, saver) {
   if (item.type !== 'task') return el('div', { class: 'num' });
+  const min = field === 'importance' ? -1 : 0;
   const color = isClosed(item.status) ? '' : levelColor(item[field], field);
   const inp = el('input', {
-    type: 'number', name: field, min: 0, max: 10, inputmode: 'numeric', class: `cell-input num-input ${color ? 'hl-level' : ''}`,
+    type: 'number', name: field, min, max: 10, inputmode: 'numeric', class: `cell-input num-input ${color ? 'hl-level' : ''}`,
     value: item[field] ?? '', 'aria-label': field,
   });
   if (color) Object.assign(inp.style, { background: color, color: contrastText(color) });
   const commit = () => {
     const v = inp.value === '' ? null : Number(inp.value);
-    if (v == null || v < 0 || v > 10) { inp.value = item[field] ?? ''; return; }
+    if (v == null || v < min || v > 10) { inp.value = item[field] ?? ''; return; }
     if (v !== item[field]) saver({ [field]: v });
   };
   inp.addEventListener('keydown', (e) => {
@@ -330,6 +335,7 @@ export function levelControl(item, field, saver) {
     let v = null;
     if (e.key === '`') v = 0;
     else if (e.key === '0') v = 10;
+    else if (e.key === '-' && min < 0) v = -1;
     else if (/^[1-9]$/.test(e.key)) v = Number(e.key);
     if (v == null) {
       if (e.key === 'Enter') inp.blur();
@@ -341,11 +347,37 @@ export function levelControl(item, field, saver) {
     commit();
   });
   // Pasted or dropped text: keep it only when it is a value on its own.
+  const whole = min < 0 ? /^(10|-1|[0-9])$/ : /^(10|[0-9])$/;
   inp.addEventListener('input', () => {
-    if (!/^(10|[0-9])$/.test(inp.value)) inp.value = item[field] ?? '';
+    if (!whole.test(inp.value)) inp.value = item[field] ?? '';
   });
   inp.addEventListener('change', commit);
   return el('div', { class: 'num' }, inp);
+}
+
+/** Effort (tasks): a dropdown of the configured durations plus "—" for
+ *  none; picking saves at once. A value that is no longer an option (a done
+ *  task keeping a removed one) still shows, as a disabled extra entry. */
+export function effortControl(item, saver) {
+  const cell = el('div', { class: 'num effort-cell' });
+  if (item.type !== 'task') return cell;
+  const current = item.effort ?? null;
+  const options = effortOptions();
+  const sel = el('select', { name: 'effort', class: 'cell-select effort-select', 'aria-label': 'effort', title: current != null ? `Effort: ${formatEffort(current)}` : 'Effort: none' });
+  sel.append(el('option', { value: '', selected: current == null ? true : null }, '—'));
+  let placed = current == null || options.includes(current);
+  for (const o of options) {
+    if (!placed && o > current) { sel.append(stale(current)); placed = true; }
+    sel.append(el('option', { value: String(o), selected: current === o ? true : null }, formatEffort(o)));
+  }
+  if (!placed) sel.append(stale(current));
+  sel.addEventListener('change', () => saver({ effort: sel.value ? Number(sel.value) : null }));
+  cell.append(sel);
+  return cell;
+
+  function stale(v) {
+    return el('option', { value: String(v), selected: true, disabled: true, title: 'No longer an option in Settings', dataset: { stale: '1' } }, formatEffort(v));
+  }
 }
 
 /** Blocked: a checkbox for tasks; locked on when an open item blocks this one

@@ -83,7 +83,12 @@ Projects and Tasks should additionally have:
 
 And tasks should additionally have:
 - Urgency: byte w/ acceptable values 0-10, defaulted to 5
-- Importance: byte w/ acceptable values 0-10, defaulted to 5
+- Importance: byte w/ acceptable values -1 to 10, defaulted to 5 (-1 is "not important at all")
+- Effort: an optional duration chosen from a global list of options (by default 15m, 30m, 1h, 2h, 4h, 8h, 16h,
+  32h and 64h).  The list is edited in Settings; an option still used by any task that is not done or
+  cancelled cannot be removed, while done and cancelled tasks keep a removed value.  Parent rows show the sum of
+  effort over the open tasks listed beneath them, and the page header (beside the sort control) shows the sum over
+  all open tasks in view.
 - Blocked: boolean defaulted to false
 
 Title is the only required field; all others are optional.
@@ -198,8 +203,8 @@ another parent (tasks), delete, and the drag handle; they are icons, not text gl
 Sorting: clicking a column header sorts by that column (ascending, then descending on a second click, removed on a
 third; Urgency and Importance start descending instead); clicking further headers appends them, so the order in which headers are clicked is the multi-column sort
 order.  "User-defined" (the drag order) remains available and is the default; a Sort menu lists the columns in
-effect.  An option pushes blocked items to the bottom regardless of the sort.  While a sort is in effect rows
-cannot be dragged.
+effect.  An option pushes blocked items to the bottom regardless of the sort, and another pushes done and
+cancelled items to the bottom, below the blocked ones.  While a sort is in effect rows cannot be dragged.
 
 Each task row has a "reassign parent" button that moves it to another "Ongoing"/"Project".
 
@@ -242,8 +247,10 @@ right-hand side of the screen.
   urgency, or a combination of importance and urgency.
 
 "Matrix" view should plot all visible tasks (tasks only, since parents have no urgency/importance) in an X-Y scatter
-with "Importance" plotted on the y-axis and "Urgency" plotted on the x-axis.  Points should be jittered so that tasks
-with identical values are all visible.  Mousing-over a point should display its title and description.  A toggle
+with "Importance" plotted on the y-axis (-1 to 10) and "Urgency" plotted on the x-axis (0 to 10).  Points should be
+jittered so that tasks with identical values are all visible.  The size of a point follows the task's effort on
+a logarithmic scale from the smallest to the largest configured option; a task without an effort is drawn as a
+hollow dot.  Mousing-over a point should display its title and description.  A toggle
 above the plot (a per-user preference) labels the points with the task key or with its title.  The plot keeps its
 place in the viewport while the list beside it scrolls.
 
@@ -311,17 +318,21 @@ A phone client for the same server, kept in `android/` of this repository and bu
 - Setup: server address and account (one of the server's users; no password), both changeable in Settings.
 - List: the Active / Backlog / Ideas templates, search and filters with the same semantics as the web UI (owner
   and assignee filters accept several choices, any of which matches);
-  Nested (each parent with its tasks in a rounded outlined card, as in the web UI) or Flat; the same
-  highlighting rules.  New items take the default status from Settings under the same filter rule as the web
+  Nested (each parent with its tasks in a rounded outlined card, as in the web UI) or Flat, switched from the
+  list's top bar; the same highlighting rules.  Task rows show their effort, parent rows the sum over their open
+  tasks, and a strip above the list the count and effort of all visible tasks.  Scrolling must stay smooth: one
+  lazy item per row, no per-row work in composition.  New items take the default status from Settings under the same filter rule as the web
   UI.  A detail screen edits every field in place with no edit mode, and shows dependencies, attachments and
   the status history.
 - Scratch pads: the shared pad and the account's own pad, monospaced and editable with a wrap toggle, cached on
   the phone and saved through the offline queue (one queued write per pad), refreshed on open and on every sync;
   a remote change never replaces text being typed.
 - Timeline and Matrix: full-screen versions of the web views (no adjacent table), with the same drawing rules,
-  colouring modes, zoom/pan, and drag editing.  In the Matrix, tapping the selected task's title opens it.
+  colouring modes, zoom/pan, and drag editing (including the importance range of -1 to 10 and effort-scaled
+  dots).  In the Matrix, tapping the selected task's title opens it.
 - Attachments: files and photos from the device, and photos taken with the camera.
-- Settings: server and account, sync status and errors, notification time, users, app settings.
+- Settings: server and account, sync status and errors, notification time, users, app settings including the
+  effort options (with the same removal guard as the web UI).
 
 ### Notifications
 A daily local notification at a configurable time lists the account's open items that are overdue, due today

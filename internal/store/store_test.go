@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -600,14 +601,14 @@ func TestUserPrefs(t *testing.T) {
 	}
 	prefs, err = s.UpdateUserPrefs(u.ID, map[string]string{
 		"view": "timeline", "narrow": "1", "collapsed": "[3, 7]",
-		"sort": `[{"key":"end","dir":"asc"},{"key":"title","dir":"desc"}]`, "bar_color": "combo", "hidden_cols": `["owner","urgency"]`,
+		"sort": `[{"key":"end","dir":"asc"},{"key":"effort","dir":"asc"},{"key":"title","dir":"desc"}]`, "bar_color": "combo", "hidden_cols": `["owner","urgency","effort"]`,
 		"parent_colors": "type", "task_colors": "parent", "point_color": "parent",
 		"filters": `{"types":["task"],"statuses":["todo","in-progress"],"recent_days":14,"hide_empty_parents":true,"owner":"3","assignee":"none","blocked":"yes","end_after":"2026-01-01","end_before":""}`,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prefs["view"] != "timeline" || prefs["narrow"] != "1" || prefs["collapsed"] != "[3, 7]" || prefs["bar_color"] != "combo" || prefs["flat"] != "0" || prefs["hidden_cols"] != `["owner","urgency"]` ||
+	if prefs["view"] != "timeline" || prefs["narrow"] != "1" || prefs["collapsed"] != "[3, 7]" || prefs["bar_color"] != "combo" || prefs["flat"] != "0" || prefs["hidden_cols"] != `["owner","urgency","effort"]` ||
 		prefs["parent_colors"] != "type" || prefs["task_colors"] != "parent" || prefs["point_color"] != "parent" {
 		t.Fatalf("updated: %v", prefs)
 	}
@@ -815,5 +816,336 @@ func TestAttachments(t *testing.T) {
 	}
 	if _, _, err := s.GetAttachment(a.ID); err != nil {
 		t.Fatalf("attachment should be back with its item: %v", err)
+	}
+}
+
+func TestImportanceMayBeMinusOne(t *testing.T) {
+	s := openTest(t)
+	o := mustCreate(t, s, TypeOngoing, Patch{Title: str("Bucket")})
+	tk := mustCreate(t, s, TypeTask, Patch{Title: str("T"), ParentID: i64(o.ID), Importance: in(-1)})
+	if *tk.Importance != -1 {
+		t.Fatalf("importance on create: %d", *tk.Importance)
+	}
+	tk, err := s.UpdateItem(tk.ID, Patch{Importance: in(10)})
+	if err != nil || *tk.Importance != 10 {
+		t.Fatalf("importance 10: %v %v", tk, err)
+	}
+	tk, err = s.UpdateItem(tk.ID, Patch{Importance: in(-1)})
+	if err != nil || *tk.Importance != -1 {
+		t.Fatalf("importance -1: %v %v", tk, err)
+	}
+	var ve *ValidationError
+	if _, err := s.UpdateItem(tk.ID, Patch{Importance: in(-2)}); !errors.As(err, &ve) || ve.Msg != "importance must be -1 to 10" {
+		t.Fatalf("importance -2: %v", err)
+	}
+	// Urgency keeps its range.
+	if _, err := s.UpdateItem(tk.ID, Patch{Urgency: in(-1)}); !errors.As(err, &ve) || ve.Msg != "urgency must be 0-10" {
+		t.Fatalf("urgency -1: %v", err)
+	}
+	// The CHECK constraint agrees with the validation.
+	if _, err := s.db.Exec(`UPDATE items SET importance = -2 WHERE id = ?`, tk.ID); err == nil {
+		t.Fatal("the CHECK constraint should refuse importance -2")
+	}
+	if _, err := s.db.Exec(`UPDATE items SET urgency = -1 WHERE id = ?`, tk.ID); err == nil {
+		t.Fatal("the CHECK constraint should refuse urgency -1")
+	}
+}
+
+// itemsTableV5 is the items table as schema version 5 created it, before
+// importance could be -1 and before the effort column.
+const itemsTableV5 = `CREATE TABLE items (
+	id              INTEGER PRIMARY KEY,
+	type            TEXT NOT NULL CHECK (type IN ('ongoing','project','task')),
+	num             INTEGER NOT NULL,
+	key             TEXT NOT NULL UNIQUE,
+	parent_id       INTEGER REFERENCES items(id),
+	title           TEXT NOT NULL,
+	description     TEXT NOT NULL DEFAULT '',
+	owner_id        INTEGER REFERENCES users(id),
+	assignee_id     INTEGER REFERENCES users(id),
+	status          TEXT CHECK (status IS NULL OR status IN ('idea','backlog','todo','in-progress','done','cancelled')),
+	start_date      TEXT,
+	start_firm      INTEGER NOT NULL DEFAULT 0,
+	end_date        TEXT,
+	end_firm        INTEGER NOT NULL DEFAULT 0,
+	urgency         INTEGER CHECK (urgency IS NULL OR (urgency BETWEEN 0 AND 10)),
+	importance      INTEGER CHECK (importance IS NULL OR (importance BETWEEN 0 AND 10)),
+	blocked         INTEGER NOT NULL DEFAULT 0,
+	color           TEXT NOT NULL DEFAULT '',
+	sort_order      INTEGER NOT NULL DEFAULT 0,
+	created_at      TEXT NOT NULL,
+	updated_at      TEXT NOT NULL,
+	deleted_at      TEXT
+)`
+
+// openV5 builds a database with the schema version 5 items table and rows in
+// every table that references it, as a planner 1.4 install would hold.
+func openV5(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	stmts := []string{
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, color TEXT NOT NULL, short TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
+		`CREATE TABLE key_counters (type TEXT PRIMARY KEY, next INTEGER NOT NULL)`,
+		itemsTableV5,
+		`CREATE INDEX items_parent ON items(parent_id)`,
+		`CREATE TABLE dependencies (blocker_id INTEGER NOT NULL REFERENCES items(id), blocked_id INTEGER NOT NULL REFERENCES items(id), created_at TEXT NOT NULL, PRIMARY KEY (blocker_id, blocked_id), CHECK (blocker_id <> blocked_id))`,
+		`CREATE TABLE status_history (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES items(id), status TEXT NOT NULL, changed_at TEXT NOT NULL)`,
+		`CREATE TABLE attachments (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES items(id), name TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL, data BLOB NOT NULL, created_at TEXT NOT NULL, deleted_at TEXT)`,
+		`INSERT INTO users (id, name, color, short, created_at) VALUES (1, 'Evan', '#4e79a7', 'Eva', '2026-01-01T00:00:00Z')`,
+		`INSERT INTO key_counters (type, next) VALUES ('ongoing', 2), ('project', 2), ('task', 3)`,
+		`INSERT INTO items (id, type, num, key, parent_id, title, description, owner_id, assignee_id, status, start_date, start_firm, end_date, end_firm, urgency, importance, blocked, color, sort_order, created_at, updated_at, deleted_at) VALUES
+			(1, 'ongoing', 1, 'N-1', NULL, 'Maint', 'desc', 1, NULL, NULL, NULL, 0, NULL, 0, NULL, NULL, 0, '#2a9d8f', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL),
+			(2, 'project', 1, 'P-1', NULL, 'Proj', '', NULL, 1, 'in-progress', '2026-01-02', 1, '2026-02-01', 0, NULL, NULL, 0, '', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL),
+			(3, 'task', 1, 'T-1', 1, 'Fix', 'the roof', 1, 1, 'todo', NULL, 0, '2026-03-01', 1, 7, 5, 1, '', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL),
+			(4, 'task', 2, 'T-2', 2, 'Gone', '', NULL, NULL, 'done', NULL, 0, NULL, 0, 5, 5, 0, '', 0, '2026-01-01T00:00:00Z', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z')`,
+		`INSERT INTO dependencies (blocker_id, blocked_id, created_at) VALUES (2, 3, '2026-01-01T00:00:00Z')`,
+		`INSERT INTO status_history (item_id, status, changed_at) VALUES (3, 'todo', '2026-01-01T00:00:00Z'), (4, 'todo', '2026-01-01T00:00:00Z'), (4, 'done', '2026-01-02T00:00:00Z')`,
+		`INSERT INTO attachments (item_id, name, content_type, size, data, created_at) VALUES (3, 'a.txt', 'text/plain', 2, X'6869', '2026-01-01T00:00:00Z')`,
+		`PRAGMA user_version = 5`,
+	}
+	for _, q := range stmts {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+}
+
+func TestItemsTableRebuiltForImportance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v5.db")
+	openV5(t, path)
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("open v5 database: %v", err)
+	}
+	defer s.Close()
+	if s.LastBackup == "" {
+		t.Fatal("expected a backup before the rebuild")
+	}
+	var sqlText string
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'`).Scan(&sqlText); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sqlText, "importance BETWEEN -1 AND 10") || !strings.Contains(sqlText, "effort") || strings.Contains(sqlText, "items_new") {
+		t.Fatalf("items table after rebuild:\n%s", sqlText)
+	}
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'items_parent'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("items_parent index: %d %v", n, err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("foreign key violations after rebuild: %d %v", n, err)
+	}
+	if err := s.db.QueryRow(`PRAGMA foreign_keys`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("foreign keys should be enforced again: %d %v", n, err)
+	}
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&n); err != nil || n != schemaVersion {
+		t.Fatalf("user_version: %d %v", n, err)
+	}
+	// Rows, ids and every column survived; the deleted task is still deleted.
+	items, err := s.ListItems()
+	if err != nil || len(items) != 3 {
+		t.Fatalf("items: %+v %v", items, err)
+	}
+	tk, err := s.GetItem(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk.Key != "T-1" || tk.Title != "Fix" || tk.Description != "the roof" || *tk.ParentID != 1 || *tk.OwnerID != 1 || *tk.AssigneeID != 1 ||
+		*tk.Status != StatusTodo || tk.EndDate == nil || *tk.EndDate != "2026-03-01" || !tk.EndFirm || *tk.Urgency != 7 || *tk.Importance != 5 ||
+		!tk.Blocked || tk.Effort != nil || tk.CreatedAt != "2026-01-01T00:00:00Z" {
+		t.Fatalf("task after rebuild: %+v", tk)
+	}
+	if len(tk.BlockedBy) != 1 || tk.BlockedBy[0] != 2 || len(tk.Attachments) != 1 || tk.Attachments[0].Name != "a.txt" {
+		t.Fatalf("task references after rebuild: %+v", tk)
+	}
+	if o, _ := s.GetItem(1); o.Color != "#2a9d8f" || o.Title != "Maint" {
+		t.Fatalf("ongoing after rebuild: %+v", o)
+	}
+	if h, _ := s.History(3); len(h) != 1 || h[0].Status != StatusTodo {
+		t.Fatalf("history after rebuild: %+v", h)
+	}
+	if _, err := s.GetItem(4); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted task should stay deleted: %v", err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM status_history WHERE item_id = 4`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("history of the deleted task: %d %v", n, err)
+	}
+	// The new constraint is in force, and so are foreign keys.
+	if _, err := s.UpdateItem(3, Patch{Importance: in(-1)}); err != nil {
+		t.Fatalf("importance -1 after rebuild: %v", err)
+	}
+	if _, err := s.db.Exec(`UPDATE items SET importance = -2 WHERE id = 3`); err == nil {
+		t.Fatal("the rebuilt CHECK constraint should refuse -2")
+	}
+	if _, err := s.db.Exec(`INSERT INTO dependencies (blocker_id, blocked_id, created_at) VALUES (99, 3, 'x')`); err == nil {
+		t.Fatal("foreign keys should be enforced after the rebuild")
+	}
+	if nt := mustCreate(t, s, TypeTask, Patch{Title: str("next"), ParentID: i64(1), Effort: in(60)}); nt.Key != "T-3" || *nt.Effort != 60 {
+		t.Fatalf("new task after rebuild: %+v", nt)
+	}
+	// Running the migration again is a no-op.
+	if err := s.migrate(); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	var again string
+	s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'`).Scan(&again)
+	if again != sqlText {
+		t.Fatalf("second migrate changed the table:\n%s", again)
+	}
+	if items, _ = s.ListItems(); len(items) != 4 {
+		t.Fatalf("items after second migrate: %d", len(items))
+	}
+	// The backup still has the old table.
+	b, err := sql.Open("sqlite", "file:"+s.LastBackup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	var old string
+	if err := b.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'`).Scan(&old); err != nil || !strings.Contains(old, "importance BETWEEN 0 AND 10") {
+		t.Fatalf("backup table: %v\n%s", err, old)
+	}
+}
+
+func TestFormatEffort(t *testing.T) {
+	for m, want := range map[int]string{15: "15m", 30: "30m", 60: "1h", 90: "1h 30m", 120: "2h", 3840: "64h", 0: "0m", 61: "1h 1m"} {
+		if got := FormatEffort(m); got != want {
+			t.Errorf("FormatEffort(%d) = %q, want %q", m, got, want)
+		}
+	}
+}
+
+func TestEffort(t *testing.T) {
+	s := openTest(t)
+	st, _ := s.Settings()
+	if st["effort_options"] != DefaultEffortOptions {
+		t.Fatalf("default effort_options: %v", st["effort_options"])
+	}
+	o := mustCreate(t, s, TypeOngoing, Patch{Title: str("Bucket")})
+	tk := mustCreate(t, s, TypeTask, Patch{Title: str("T"), ParentID: i64(o.ID)})
+	if tk.Effort != nil {
+		t.Fatalf("effort defaults to unset, got %v", *tk.Effort)
+	}
+	tk2 := mustCreate(t, s, TypeTask, Patch{Title: str("T2"), ParentID: i64(o.ID), Effort: in(60)})
+	if tk2.Effort == nil || *tk2.Effort != 60 {
+		t.Fatalf("effort on create: %+v", tk2)
+	}
+	var ve *ValidationError
+	if _, err := s.CreateItem(NewItem{Type: TypeTask, Patch: Patch{Title: str("x"), ParentID: i64(o.ID), Effort: in(45)}}); !errors.As(err, &ve) || !strings.Contains(ve.Msg, "15m, 30m, 1h, 2h") {
+		t.Fatalf("effort not an option: %v", err)
+	}
+	if _, err := s.CreateItem(NewItem{Type: TypeProject, Patch: Patch{Title: str("x"), Effort: in(60)}}); !errors.As(err, &ve) {
+		t.Fatalf("project with effort: %v", err)
+	}
+	if _, err := s.UpdateItem(o.ID, Patch{ClearEffort: true}); !errors.As(err, &ve) {
+		t.Fatalf("ongoing clearing effort: %v", err)
+	}
+	tk, err := s.UpdateItem(tk.ID, Patch{Effort: in(120)})
+	if err != nil || tk.Effort == nil || *tk.Effort != 120 {
+		t.Fatalf("effort update: %+v %v", tk, err)
+	}
+	if _, err := s.UpdateItem(tk.ID, Patch{Effort: in(0)}); !errors.As(err, &ve) {
+		t.Fatalf("effort 0: %v", err)
+	}
+	tk, err = s.UpdateItem(tk.ID, Patch{ClearEffort: true})
+	if err != nil || tk.Effort != nil {
+		t.Fatalf("effort clear: %+v %v", tk, err)
+	}
+	items, _ := s.ListItems()
+	if items[2].Effort == nil || *items[2].Effort != 60 || items[1].Effort != nil {
+		t.Fatalf("list: %+v", items)
+	}
+
+	// effort_options validation.
+	for _, bad := range []string{"", "nope", "[]", "{}", "[0]", "[-15]", "[15,15]", "[1.5]", `["15"]`, "[15,null]",
+		"[" + strings.Repeat("1,", MaxEffortOptions) + "9999]"} {
+		if _, err := s.UpdateSettings(map[string]string{"effort_options": bad}); !errors.As(err, &ve) {
+			t.Errorf("effort_options %q: expected validation error, got %v", bad, err)
+		}
+	}
+	// Stored sorted, and an item may then use the new values.
+	st, err = s.UpdateSettings(map[string]string{"effort_options": "[60, 10, 3840, 120]"})
+	if err != nil || st["effort_options"] != "[10,60,120,3840]" {
+		t.Fatalf("effort_options stored: %v %v", st["effort_options"], err)
+	}
+	if _, err := s.UpdateItem(tk.ID, Patch{Effort: in(10)}); err != nil {
+		t.Fatalf("new option: %v", err)
+	}
+	if _, err := s.UpdateItem(tk.ID, Patch{Effort: in(15)}); !errors.As(err, &ve) {
+		t.Fatalf("removed option: %v", err)
+	}
+
+	// Removal guard: tk uses 10 (todo), tk2 uses 60 (todo), tk3 uses 120 and
+	// is done, tk4 uses 3840 and is deleted.
+	tk3 := mustCreate(t, s, TypeTask, Patch{Title: str("T3"), ParentID: i64(o.ID), Effort: in(120), Status: str(StatusDone)})
+	tk4 := mustCreate(t, s, TypeTask, Patch{Title: str("T4"), ParentID: i64(o.ID), Effort: in(3840)})
+	if err := s.DeleteItem(tk4.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.UpdateSettings(map[string]string{"effort_options": "[120]"})
+	if !errors.As(err, &ve) {
+		t.Fatalf("removing used options: %v", err)
+	}
+	if ve.Msg != "effort option 10m is used by "+tk.Key+"; effort option 1h is used by "+tk2.Key {
+		t.Fatalf("guard message: %q", ve.Msg)
+	}
+	if st, _ = s.Settings(); st["effort_options"] != "[10,60,120,3840]" {
+		t.Fatalf("rejected update must not write: %v", st["effort_options"])
+	}
+	// Several open tasks on one option are all named, in key order.
+	tk5 := mustCreate(t, s, TypeTask, Patch{Title: str("T5"), ParentID: i64(o.ID), Effort: in(60), Status: str(StatusInProgress)})
+	_, err = s.UpdateSettings(map[string]string{"effort_options": "[10,120,3840]"})
+	if !errors.As(err, &ve) || ve.Msg != "effort option 1h is used by "+tk2.Key+", "+tk5.Key {
+		t.Fatalf("guard message with two tasks: %v", err)
+	}
+	// Options used only by closed or deleted tasks may go; the tasks keep
+	// their value.
+	st, err = s.UpdateSettings(map[string]string{"effort_options": "[10,60]"})
+	if err != nil || st["effort_options"] != "[10,60]" {
+		t.Fatalf("removing closed/deleted-only options: %v %v", st["effort_options"], err)
+	}
+	if got, _ := s.GetItem(tk3.ID); got.Effort == nil || *got.Effort != 120 {
+		t.Fatalf("done task should keep its effort: %+v", got)
+	}
+	// A task keeps a stale value through unrelated edits, and closing a task
+	// releases its option.
+	if got, err := s.UpdateItem(tk3.ID, Patch{Title: str("renamed")}); err != nil || *got.Effort != 120 {
+		t.Fatalf("stale effort through an edit: %+v %v", got, err)
+	}
+	for _, id := range []int64{tk2.ID, tk5.ID} {
+		if _, err := s.UpdateItem(id, Patch{Status: str(StatusCancelled)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.UpdateSettings(map[string]string{"effort_options": "[10]"}); err != nil {
+		t.Fatalf("removing an option only cancelled tasks use: %v", err)
+	}
+	// Other settings in the same batch are untouched by the guard, and the
+	// setting still round-trips through migrate.
+	if st, err = s.UpdateSettings(map[string]string{"effort_options": "[10,20]", "week_start": "0"}); err != nil || st["week_start"] != "0" || st["effort_options"] != "[10,20]" {
+		t.Fatalf("batch: %v %v", st, err)
+	}
+}
+
+func TestClosedLastPref(t *testing.T) {
+	s := openTest(t)
+	u, _ := s.CreateUser("Evan", "", "")
+	prefs, err := s.UserPrefs(u.ID)
+	if err != nil || prefs["closed_last"] != "0" {
+		t.Fatalf("default: %v %v", prefs, err)
+	}
+	prefs, err = s.UpdateUserPrefs(u.ID, map[string]string{"closed_last": "1"})
+	if err != nil || prefs["closed_last"] != "1" || prefs["blocked_last"] != "0" {
+		t.Fatalf("set: %v %v", prefs, err)
+	}
+	var ve *ValidationError
+	for _, bad := range []string{"", "2", "true"} {
+		if _, err := s.UpdateUserPrefs(u.ID, map[string]string{"closed_last": bad}); !errors.As(err, &ve) {
+			t.Errorf("closed_last %q: expected validation error, got %v", bad, err)
+		}
 	}
 }

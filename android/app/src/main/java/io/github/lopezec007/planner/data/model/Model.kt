@@ -3,6 +3,7 @@
 // "Item JSON fields".
 package io.github.lopezec007.planner.data.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -38,6 +39,10 @@ enum class Status(val wire: String, val label: String) {
     }
 }
 
+// The model classes are @Immutable so Compose compares them by value: a list
+// row whose item did not change is skipped when a new snapshot arrives,
+// instead of recomposing because the instance is new (see ItemList).
+@Immutable
 data class User(
     val id: Long,
     val name: String,
@@ -49,6 +54,7 @@ data class User(
     val chip: String get() = short.ifBlank { name }
 }
 
+@Immutable
 data class Attachment(
     val id: Long,
     val itemId: Long,
@@ -64,6 +70,7 @@ data class Attachment(
  * An item as the UI sees it. `id` is negative for an item created offline
  * that the server has not yet answered ([isLocal]); its [key] is then "…".
  */
+@Immutable
 data class Item(
     val id: Long,
     val type: ItemType,
@@ -80,7 +87,8 @@ data class Item(
     val endDate: LocalDate?,
     val endFirm: Boolean,
     val urgency: Int?,
-    val importance: Int?,
+    val importance: Int?,       // -1..10 (urgency is 0..10)
+    val effort: Int? = null,    // minutes, tasks only; one of the `effort_options` setting
     val blocked: Boolean,
     val color: String,          // an Ongoing's/Project's own colour, "" for none
     val sortOrder: Long,
@@ -103,6 +111,7 @@ data class Item(
 data class StatusChange(val id: Long, val itemId: Long, val status: Status, val changedAt: String)
 
 /** App settings from /api/settings (strings on the wire, defaults from the server). */
+@Immutable
 data class AppSettings(val values: Map<String, String>) {
     operator fun get(key: String): String? = values[key]
     val weekStart: Int get() = values["week_start"]?.toIntOrNull()?.coerceIn(0, 6) ?: 6
@@ -113,13 +122,16 @@ data class AppSettings(val values: Map<String, String>) {
     /** The status a new project or task starts with when the filters allow it (server default "todo"). */
     val defaultStatus: Status get() = Status.fromWire(values["default_status"]) ?: Status.TODO
 
-    /** The ramp for urgency or importance: index = value 0..10, "" = no colour. */
+    /** The ramp for urgency or importance: index = value 0..10, "" = no colour (importance -1 has none). */
     fun ramp(field: String): List<String> = parseRamp(values["${field}_colors"])
 
     fun levelColor(field: String, n: Int?): String {
-        if (n == null) return ""
+        if (n == null || n < 0) return ""
         return ramp(field).getOrNull(n) ?: ""
     }
+
+    /** The effort choices in minutes, ascending (the `effort_options` setting; the server's default when absent). */
+    val effortOptions: List<Int> get() = Effort.parseOptions(values["effort_options"])
 
     companion object {
         val EMPTY = AppSettings(emptyMap())
@@ -133,6 +145,58 @@ data class AppSettings(val values: Map<String, String>) {
                 emptyList()
             }
         }
+    }
+}
+
+/**
+ * Effort on a task: whole minutes, one of the planner's `effort_options`.
+ * Shown as "15m", "1h", "1h 30m", "64h"; summed over a parent's open tasks.
+ */
+object Effort {
+    /** The server's default options: 15m, 30m, 1h, 2h, 4h, 8h, 16h, 32h, 64h. */
+    val DEFAULT_OPTIONS = listOf(15, 30, 60, 120, 240, 480, 960, 1920, 3840)
+
+    /** Minutes as "15m" / "1h" / "1h 30m"; "" for null. */
+    fun format(minutes: Int?): String {
+        if (minutes == null) return ""
+        if (minutes <= 0) return "0m"
+        val h = minutes / 60
+        val m = minutes % 60
+        return when {
+            h == 0 -> "${m}m"
+            m == 0 -> "${h}h"
+            else -> "${h}h ${m}m"
+        }
+    }
+
+    /** Parses the setting's JSON array of positive minutes leniently: ascending, distinct, the default when blank or malformed. */
+    fun parseOptions(json: String?): List<Int> {
+        if (json.isNullOrBlank()) return DEFAULT_OPTIONS
+        val parsed = try {
+            Json.decodeFromString<List<Int>>(json)
+        } catch (_: Exception) {
+            return DEFAULT_OPTIONS
+        }
+        val clean = parsed.filter { it > 0 }.distinct().sorted()
+        return if (clean.isEmpty()) DEFAULT_OPTIONS else clean
+    }
+
+    /** The setting's wire form: a JSON array, ascending. */
+    fun encodeOptions(options: List<Int>): String = options.distinct().sorted().joinToString(",", "[", "]")
+
+    /** The effort of the tasks that count: open ones (not Done/Cancelled) with a value; null when none has one. */
+    fun sumOpen(tasks: List<Item>): Int? = sum(tasks.filter { !it.isClosed })
+
+    /** The effort of every task with a value, closed ones included; null when none has one. */
+    fun sum(tasks: List<Item>): Int? {
+        var total = 0
+        var any = false
+        for (t in tasks) {
+            val e = t.effort ?: continue
+            total += e
+            any = true
+        }
+        return if (any) total else null
     }
 }
 

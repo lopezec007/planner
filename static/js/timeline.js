@@ -29,6 +29,10 @@
 // resized; on a Project, clicking or dragging its edge pins a real date, and
 // an Ongoing's bar is inert (the row band shows the tooltip instead).
 //
+// The tooltip names a task's effort ("Effort: 2h") when it has one, and its
+// importance/urgency in the level-based colour modes (importance may be -1;
+// the combo colour clamps it to 0, see colors.js).
+//
 // Dependencies: every edge whose two items both have a bar is drawn as a
 // rounded orthogonal connector from the end of the blocker's bar to the start
 // of the blocked bar, with an arrowhead at the blocked end. The connectors
@@ -39,6 +43,7 @@ import { el, toast } from './util.js';
 import { api } from './api.js';
 import { state, isClosed, isBlocked, dependencyEdges, parseYMD, today, daysFromToday, addDays } from './state.js';
 import { BAR_COLOR_MODES, barColor, barLegend, rowTint, typeChip } from './colors.js';
+import { formatEffort } from './effort.js';
 
 const DAY_MS = 86400000;
 const MAX_PPD = 80;        // max pixels per day
@@ -686,6 +691,7 @@ export function renderTimeline(panel, handle, ctx) {
     if (it.type === 'task' && (colorMode === 'importance' || colorMode === 'urgency' || colorMode === 'combo')) {
       tooltip.append(el('div', { class: 'timeline-tip-who' }, `Importance: ${it.importance ?? '—'}  ·  Urgency: ${it.urgency ?? '—'}`));
     }
+    if (it.type === 'task' && it.effort != null && formatEffort(it.effort)) tooltip.append(el('div', { class: 'timeline-tip-who timeline-tip-effort' }, `Effort: ${formatEffort(it.effort)}`));
     tooltip.append(el('div', { class: 'timeline-tip-hint' }));
     tooltip.hidden = false;
   }

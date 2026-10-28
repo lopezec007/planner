@@ -32,6 +32,9 @@ export const COLUMNS = [
   { name: 'end', label: 'End', width: '150px', hidable: true },
   { name: 'urgency', label: 'Urgency', width: '44px', hidable: true },
   { name: 'importance', label: 'Importance', width: '44px', hidable: true },
+  // Tasks only: a dropdown of the configured durations; parents show the sum
+  // of their open tasks (see table.js) and the toolbar the total (app.js).
+  { name: 'effort', label: 'Effort', width: '76px', hidable: true },
   { name: 'blocked', label: 'Blocked', width: '80px', hidable: true },
   { name: 'actions', width: '124px' },
 ];

@@ -262,16 +262,26 @@ function applyFilter(groups) {
 
 // ---- re-render plumbing ----
 
+const TEXTUAL = (node) => node.tagName === 'INPUT' && (node.type === 'text' || node.type === 'search');
+
+/** Remember the focused control (and the caret in a text box) so the next
+ *  mount can give it back. Every render rebuilds the controls, so app.js
+ *  calls this before it empties the toolbar, whatever triggered the render
+ *  (a save, a live update); the re-renders started here call it too. */
+export function captureFocus() {
+  if (pendingFocus) return;
+  const a = document.activeElement;
+  if (!(a && a.dataset && a.dataset.searchKey)) return;
+  pendingFocus = { key: a.dataset.searchKey };
+  if (TEXTUAL(a)) {
+    pendingFocus.start = a.selectionStart;
+    pendingFocus.end = a.selectionEnd;
+  }
+}
+
 function rerender() {
   persistFilters();
-  const a = document.activeElement;
-  if (a && a.dataset && a.dataset.searchKey) {
-    pendingFocus = { key: a.dataset.searchKey };
-    if (a.tagName === 'INPUT' && a.type === 'text') {
-      pendingFocus.start = a.selectionStart;
-      pendingFocus.end = a.selectionEnd;
-    }
-  }
+  captureFocus();
   if (currentCtx) currentCtx.rerender();
 }
 
@@ -282,7 +292,7 @@ function restoreFocus(slot) {
   const node = slot.querySelector(`[data-search-key="${key}"]`);
   if (!node) return;
   node.focus();
-  if (start != null && node.type === 'text') {
+  if (start != null && TEXTUAL(node)) {
     try { node.setSelectionRange(start, end); } catch {}
   }
 }

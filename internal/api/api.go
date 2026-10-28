@@ -251,6 +251,7 @@ type itemBody struct {
 	EndFirm     *bool       `json:"end_firm"`
 	Urgency     *int        `json:"urgency"`
 	Importance  *int        `json:"importance"`
+	Effort      Opt[int]    `json:"effort"`
 	Blocked     *bool       `json:"blocked"`
 	Color       *string     `json:"color"`
 }
@@ -298,6 +299,13 @@ func (b *itemBody) patch() (store.Patch, error) {
 			p.ClearEnd = true
 		} else {
 			p.EndDate = b.EndDate.Val
+		}
+	}
+	if b.Effort.Set {
+		if b.Effort.Val == nil {
+			p.ClearEffort = true
+		} else {
+			p.Effort = b.Effort.Val
 		}
 	}
 	return p, nil

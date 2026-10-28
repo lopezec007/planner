@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"planner/internal/store"
@@ -511,5 +512,141 @@ func TestAttachmentBatchIsAllOrNothing(t *testing.T) {
 	call(t, srv, "GET", "/api/items/"+id, nil, &got)
 	if n := len(got["attachments"].([]any)); n != 0 {
 		t.Fatalf("expected nothing stored, got %d attachment(s)", n)
+	}
+}
+
+// callErr is call for responses whose body is wanted whatever the status,
+// returning the decoded JSON (an {"error": ...} object on failure).
+func callErr(t *testing.T, srv *httptest.Server, method, path string, body any) (int, map[string]any) {
+	t.Helper()
+	var buf bytes.Buffer
+	if body != nil {
+		if s, ok := body.(string); ok {
+			buf.WriteString(s)
+		} else {
+			json.NewEncoder(&buf).Encode(body)
+		}
+	}
+	req, _ := http.NewRequest(method, srv.URL+path, &buf)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	if resp.StatusCode != 204 {
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decode %s %s: %v", method, path, err)
+		}
+	}
+	return resp.StatusCode, out
+}
+
+func TestEffortEndpoints(t *testing.T) {
+	srv := setup(t)
+	var st map[string]string
+	if c := call(t, srv, "GET", "/api/settings", nil, &st); c != 200 || st["effort_options"] != store.DefaultEffortOptions {
+		t.Fatalf("default effort_options: %d %v", c, st["effort_options"])
+	}
+	var o map[string]any
+	call(t, srv, "POST", "/api/items", map[string]any{"type": "ongoing", "title": "Maint"}, &o)
+	var tk map[string]any
+	if c := call(t, srv, "POST", "/api/items", map[string]any{"type": "task", "title": "a", "parent_id": o["id"], "effort": 30}, &tk); c != 201 {
+		t.Fatalf("create with effort: %d", c)
+	}
+	if tk["effort"].(float64) != 30 {
+		t.Fatalf("effort on create: %v", tk)
+	}
+	var tk2 map[string]any
+	call(t, srv, "POST", "/api/items", map[string]any{"type": "task", "title": "b", "parent_id": o["id"]}, &tk2)
+	if v, ok := tk2["effort"]; !ok || v != nil {
+		t.Fatalf("effort should be present and null when unset: %v", tk2)
+	}
+	path := "/api/items/" + jsonNum(int64(tk["id"].(float64)))
+	// An unknown value is a 400 that lists the options.
+	if c, body := callErr(t, srv, "PATCH", path, map[string]any{"effort": 45}); c != 400 || !strings.Contains(body["error"].(string), "15m, 30m, 1h") {
+		t.Fatalf("effort 45: %d %v", c, body)
+	}
+	if c := call(t, srv, "PATCH", path, `{"effort": "1h"}`, nil); c != 400 {
+		t.Fatalf("effort as a string: %d", c)
+	}
+	if c := call(t, srv, "POST", "/api/items", map[string]any{"type": "project", "title": "p", "effort": 60}, nil); c != 400 {
+		t.Fatalf("project with effort: %d", c)
+	}
+	var up map[string]any
+	if c := call(t, srv, "PATCH", path, map[string]any{"effort": 60}, &up); c != 200 || up["effort"].(float64) != 60 {
+		t.Fatalf("patch effort: %d %v", c, up)
+	}
+	// An absent field leaves it; null clears it.
+	if c := call(t, srv, "PATCH", path, map[string]any{"title": "renamed"}, &up); c != 200 || up["effort"].(float64) != 60 {
+		t.Fatalf("effort kept through an unrelated patch: %d %v", c, up)
+	}
+	if c := call(t, srv, "PATCH", path, `{"effort": null}`, &up); c != 200 || up["effort"] != nil {
+		t.Fatalf("clear effort: %d %v", c, up)
+	}
+	var items []map[string]any
+	call(t, srv, "GET", "/api/items", nil, &items)
+	if len(items) != 3 || items[1]["effort"] != nil {
+		t.Fatalf("list: %v", items)
+	}
+
+	// Settings: stored sorted; dropping an option in use is a 400 naming it.
+	if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"effort_options": "[120, 60]"}, &st); c != 200 || st["effort_options"] != "[60,120]" {
+		t.Fatalf("effort_options: %d %v", c, st["effort_options"])
+	}
+	for _, bad := range []string{"[]", "[0]", "[60,60]", "x"} {
+		if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"effort_options": bad}, nil); c != 400 {
+			t.Fatalf("effort_options %q: expected 400, got %d", bad, c)
+		}
+	}
+	if c := call(t, srv, "PATCH", path, map[string]any{"effort": 120}, &up); c != 200 {
+		t.Fatalf("effort 120: %d", c)
+	}
+	if c, body := callErr(t, srv, "PATCH", "/api/settings", map[string]string{"effort_options": "[60]"}); c != 400 || body["error"] != "effort option 2h is used by T-1" {
+		t.Fatalf("guard: %d %v", c, body)
+	}
+	call(t, srv, "PATCH", path, map[string]any{"status": "done"}, nil)
+	if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"effort_options": "[60]"}, &st); c != 200 || st["effort_options"] != "[60]" {
+		t.Fatalf("removal after closing: %d %v", c, st["effort_options"])
+	}
+	call(t, srv, "GET", path, nil, &up)
+	if up["effort"].(float64) != 120 {
+		t.Fatalf("closed task keeps its effort: %v", up)
+	}
+}
+
+func TestImportanceMinusOneEndpoint(t *testing.T) {
+	srv := setup(t)
+	var o, tk map[string]any
+	call(t, srv, "POST", "/api/items", map[string]any{"type": "ongoing", "title": "Maint"}, &o)
+	if c := call(t, srv, "POST", "/api/items", map[string]any{"type": "task", "title": "a", "parent_id": o["id"], "importance": -1}, &tk); c != 201 || tk["importance"].(float64) != -1 {
+		t.Fatalf("create with importance -1: %d %v", c, tk)
+	}
+	path := "/api/items/" + jsonNum(int64(tk["id"].(float64)))
+	if c, body := callErr(t, srv, "PATCH", path, map[string]any{"importance": -2}); c != 400 || body["error"] != "importance must be -1 to 10" {
+		t.Fatalf("importance -2: %d %v", c, body)
+	}
+	if c := call(t, srv, "PATCH", path, map[string]any{"urgency": -1}, nil); c != 400 {
+		t.Fatalf("urgency -1: %d", c)
+	}
+	if c := call(t, srv, "PATCH", path, map[string]any{"importance": 10}, &tk); c != 200 || tk["importance"].(float64) != 10 {
+		t.Fatalf("importance 10: %d %v", c, tk)
+	}
+}
+
+func TestClosedLastPrefEndpoint(t *testing.T) {
+	srv := setup(t)
+	var u map[string]any
+	call(t, srv, "POST", "/api/users", map[string]any{"name": "Evan"}, &u)
+	path := "/api/users/" + jsonNum(int64(u["id"].(float64))) + "/prefs"
+	var prefs map[string]string
+	if c := call(t, srv, "GET", path, nil, &prefs); c != 200 || prefs["closed_last"] != "0" {
+		t.Fatalf("default: %d %v", c, prefs)
+	}
+	if c := call(t, srv, "PATCH", path, map[string]string{"closed_last": "1"}, &prefs); c != 200 || prefs["closed_last"] != "1" {
+		t.Fatalf("set: %d %v", c, prefs)
+	}
+	if c := call(t, srv, "PATCH", path, map[string]string{"closed_last": "yes"}, nil); c != 400 {
+		t.Fatalf("bad value: %d", c)
 	}
 }

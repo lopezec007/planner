@@ -9,7 +9,10 @@ const byTitle = async (request, title) => (await (await request.get('/api/items'
 // (depending on what was edited before), while a few real moves are reliable.
 export async function dragRow(page, handle, target, { x = 200, y = 4 } = {}) {
   // Both rows must be on screen and clear of the sticky title bar, which
-  // would otherwise swallow the drop.
+  // would otherwise swallow the drop. The handle sits in the last column,
+  // which lies past the right edge of a 1500px window in Flat (the page
+  // scrolls sideways there), so it is scrolled into view first.
+  await handle.scrollIntoViewIfNeeded();
   const bar = await page.evaluate(() => document.querySelector('.topbar').getBoundingClientRect().bottom);
   let t = await target.boundingBox();
   let h = await handle.boundingBox();

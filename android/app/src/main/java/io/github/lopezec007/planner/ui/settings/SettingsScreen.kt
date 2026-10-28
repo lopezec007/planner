@@ -1,8 +1,10 @@
 // Settings: the server and account, sync status with the log of dropped
 // changes, the daily notification, the users (name, colour, chip label),
-// the planner settings shared with every client, and About. Planner
-// settings and users go through the repository, so they are applied at once
-// and queued like any other change (README "Offline tolerance").
+// the planner settings shared with every client (including the effort
+// options), and About. Planner settings and users go through the
+// repository, so they are applied at once and queued like any other change
+// (README "Offline tolerance"); a change the server then refuses shows up
+// as a snackbar here as well as in the sync log.
 package io.github.lopezec007.planner.ui.settings
 
 import android.Manifest
@@ -15,6 +17,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -31,8 +36,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -55,6 +62,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,12 +74,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lopezec007.planner.BuildConfig
 import io.github.lopezec007.planner.data.db.SyncLogEntity
 import io.github.lopezec007.planner.data.model.AppSettings
+import io.github.lopezec007.planner.data.model.Effort
+import io.github.lopezec007.planner.data.model.Item
 import io.github.lopezec007.planner.data.model.Status
 import io.github.lopezec007.planner.data.model.User
 import io.github.lopezec007.planner.data.sync.SyncPhase
@@ -137,6 +148,15 @@ fun SettingsScreen(vm: PlannerViewModel, nav: Nav) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
+    // A change the server refused after this screen opened (a settings
+    // patch, say, removing an effort option a task uses) is also shown
+    // here, where it was made; the sync section keeps the log.
+    val errorAtOpen = remember { sync.lastError }
+    LaunchedEffect(sync.lastError) {
+        val e = sync.lastError
+        if (e != null && e != errorAtOpen) snackbar.showSnackbar(e)
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -167,6 +187,12 @@ fun SettingsScreen(vm: PlannerViewModel, nav: Nav) {
             PlannerSettingsSection(
                 settings = snap.settings,
                 onChange = { key, value -> scope.launch { vm.repo.updateSettings(mapOf(key to value)) } },
+            )
+            EffortOptionsRows(
+                options = snap.settings.effortOptions,
+                items = snap.items,
+                onSave = { scope.launch { vm.repo.updateSettings(mapOf("effort_options" to Effort.encodeOptions(it))) } },
+                onRefuse = { scope.launch { snackbar.showSnackbar(it) } },
             )
             HorizontalDivider()
             AboutSection()
@@ -822,6 +848,108 @@ private fun RampRow(label: String, ramp: List<String>) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------- 5b. effort options
+
+/**
+ * The effort choices (the `effort_options` setting): a chip per option,
+ * tapped to remove it, and an Add button for a new one in minutes. An option
+ * a live task uses (not Done/Cancelled) cannot be removed; the server
+ * refuses that naming the value and the tasks, and so does this screen,
+ * without queuing anything.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EffortOptionsRows(options: List<Int>, items: List<Item>, onSave: (List<Int>) -> Unit, onRefuse: (String) -> Unit) {
+    var adding by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf<Int?>(null) }
+
+    Text("Effort options", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 16.dp, top = 10.dp, end = 16.dp))
+    Hint("The choices offered for a task's effort. Tap one to remove it; an option in use by an open task stays.")
+    FlowRow(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for (m in options) {
+            AssistChip(
+                onClick = {
+                    // The same rule as the server's: a live task's effort must stay an option.
+                    val users = items.filter { it.effort == m && !it.isClosed }
+                    if (users.isEmpty()) removing = m
+                    else onRefuse("effort option ${Effort.format(m)} is used by ${users.joinToString(", ") { it.key }}")
+                },
+                label = { Text(Effort.format(m)) },
+                trailingIcon = { Icon(Icons.Filled.Close, contentDescription = "Remove ${Effort.format(m)}", modifier = Modifier.size(16.dp)) },
+            )
+        }
+    }
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        OutlinedButton(onClick = { adding = true }) {
+            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Add option")
+        }
+    }
+
+    removing?.let { m ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove ${Effort.format(m)}?") },
+            text = { Text("Tasks will no longer be offered this effort. Closed tasks that have it keep it.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    removing = null
+                    onSave(options - m)
+                }) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
+        )
+    }
+    if (adding) {
+        EffortOptionDialog(
+            existing = options,
+            onAdd = { onSave((options + it).distinct().sorted()) },
+            onDismiss = { adding = false },
+        )
+    }
+}
+
+/** Minutes for a new effort option (whole, positive, not already there), previewed as it will show. */
+@Composable
+private fun EffortOptionDialog(existing: List<Int>, onAdd: (Int) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val minutes = text.toIntOrNull()
+    val problem = when {
+        text.isBlank() -> null
+        minutes == null || minutes <= 0 -> "Whole minutes, more than 0"
+        minutes in existing -> "${Effort.format(minutes)} is already an option"
+        else -> null
+    }
+    val ok = minutes != null && minutes > 0 && problem == null
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add effort option") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { v -> text = v.filter { it.isDigit() }.take(6) },
+                    label = { Text("Minutes") },
+                    supportingText = { Text(problem ?: if (ok) "Shown as ${Effort.format(minutes)}" else "e.g. 45 for 45m, 90 for 1h 30m") },
+                    isError = problem != null,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = ok, onClick = { onAdd(minutes!!); onDismiss() }) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 // ---------------------------------------------------------------- 6. about

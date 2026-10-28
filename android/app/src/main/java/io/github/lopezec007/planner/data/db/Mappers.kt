@@ -32,14 +32,14 @@ fun ItemDto.toEntity() = ItemEntity(
     ownerId = owner_id, assigneeId = assignee_id, status = status, startDate = start_date, startFirm = start_firm,
     endDate = end_date, endFirm = end_firm, urgency = urgency, importance = importance, blocked = blocked,
     color = color, sortOrder = sort_order, createdAt = created_at, updatedAt = updated_at, closedAt = closed_at,
-    blockedBy = encodeIds(blocked_by), blocks = encodeIds(blocks),
+    blockedBy = encodeIds(blocked_by), blocks = encodeIds(blocks), effort = effort,
 )
 
 fun ItemEntity.toModel(attachments: List<Attachment>): Item = Item(
     id = id, type = ItemType.fromWire(type), key = key, num = num, parentId = parentId, title = title,
     description = description, ownerId = ownerId, assigneeId = assigneeId, status = Status.fromWire(status),
     startDate = Dates.parse(startDate), startFirm = startFirm, endDate = Dates.parse(endDate), endFirm = endFirm,
-    urgency = urgency, importance = importance, blocked = blocked, color = color, sortOrder = sortOrder,
+    urgency = urgency, importance = importance, effort = effort, blocked = blocked, color = color, sortOrder = sortOrder,
     createdAt = createdAt, updatedAt = updatedAt, closedAt = closedAt,
     blockedBy = decodeIds(blockedBy), blocks = decodeIds(blocks), attachments = attachments,
 )

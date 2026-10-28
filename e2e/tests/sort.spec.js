@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 // Column sorting (headers clicked in order build a multi-column sort), the
-// Sort menu with its User-defined reset, and "blocked items last".
+// Sort menu with its User-defined reset, "blocked items last" and "done /
+// cancelled items last".
 
 const items = async (request) => (await request.get('/api/items')).json();
 const byTitle = async (request, title) => (await items(request)).find((i) => i.title === title);
@@ -92,6 +93,51 @@ test('blocked items last applies whatever the sort, to tasks and to parents', as
   await header(page, 'urgency').click(); // ascending
   await header(page, 'urgency').click(); // off
   await expect(page.locator('#sort-badge')).toHaveCount(0);
+});
+
+test('done / cancelled items last sinks closed items, alone and below the blocked ones with blocked last', async ({ page, request }) => {
+  const kitchen = await byTitle(request, 'Kitchen remodel');
+  await page.goto('/#/all');
+  // User order: Demo (done), Order countertops, Electrical rough-in (blocked), Paint walls (blocked), Choose backsplash (cancelled).
+  const userOrder = ['Demo old cabinets', 'Order countertops', 'Electrical rough-in', 'Paint walls', 'Choose backsplash'];
+  await expect.poll(() => taskTitles(page, kitchen.id)).toEqual(userOrder);
+  await page.locator('#btn-sort').click();
+  await page.locator('#sort-closed-last').check();
+  await expect.poll(() => taskTitles(page, kitchen.id)).toEqual(['Order countertops', 'Electrical rough-in', 'Paint walls', 'Demo old cabinets', 'Choose backsplash']);
+  // The switch alone counts as sorting: no dragging, the button lit, the title says so.
+  await expect(page.locator('.table')).toHaveClass(/sorted/);
+  await expect(page.locator('.drag-handle[draggable]')).toHaveCount(0);
+  await expect(page.locator('#btn-sort')).toHaveClass(/active/);
+  await expect(page.locator('#btn-sort')).toHaveAttribute('title', /done \/ cancelled last/);
+  // Parents too: the done project sinks to the bottom.
+  let parents = await page.locator('.row.parent .title-text').allTextContents();
+  expect(parents[parents.length - 1]).toBe('Repaint shed');
+  // With blocked last as well: open and unblocked, then blocked, then closed (whatever their blocked state).
+  await page.locator('#sort-blocked-last').check();
+  await expect.poll(() => taskTitles(page, kitchen.id)).toEqual(['Order countertops', 'Electrical rough-in', 'Paint walls', 'Demo old cabinets', 'Choose backsplash']);
+  parents = await page.locator('.row.parent .title-text').allTextContents();
+  expect(parents.slice(-2)).toEqual(['Spring garden', 'Repaint shed']); // blocked, then done
+  await expect(page.locator('#btn-sort')).toHaveAttribute('title', /blocked last, done \/ cancelled last/);
+  // Blocked last alone puts the blocked ones below the closed ones.
+  await page.locator('#sort-closed-last').uncheck();
+  await expect.poll(() => taskTitles(page, kitchen.id)).toEqual(['Demo old cabinets', 'Order countertops', 'Choose backsplash', 'Electrical rough-in', 'Paint walls']);
+  // Both with a column sort: each band keeps the sort (importance descending: Order 9, Electrical 7, Paint 4; Demo 8, Choose 2).
+  await page.locator('#sort-closed-last').check();
+  await header(page, 'importance').click();
+  await expect.poll(() => taskTitles(page, kitchen.id)).toEqual(['Order countertops', 'Electrical rough-in', 'Paint walls', 'Demo old cabinets', 'Choose backsplash']);
+  await header(page, 'importance').click(); // ascending: Order 9 | Paint 4, Electrical 7 (blocked) | Choose 2, Demo 8 (closed)
+  await expect.poll(() => taskTitles(page, kitchen.id)).toEqual(['Order countertops', 'Paint walls', 'Electrical rough-in', 'Choose backsplash', 'Demo old cabinets']);
+  await header(page, 'importance').click(); // off
+  // The preference survives a reload; off again restores the user order and dragging.
+  await page.reload();
+  await expect.poll(() => taskTitles(page, kitchen.id)).toEqual(['Order countertops', 'Electrical rough-in', 'Paint walls', 'Demo old cabinets', 'Choose backsplash']);
+  await page.locator('#btn-sort').click();
+  await expect(page.locator('#sort-closed-last')).toBeChecked();
+  await page.locator('#sort-closed-last').uncheck();
+  await page.locator('#sort-blocked-last').uncheck();
+  await expect.poll(() => taskTitles(page, kitchen.id)).toEqual(userOrder);
+  await expect(page.locator('.drag-handle[draggable]').first()).toBeVisible();
+  await expect(page.locator('#btn-sort')).not.toHaveClass(/active/);
 });
 
 test('Flat sorts every task together and offers the Ongoing / Project column', async ({ page }) => {

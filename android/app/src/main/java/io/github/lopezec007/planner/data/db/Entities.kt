@@ -52,6 +52,8 @@ data class ItemEntity(
     @ColumnInfo(defaultValue = "0") val deleted: Boolean = false,
     /** For a task hidden by its parent's delete: that parent's id, so a restore brings it back. */
     val deletedWith: Long? = null,
+    /** Minutes (tasks only); added in version 3, so it comes last. */
+    val effort: Int? = null,
 )
 
 @Entity(tableName = "attachments", indices = [Index("itemId")])

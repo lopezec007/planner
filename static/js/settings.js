@@ -1,4 +1,5 @@
-// Settings page: general options, row colours, and the users list.
+// Settings page: general options (week start, default status, effort
+// options), row colours, highlighting, and the users list.
 //
 // renderSettings(main, ctx)   ctx = { reload() } reloads state and re-renders.
 // Settings live on the server (GET/PATCH /api/settings) so every browser on
@@ -8,6 +9,7 @@ import { api } from './api.js';
 import { state, STATUSES, STATUS_LABEL } from './state.js';
 import { renderUsers } from './users.js';
 import { el, toast, contrastText } from './util.js';
+import { DEFAULT_EFFORT_OPTIONS, effortOptions, formatEffort, parseEffort } from './effort.js';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DEFAULT_COLORS = { color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d' };
@@ -103,6 +105,54 @@ function defaultStatusRow(ctx) {
     el('span', { class: 'settings-help' }, 'Used when the current filters show it; otherwise a new row takes a status the filters show (Backlog under the Backlog template).'));
 }
 
+/** Effort options: the durations a task's Effort can be set to, as chips
+ *  with a remove button each, an add field (minutes, or 1h 30m / 2h / 45m)
+ *  and a reset to the defaults. The server refuses to drop an option that a
+ *  live open task uses; its message (naming the tasks) shows in a toast and
+ *  the list stays as it was. */
+function effortOptionsBlock(ctx) {
+  const options = effortOptions();
+  const saveOptions = async (list) => {
+    const next = [...new Set(list)].sort((a, b) => a - b);
+    if (!next.length) { toast('Keep at least one effort option.'); return; }
+    try {
+      await api.updateSettings({ effort_options: JSON.stringify(next) });
+      await ctx.reload();
+    } catch (e) {
+      toast(e.message, 8000); // the message lists the tasks still using the option
+    }
+  };
+  const chips = el('div', { class: 'effort-options', role: 'list', 'aria-label': 'Effort options' });
+  for (const o of options) {
+    chips.append(el('span', { class: 'effort-chip', role: 'listitem', dataset: { effort: o } },
+      el('span', { class: 'effort-chip-text' }, formatEffort(o)),
+      el('button', {
+        type: 'button', class: 'effort-remove', title: `Remove ${formatEffort(o)}`, 'aria-label': `Remove ${formatEffort(o)}`, dataset: { effortRemove: o },
+        onClick: () => saveOptions(options.filter((x) => x !== o)),
+      }, '×')));
+  }
+  const input = el('input', { type: 'text', id: 'setting-effort-add', class: 'effort-add', placeholder: 'e.g. 1h 30m', 'aria-label': 'New effort option (minutes, or 1h 30m)', autocomplete: 'off' });
+  const add = () => {
+    const v = parseEffort(input.value);
+    if (v == null) { toast('Enter a duration as minutes (90) or hours and minutes (1h 30m, 2h, 45m).'); return; }
+    if (options.includes(v)) { toast(`${formatEffort(v)} is already an option.`); input.value = ''; return; }
+    saveOptions([...options, v]);
+  };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+  const addBtn = el('button', { type: 'button', id: 'setting-effort-add-btn', title: 'Add this duration to the options', onClick: add }, 'Add');
+  const isDefault = options.length === DEFAULT_EFFORT_OPTIONS.length && options.every((o, i) => o === DEFAULT_EFFORT_OPTIONS[i]);
+  const reset = el('button', {
+    type: 'button', class: 'settings-reset', id: 'setting-effort-reset', disabled: isDefault ? true : null, dataset: { reset: 'effort_options' },
+    title: `Back to ${DEFAULT_EFFORT_OPTIONS.map(formatEffort).join(', ')}`, onClick: () => saveOptions(DEFAULT_EFFORT_OPTIONS),
+  }, 'Reset to defaults');
+  return el('div', { class: 'settings-block', id: 'setting-effort-options' },
+    el('div', { class: 'settings-row' },
+      el('label', { for: 'setting-effort-add' }, 'Effort options'),
+      el('span', { class: 'settings-help' }, 'The durations a task\'s Effort can be set to. An option still used by an open task cannot be removed.')),
+    chips,
+    el('div', { class: 'settings-row' }, input, addBtn, reset));
+}
+
 function colorRow(key, label, help, ctx) {
   const current = state.settings[key] || '';
   const isDefault = current === DEFAULT_COLORS[key];
@@ -144,7 +194,7 @@ export function renderSettings(main, ctx) {
   const usersBox = el('div', { id: 'settings-users' });
   main.replaceChildren(
     el('h1', {}, 'Settings'),
-    section('General', weekStartRow(ctx), defaultStatusRow(ctx)),
+    section('General', weekStartRow(ctx), defaultStatusRow(ctx), effortOptionsBlock(ctx)),
     section('Row colours',
       el('p', { class: 'settings-help' }, 'Rows are tinted with these colours in both light and dark themes.'),
       colorRow('color_ongoing', 'Ongoing rows', '', ctx),

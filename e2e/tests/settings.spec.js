@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 const weekday = (ymd) => { const [y, m, d] = ymd.split('-').map(Number); return new Date(y, m - 1, d).getDay(); };
 
 test.afterEach(async ({ request }) => {
-  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d', date_warn_days: '7', date_alert_days: '0', urgency_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]', importance_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]', default_status: 'todo' } });
+  await request.patch('/api/settings', { data: { week_start: '6', color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d', date_warn_days: '7', date_alert_days: '0', urgency_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]', importance_colors: '["","","","","","","#f5a524","#f5a524","#f5a524","#e5484d","#e5484d"]', default_status: 'todo', effort_options: '[15,30,60,120,240,480,960,1920,3840]' } });
 });
 
 test('settings page hosts the users list and the old #/users route still works', async ({ page }) => {

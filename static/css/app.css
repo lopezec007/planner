@@ -113,6 +113,14 @@ button:disabled { opacity: 0.5; cursor: default; }
 .toolbar button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 30px; }
 .toolbar button > .icon { display: block; }
 .toolbar .search-badge { margin-left: 2px; }
+/* The effort total (app.js): the sum over every open task in view, as a
+   badge beside the Sort button; the tooltip has the done/cancelled part. */
+.toolbar .effort-slot { display: flex; align-items: center; margin-right: 4px; white-space: nowrap; cursor: help; }
+.toolbar .effort-total {
+  display: inline-block; padding: 0 7px; border-radius: 10px; line-height: 20px;
+  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+  background: var(--accent); color: var(--accent-fg);
+}
 .key-glyph { font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.02em; }
 .toolbar button.primary .key-glyph { color: var(--accent-fg); }
 /* Account menu at the far right: who is using this browser (preferences follow it). */
@@ -145,7 +153,7 @@ main { padding: 12px 16px; flex: 1; }
    Nested frames the header and each Ongoing/Project with its tasks
    separately, see below. */
 .table {
-  --cols: 28px 92px minmax(220px, 1fr) 110px 136px 136px 150px 150px 44px 44px 80px 124px;
+  --cols: 28px 92px minmax(220px, 1fr) 110px 136px 136px 150px 150px 44px 44px 76px 80px 124px;
   --indent: 26px;
   width: fit-content;
   min-width: 100%;
@@ -160,7 +168,7 @@ main { padding: 12px 16px; flex: 1; }
 /* Flat: tasks only, with the parent's key (its type chip, hence the wider
    first column) and title as leading columns (and no collapse column: there
    are no parent rows). */
-.table.flat { --cols: 84px 72px minmax(150px, 0.8fr) minmax(200px, 1.2fr) 110px 136px 136px 150px 150px 44px 44px 80px 124px; }
+.table.flat { --cols: 84px 72px minmax(150px, 0.8fr) minmax(200px, 1.2fr) 110px 136px 136px 150px 150px 44px 44px 76px 80px 124px; }
 .table.flat.title-only { --cols: 84px 72px minmax(140px, 0.8fr) minmax(180px, 1.2fr); }
 .table.flat .row.task .key, .table.flat .row.task .title, .table.flat .row.kind-task > .title { padding-left: 8px; }
 .row .parent-ref { color: var(--fg-muted); font-weight: 400; }
@@ -251,6 +259,9 @@ main { padding: 12px 16px; flex: 1; }
 .row .title { white-space: nowrap; }
 .row .title .title-text { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .row .num { justify-content: center; font-variant-numeric: tabular-nums; }
+/* Effort: a parent's sum over its open tasks (its tooltip has the breakdown);
+   the total over every task in view is a badge in the toolbar (below). */
+.row.parent .effort-cell { font-size: 12.5px; }
 .row .date { font-variant-numeric: tabular-nums; }
 .row .blocked-cell { justify-content: center; }
 .row .blocked-cell input { margin: 0; vertical-align: middle; pointer-events: none; }

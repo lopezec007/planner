@@ -6,17 +6,22 @@
 // urgency and importance which start descending), flips it on the second
 // click and removes it on the third, so headers clicked in sequence build a
 // multi-column sort. The menu shows the same list, lets the direction
-// be flipped or a column removed, resets to user-defined, and holds the
-// "blocked items last" switch, which sinks blocked items whatever the sort.
+// be flipped or a column removed, resets to user-defined, and holds two
+// switches that apply whatever the sort: "blocked items last" sinks blocked
+// items, "done / cancelled items last" sinks closed items. With both on the
+// bands are: open and unblocked, then blocked, then closed (a closed item
+// sinks below the blocked ones whether or not it is blocked itself); each
+// band keeps the column sort or the user-defined order.
 //
 //   SORT_COLUMNS                 key -> { label, flatOnly?, defaultDir? }
 //   defaultDir(key)              'asc' | 'desc': the direction a first click gives
-//   compareItems(sort, blockedLast) -> comparator for sibling items
-//   renderSortMenu(slot, ctx)    ctx = { sort, blockedLast, flat, setSort(keys, all?), setBlockedLast(on) }
+//   compareItems(sort, blockedLast, closedLast) -> comparator for sibling items
+//   renderSortMenu(slot, ctx)    ctx = { sort, blockedLast, closedLast, flat, setSort(keys, all?),
+//                                setBlockedLast(on), setClosedLast(on) }
 //                                setSort(keys, true) replaces the whole stored sort (User-defined)
 //   toggleSort(sort, key)        the header-click rule, returns the new list
 
-import { state, STATUSES, isBlocked } from './state.js';
+import { state, STATUSES, isBlocked, isClosed } from './state.js';
 import { el } from './util.js';
 import { icon } from './icons.js';
 
@@ -31,6 +36,7 @@ export const SORT_COLUMNS = {
   end: { label: 'End' },
   urgency: { label: 'Urgency', defaultDir: 'desc' },   // the most urgent first
   importance: { label: 'Importance', defaultDir: 'desc' },
+  effort: { label: 'Effort' },                           // the quickest first; tasks with none last
   blocked: { label: 'Blocked' },
 };
 
@@ -81,6 +87,7 @@ function value(it, key) {
     case 'end': return it.end_date || null;
     case 'urgency': return it.urgency ?? null;
     case 'importance': return it.importance ?? null;
+    case 'effort': return it.effort ?? null;
     case 'blocked': return isBlocked(it) ? 1 : 0;
     default: return null;
   }
@@ -106,10 +113,15 @@ function userOrder(a, b) {
 }
 
 /** Comparator for items in one sibling group (or every task, in Flat). Ties
- *  fall back to the user-defined order, so the sort is stable. */
-export function compareItems(sort, blockedLast) {
+ *  fall back to the user-defined order, so the sort is stable. Closed items
+ *  sink first (below the blocked band), then blocked ones. */
+export function compareItems(sort, blockedLast, closedLast = false) {
   const keys = normalizeSort(sort);
   return (a, b) => {
+    if (closedLast) {
+      const d = Number(isClosed(a.status)) - Number(isClosed(b.status));
+      if (d) return d;
+    }
     if (blockedLast) {
       const d = Number(isBlocked(a)) - Number(isBlocked(b));
       if (d) return d;
@@ -125,8 +137,8 @@ export function compareItems(sort, blockedLast) {
 }
 
 /** Sort a list of items in place with the current rules. */
-export function sortItems(items, sort, blockedLast) {
-  return items.sort(compareItems(sort, blockedLast));
+export function sortItems(items, sort, blockedLast, closedLast = false) {
+  return items.sort(compareItems(sort, blockedLast, closedLast));
 }
 
 // ---- toolbar menu ----
@@ -141,10 +153,11 @@ export function renderSortMenu(slot, ctx) {
   const active = sort.length > 0;
   const summary = active ? sort.map((s) => `${SORT_COLUMNS[s.key].label} ${ARROW[s.dir]}`).join(', ') : 'User-defined';
 
+  const last = [ctx.blockedLast ? 'blocked last' : '', ctx.closedLast ? 'done / cancelled last' : ''].filter(Boolean).join(', ');
   const btn = el('button', {
-    type: 'button', id: 'btn-sort', class: active || ctx.blockedLast ? 'active' : '', 'aria-expanded': open ? 'true' : 'false',
+    type: 'button', id: 'btn-sort', class: active || last ? 'active' : '', 'aria-expanded': open ? 'true' : 'false',
     'aria-controls': 'sort-panel', 'aria-label': 'Sort',
-    title: `Sort: ${summary}${ctx.blockedLast ? ' (blocked last)' : ''}. Click column headers to sort by them, in order.`,
+    title: `Sort: ${summary}${last ? ` (${last})` : ''}. Click column headers to sort by them, in order.`,
     onClick: () => setOpen(!open),
   }, icon('sort'), active ? el('span', { class: 'search-badge', id: 'sort-badge' }, String(sort.length)) : null);
 
@@ -189,6 +202,9 @@ export function renderSortMenu(slot, ctx) {
   panel.append(el('label', { class: 'search-check sort-blocked' },
     el('input', { type: 'checkbox', id: 'sort-blocked-last', checked: ctx.blockedLast ? true : null, onChange: (e) => ctx.setBlockedLast(e.target.checked) }),
     ' Blocked items last, whatever the sort'));
+  panel.append(el('label', { class: 'search-check sort-closed', title: 'Done and cancelled items sink to the bottom, below the blocked ones' },
+    el('input', { type: 'checkbox', id: 'sort-closed-last', checked: ctx.closedLast ? true : null, onChange: (e) => ctx.setClosedLast(e.target.checked) }),
+    ' Done / cancelled items last'));
 
   slot.replaceChildren(el('div', { class: 'menu-wrap' }, btn, panel));
   installListeners();

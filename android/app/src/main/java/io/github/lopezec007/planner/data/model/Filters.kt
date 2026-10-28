@@ -5,6 +5,7 @@
 // preference.
 package io.github.lopezec007.planner.data.model
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -13,6 +14,7 @@ import kotlinx.serialization.decodeFromString
 import java.time.LocalDate
 
 /** A parent with the tasks shown under it. */
+@Immutable
 data class Group(val parent: Item, val tasks: List<Item>)
 
 enum class Preset(val title: String, val hint: String, val statuses: Set<Status>, val recentDays: Int, val hideEmptyParents: Boolean) {

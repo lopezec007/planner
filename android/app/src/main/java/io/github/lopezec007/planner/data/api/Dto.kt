@@ -41,6 +41,7 @@ data class ItemDto(
     val end_firm: Boolean = false,
     val urgency: Int? = null,
     val importance: Int? = null,
+    val effort: Int? = null,
     val blocked: Boolean = false,
     val color: String = "",
     val sort_order: Long = 0,

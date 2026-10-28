@@ -298,3 +298,24 @@ test('the templates are toggles that combine; clearing one, the lit set and pers
   await expect(lit()).toHaveCount(1);
   await expect(page.locator('.search-preset[data-preset=ideas]')).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('typing in the search box keeps the caret where it is across the re-renders it triggers', async ({ page }) => {
+  await page.goto('/#/all');
+  const box = page.locator('#search-text');
+  await box.click();
+  await box.pressSequentially('gut', { delay: 80 }); // slower than the 150 ms debounce: each keystroke re-renders
+  await page.waitForTimeout(300);
+  await expect(box).toBeFocused();
+  await expect(box).toHaveValue('gut');
+  expect(await box.evaluate((e) => [e.selectionStart, e.selectionEnd])).toEqual([3, 3]);
+  // A caret moved into the middle stays there too, including over a re-render caused elsewhere (a save).
+  await box.press('Home');
+  await box.press('ArrowRight');
+  await page.waitForTimeout(300);
+  expect(await box.evaluate((e) => e.selectionStart)).toBe(1);
+  await page.evaluate(() => document.querySelector('.row.task .status select').dispatchEvent(new Event('change', { bubbles: true })));
+  await page.waitForTimeout(400);
+  await expect(box).toBeFocused();
+  expect(await box.evaluate((e) => e.selectionStart)).toBe(1);
+  await box.fill('');
+});

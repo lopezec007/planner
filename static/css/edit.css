@@ -58,6 +58,10 @@
 }
 .num-input::-webkit-outer-spin-button, .num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .num-input.hl-level { border-color: transparent; }
+/* Effort: the dropdown of configured durations, centred like the numbers;
+   the native arrow is dropped so "1h30m" fits the narrow cell. */
+.effort-select { width: 100%; max-width: 100%; text-align: center; font-size: 12.5px; padding: 2px 2px; appearance: none; -webkit-appearance: none; font-variant-numeric: tabular-nums; }
+.effort-select option[data-stale] { font-style: italic; }
 .num-input.hl-level:focus { outline: 2px solid var(--accent); }
 .row .blocked-cell input { pointer-events: auto; cursor: pointer; }
 .row .blocked-cell input:disabled { cursor: not-allowed; }

@@ -29,6 +29,7 @@ export const PREF_DEFAULTS = {
   collapsed: '[]',        // JSON array of parent ids whose tasks are hidden
   sort: '[]',             // JSON array of { key, dir } (empty = user-defined order)
   blocked_last: '0',      // 0 | 1: blocked items sink to the bottom regardless of sort
+  closed_last: '0',       // 0 | 1: done/cancelled items sink to the bottom (below blocked ones)
   bar_color: 'assignee',  // assignee | owner | importance | urgency | combo | parent
   hidden_cols: '[]',      // JSON array of hidden table columns (columns.js)
   // Colour-coding by Ongoing/Project (colors.js): the items' own colours are

@@ -1,6 +1,6 @@
 // The main screen: the shared toolbar (search, Active/Backlog/Ideas,
-// filters, the scratch pads), the view switcher (List / Timeline / Matrix)
-// in a bottom bar, and the content for the chosen view. The sync state shows as a thin
+// the Nested/Flat toggle, filters, the scratch pads), the view switcher
+// (List / Timeline / Matrix) in a bottom bar, and the content for the chosen view. The sync state shows as a thin
 // banner under the toolbar when something is worth knowing.
 package io.github.lopezec007.planner.ui.home
 
@@ -25,16 +25,19 @@ import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.ViewHeadline
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -129,6 +132,18 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
                         IconButton(onClick = { nav.push(Screen.Settings) }) { Icon(Icons.Filled.Settings, "Settings") }
                     },
                     actions = {
+                        // Nested / Flat (a phone preference): tinted while Flat. The
+                        // Matrix has no layout, so the toggle hides there.
+                        if (p.view != View.MATRIX) {
+                            FilledTonalIconToggleButton(
+                                checked = p.flat,
+                                onCheckedChange = { vm.setFlat(it) },
+                                // Plain like its neighbours while Nested; a tinted pill while Flat.
+                                colors = IconButtonDefaults.filledTonalIconToggleButtonColors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                            ) {
+                                Icon(Icons.Filled.ViewHeadline, if (p.flat) "Flat list: tasks only. Tap for nested" else "Nested list. Tap for flat: tasks only")
+                            }
+                        }
                         IconButton(onClick = { nav.push(Screen.Scratch) }) { Icon(Icons.Filled.EditNote, "Scratch pad") }
                         BadgedBox(badge = { if (p.criteria.filterCount > 0) Badge { Text(p.criteria.filterCount.toString()) } }) {
                             IconButton(onClick = { filtersOpen = true }) { Icon(Icons.Filled.FilterList, "Filters") }
@@ -192,8 +207,6 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
         FilterSheet(
             criteria = p.criteria,
             users = snap.users,
-            flat = p.flat,
-            onFlat = { vm.setFlat(it) },
             onChange = { vm.setCriteria(it) },
             onDismiss = { filtersOpen = false },
         )

@@ -386,6 +386,32 @@ test('Urgency and Importance accept digits only', async ({ page, request }) => {
   expect((await byTitle(request, 'E2E Task C')).urgency).toBe(Number(v));
 });
 
+test('Importance takes -1 from the "-" key; urgency ignores it', async ({ page, request }) => {
+  await page.goto('/#/all');
+  const row = taskRow(page, 'E2E Task C');
+  const imp = row.locator('input[name=importance]');
+  const urg = row.locator('input[name=urgency]');
+  await expect(imp).toHaveAttribute('min', '-1');
+  await expect(urg).toHaveAttribute('min', '0');
+  const u = await urg.inputValue();
+  await urg.click();
+  await urg.press('-');
+  await expect(urg).toHaveValue(u);
+  await imp.click();
+  await imp.press('-');
+  await expect.poll(async () => (await byTitle(request, 'E2E Task C')).importance).toBe(-1);
+  await expect(taskRow(page, 'E2E Task C').locator('input[name=importance]')).toHaveValue('-1');
+  await expect(taskRow(page, 'E2E Task C').locator('input[name=importance]')).not.toHaveClass(/hl-level/); // off the colour ramp
+  // Pasted "-1" is dropped by urgency and kept by importance.
+  await taskRow(page, 'E2E Task C').locator('input[name=urgency]').click();
+  await page.keyboard.insertText('-1');
+  await expect(taskRow(page, 'E2E Task C').locator('input[name=urgency]')).toHaveValue(u);
+  await page.keyboard.press('Escape');
+  await taskRow(page, 'E2E Task C').locator('input[name=importance]').press('3');
+  await expect.poll(async () => (await byTitle(request, 'E2E Task C')).importance).toBe(3);
+  expect((await byTitle(request, 'E2E Task C')).urgency).toBe(Number(u));
+});
+
 test('Delete a task and a parent (with its tasks)', async ({ page, request }) => {
   await page.goto('/#/all');
   page.on('dialog', (d) => d.accept());

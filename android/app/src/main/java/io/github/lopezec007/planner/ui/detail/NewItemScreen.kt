@@ -1,7 +1,7 @@
 // The form for a new Ongoing, Project or task (README "Using it" step 2):
 // title required, the rest optional with the web UI's defaults (status: the
 // `default_status` setting when the filters in effect admit it, owner = the
-// account, urgency and importance 5).
+// account, urgency and importance 5, no effort).
 // Create writes the item to Room with a temporary id and replaces this
 // screen with its detail; the key shows "…" until the server answers.
 package io.github.lopezec007.planner.ui.detail
@@ -50,6 +50,7 @@ import io.github.lopezec007.planner.data.repo.ItemPatch
 import io.github.lopezec007.planner.data.repo.Opt
 import io.github.lopezec007.planner.data.repo.set
 import io.github.lopezec007.planner.ui.PlannerViewModel
+import io.github.lopezec007.planner.ui.components.EffortField
 import io.github.lopezec007.planner.ui.components.FieldRow
 import io.github.lopezec007.planner.ui.components.LevelSlider
 import io.github.lopezec007.planner.ui.components.StatusChip
@@ -87,6 +88,7 @@ fun NewItemScreen(vm: PlannerViewModel, nav: Nav, type: ItemType, parentId: Long
     var endFirm by remember { mutableStateOf(false) }
     var urgency by remember { mutableIntStateOf(5) }
     var importance by remember { mutableIntStateOf(5) }
+    var effort by remember { mutableStateOf<Int?>(null) }
     var creating by remember { mutableStateOf(false) }
 
     var pickStatus by remember { mutableStateOf(false) }
@@ -109,6 +111,7 @@ fun NewItemScreen(vm: PlannerViewModel, nav: Nav, type: ItemType, parentId: Long
                     endFirm = if (dated && endFirm) set(true) else Opt.Unset,
                     urgency = if (type == ItemType.TASK && urgency != 5) set(urgency) else Opt.Unset,
                     importance = if (type == ItemType.TASK && importance != 5) set(importance) else Opt.Unset,
+                    effort = if (type == ItemType.TASK && effort != null) set(effort) else Opt.Unset,
                 )
                 val id = vm.repo.createItem(
                     type = type,
@@ -199,7 +202,9 @@ fun NewItemScreen(vm: PlannerViewModel, nav: Nav, type: ItemType, parentId: Long
                     value = importance,
                     onChange = { importance = it },
                     modifier = Modifier.padding(horizontal = 16.dp),
+                    min = -1,
                 )
+                EffortField(value = effort, options = snap.settings.effortOptions, onChange = { effort = it })
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Text(

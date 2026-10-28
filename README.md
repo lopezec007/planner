@@ -52,8 +52,12 @@ the single SQLite file. The directory containing it must already exist.
    otherwise; click the pressed chip to clear). The `~` before a date marks it approximate; click it to
    pin it firm (the `~` becomes a 📌; click again to make it approximate).
    In the urgency and importance fields a single key sets the
-   value: 1 to 9, 0 for 10 and ` for 0; nothing but digits can be typed
-   there. Leaving the page (the gear, a filter route, the back button)
+   value: 1 to 9, 0 for 10, ` for 0 and, for importance only, - for -1;
+   nothing but digits can be typed there. **Effort** is a dropdown of the
+   durations configured in Settings (15m to 64h by default); an Ongoing or
+   Project row shows the effort of the open tasks listed beneath it, and a
+   badge in the page header, beside Sort, carries the total over every open
+   task in view (hover either for the done/cancelled part). Leaving the page (the gear, a filter route, the back button)
    while a new row or a text edit is in progress shows a warning and stays
    put; finish the edit (Enter) or discard it (Escape) first. Reloading or
    closing the tab asks the browser's usual confirmation.
@@ -94,8 +98,9 @@ the single SQLite file. The directory containing it must already exist.
    with the highest first, the other columns ascending. Headers clicked in
    sequence build a multi-column sort, numbered under the arrows. The Sort menu shows the
    columns in effect, flips or removes them, returns to **User-defined** (the
-   drag order) and has **Blocked items last**, which sinks blocked items
-   whatever the sort. While sorted, rows cannot be dragged. The **Columns**
+   drag order) and has **Blocked items last** and **Done / cancelled items
+   last**, which sink those items whatever the sort (done/cancelled below
+   blocked when both are on). While sorted, rows cannot be dragged. The **Columns**
    menu next to it hides or shows any column (the title always shows).
    Dependencies and attachments in the expanded row each have a small **+**
    (the dropdown of items, or the file picker).
@@ -115,11 +120,16 @@ the single SQLite file. The directory containing it must already exist.
    or importance × urgency (a blend: red = urgent and important, blue =
    important, amber = urgent, grey = neither), with a legend. Tooltips name
    a task's Ongoing or Project above its title. **Matrix**
-   plots tasks by urgency and importance and stays in view while the list
-   scrolls; hover a point for its description; the Keys / Titles toggle
+   plots tasks by urgency (0 to 10) and importance (-1 to 10) and stays in
+   view while the list scrolls; dot size follows effort on a logarithmic
+   scale from the smallest to the largest configured option, and a task
+   without an effort is a hollow dashed dot of middling size; hover a point
+   for its description; the Keys / Titles toggle
    above the plot labels points with the task key or its title.
    Settings has the first day of the week, the default status for new
-   projects and tasks, the row tint colours for
+   projects and tasks, the effort options (add any duration such as 1h 30m;
+   an option still used by an open task cannot be removed, and done or
+   cancelled tasks keep a removed one), the row tint colours for
    Ongoing, Project and Task rows, the end-date highlight colours and
    windows, and a colour for each urgency and importance value (two ramps,
    with presets).
@@ -320,8 +330,8 @@ API summary (all JSON):
     POST   /api/users {name, color?, short?}  DELETE /api/users/{id}   (409 if referenced)
     GET    /api/users/{id}/prefs      PATCH /api/users/{id}/prefs {key: value}
                                       (view, narrow, flat, collapsed, sort, blocked_last, bar_color, hidden_cols,
-                                       parent_colors, task_colors, point_color, filters, matrix_labels,
-                                       scratch_open, scratch_width, scratch_split, scratch_wrap)
+                                       closed_last, parent_colors, task_colors, point_color, filters,
+                                       matrix_labels, scratch_open, scratch_width, scratch_split, scratch_wrap)
     GET    /api/users/{id}/scratch    PUT /api/users/{id}/scratch {text}   the user's scratch pad {text, updated_at}
     GET    /api/scratch               PUT /api/scratch {text}              the shared scratch pad (1 MiB cap)
     GET    /api/events                server-sent events: {"kind": items|users|settings|scratch, "scope"?,
@@ -340,11 +350,13 @@ API summary (all JSON):
     PUT    /api/order {ids: [...]}    reorder siblings
     POST   /api/dependencies {blocker_id, blocked_id}   400 on self/ongoing/cycle
     DELETE /api/dependencies/{blocker}/{blocked}
-    GET    /api/settings              PATCH /api/settings {key: value}  (week_start, default_status, color_*, ...)
+    GET    /api/settings              PATCH /api/settings {key: value}  (week_start, default_status, effort_options,
+                                      color_*, ...; removing an effort option an open task uses is a 400)
 
 Item JSON fields: id, type (ongoing|project|task), key, num, parent_id, title,
 description, owner_id, assignee_id, status, start_date,
-start_firm, end_date, end_firm, urgency, importance, blocked, color (an
+start_firm, end_date, end_firm, urgency (0-10), importance (-1 to 10),
+effort (minutes, one of the effort_options, or null; tasks only), blocked, color (an
 Ongoing's or Project's own "#rrggbb", or "" for the type colour), sort_order,
 created_at, updated_at, closed_at (set while status is done/cancelled),
 blocked_by and blocks (ids of live projects/tasks), attachments (metadata:

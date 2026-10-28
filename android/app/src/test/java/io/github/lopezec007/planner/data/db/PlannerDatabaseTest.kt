@@ -1,7 +1,7 @@
-// The scratch table and the schema migration that added it, on Robolectric
-// so Room runs for real: in memory for the DAO; for the migration, a file
-// built from the exported version-1 schema (app/schemas) and opened by Room,
-// which runs the migration and validates the result against the entities.
+// The scratch table and the schema migrations, on Robolectric so Room runs
+// for real: in memory for the DAO; for a migration, a file built from the
+// exported schema of the older version (app/schemas) and opened by Room,
+// which runs the migrations and validates the result against the entities.
 package io.github.lopezec007.planner.data.db
 
 import android.app.Application
@@ -85,6 +85,34 @@ class PlannerDatabaseTest {
             assertNull(db.scratch().get("global"))
             db.scratch().upsert(ScratchEntity("global", "hello", ""))
             assertEquals("hello", db.scratch().get("global")!!.text)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun migration2To3KeepsItemsAndAddsEffort() = runBlocking {
+        val file = File(context.cacheDir, "migration-test-3.db").apply { delete() }
+        createFromSchema(file, 2)
+        SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READWRITE).use { sql ->
+            sql.execSQL(
+                "INSERT INTO items (id, type, `key`, num, parentId, title, description, ownerId, assigneeId, status, startDate, startFirm, endDate, endFirm, urgency, importance, blocked, color, sortOrder, createdAt, updatedAt, closedAt, blockedBy, blocks, deleted, deletedWith) " +
+                    "VALUES (7, 'task', 'T-7', 7, 3, 'Walk', '', NULL, NULL, 'todo', NULL, 0, NULL, 0, 5, -1, 0, '', 0, '', '', NULL, '[]', '[]', 0, NULL)",
+            )
+            sql.execSQL("INSERT INTO pending_ops (payload, createdAt, attempts) VALUES ('{\"kind\":\"delete_item\",\"id\":7}', 1, 0)")
+        }
+
+        val db = Room.databaseBuilder(context, PlannerDatabase::class.java, file.path)
+            .addMigrations(*PlannerDatabase.MIGRATIONS)
+            .allowMainThreadQueries()
+            .build()
+        try {
+            val walk = db.items().get(7)!!
+            assertNull(walk.effort)
+            assertEquals(-1, walk.importance)
+            assertEquals(1, db.pendingOps().count())
+            db.items().update(walk.copy(effort = 90))
+            assertEquals(90, db.items().get(7)!!.effort)
         } finally {
             db.close()
         }

@@ -6,10 +6,13 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -88,7 +91,10 @@ type Item struct {
 	EndFirm     bool    `json:"end_firm"`
 	Urgency     *int    `json:"urgency"`
 	Importance  *int    `json:"importance"`
-	Blocked     bool    `json:"blocked"`
+	// Effort is a task's estimated effort in minutes, one of the
+	// effort_options setting's values, or nil when unset.
+	Effort  *int `json:"effort"`
+	Blocked bool `json:"blocked"`
 	// Color is an Ongoing's or Project's own colour ("#rrggbb"), shared by
 	// everyone, or "" to use the type colour from Settings. Tasks have none.
 	Color     string `json:"color"`
@@ -133,6 +139,8 @@ type Patch struct {
 	EndFirm       *bool
 	Urgency       *int
 	Importance    *int
+	Effort        *int
+	ClearEffort   bool
 	Blocked       *bool
 	Color         *string // "" clears it
 }
@@ -146,7 +154,7 @@ type Store struct {
 
 // schemaVersion is stored in PRAGMA user_version. Bump it whenever migrate()
 // gains a step; an existing database below it is backed up before migrating.
-const schemaVersion = 5
+const schemaVersion = 6
 
 // Open opens (creating if necessary) the SQLite database at path and applies
 // the schema. An existing database whose schema is behind is first copied to
@@ -195,21 +203,11 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-const schema = `
-CREATE TABLE IF NOT EXISTS users (
-	id         INTEGER PRIMARY KEY,
-	name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
-	color      TEXT NOT NULL,
-	short      TEXT NOT NULL DEFAULT '',
-	created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS key_counters (
-	type TEXT PRIMARY KEY,
-	next INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS items (
+// itemsTable is the items table as fresh databases get it. It is kept apart
+// from schema because a change to a CHECK constraint cannot be applied with
+// ALTER TABLE: migrate() rebuilds the table from this text instead (see
+// rebuildItems).
+const itemsTable = `CREATE TABLE IF NOT EXISTS items (
 	id              INTEGER PRIMARY KEY,
 	type            TEXT NOT NULL CHECK (type IN ('ongoing','project','task')),
 	num             INTEGER NOT NULL,
@@ -225,14 +223,31 @@ CREATE TABLE IF NOT EXISTS items (
 	end_date        TEXT,
 	end_firm        INTEGER NOT NULL DEFAULT 0,
 	urgency         INTEGER CHECK (urgency IS NULL OR (urgency BETWEEN 0 AND 10)),
-	importance      INTEGER CHECK (importance IS NULL OR (importance BETWEEN 0 AND 10)),
+	importance      INTEGER CHECK (importance IS NULL OR (importance BETWEEN -1 AND 10)),
 	blocked         INTEGER NOT NULL DEFAULT 0,
 	color           TEXT NOT NULL DEFAULT '',
+	effort          INTEGER,
 	sort_order      INTEGER NOT NULL DEFAULT 0,
 	created_at      TEXT NOT NULL,
 	updated_at      TEXT NOT NULL,
 	deleted_at      TEXT
+)`
+
+const schema = `
+CREATE TABLE IF NOT EXISTS users (
+	id         INTEGER PRIMARY KEY,
+	name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+	color      TEXT NOT NULL,
+	short      TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS key_counters (
+	type TEXT PRIMARY KEY,
+	next INTEGER NOT NULL
+);
+
+` + itemsTable + `;
 CREATE INDEX IF NOT EXISTS items_parent ON items(parent_id);
 
 CREATE TABLE IF NOT EXISTS dependencies (
@@ -324,6 +339,27 @@ func (s *Store) migrate() error {
 			return err
 		}
 	}
+	// Importance gained the value -1 (schema version 6), which the original
+	// CHECK constraint refuses; the table has to be rebuilt for it.
+	var itemsSQL string
+	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'`).Scan(&itemsSQL); err != nil {
+		return err
+	}
+	if strings.Contains(itemsSQL, "importance BETWEEN 0 AND 10") {
+		if err := s.rebuildItems(); err != nil {
+			return fmt.Errorf("rebuild items table: %w", err)
+		}
+	}
+	// Tasks gained an effort estimate (schema version 6). The rebuild above
+	// adds the column; this covers a table that was rebuilt without it.
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('items') WHERE name = 'effort'`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE items ADD COLUMN effort INTEGER`); err != nil {
+			return err
+		}
+	}
 	// Users gained a chip label (schema version 4); existing users get the
 	// default derived from their name.
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'short'`).Scan(&n); err != nil {
@@ -360,6 +396,77 @@ func (s *Store) migrate() error {
 	return nil
 }
 
+// rebuildItems recreates the items table from itemsTable, keeping every row
+// and id, following SQLite's procedure for schema changes ALTER TABLE cannot
+// make: foreign keys off, copy into a new table inside a transaction, drop
+// the old one, rename, recreate the index, check foreign keys, commit. The
+// tables that reference items(id) (dependencies, status_history,
+// attachments) are untouched and resolve again once the new table takes the
+// old name. Columns the old table lacks are left at their defaults.
+func (s *Store) rebuildItems() error {
+	ctx := context.Background()
+	// PRAGMA foreign_keys is a no-op inside a transaction, so it is set on
+	// the connection the transaction then runs on.
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	defer conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+
+	err = func() error {
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		create := strings.Replace(itemsTable, "CREATE TABLE IF NOT EXISTS items (", "CREATE TABLE items_new (", 1)
+		if _, err := tx.Exec(create); err != nil {
+			return err
+		}
+		// Copy the columns the two tables share.
+		rows, err := tx.Query(`SELECT name FROM pragma_table_info('items') WHERE name IN (SELECT name FROM pragma_table_info('items_new'))`)
+		if err != nil {
+			return err
+		}
+		var cols []string
+		for rows.Next() {
+			var c string
+			if err := rows.Scan(&c); err != nil {
+				rows.Close()
+				return err
+			}
+			cols = append(cols, c)
+		}
+		rows.Close()
+		list := strings.Join(cols, ", ")
+		if _, err := tx.Exec(`INSERT INTO items_new (` + list + `) SELECT ` + list + ` FROM items`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DROP TABLE items`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`ALTER TABLE items_new RENAME TO items`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS items_parent ON items(parent_id)`); err != nil {
+			return err
+		}
+		var bad int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&bad); err != nil {
+			return err
+		}
+		if bad > 0 {
+			return fmt.Errorf("%d foreign key violation(s) after the rebuild", bad)
+		}
+		return tx.Commit()
+	}()
+	return err
+}
+
 // ---------------------------------------------------------------- settings
 
 // SettingDefaults lists every known setting with its default value. Unknown
@@ -384,6 +491,104 @@ var SettingDefaults = map[string]string{
 	// Status given to new projects and tasks when the filters in effect admit
 	// it (the client falls back to a filter-derived status otherwise).
 	"default_status": StatusTodo,
+	// The values a task's effort may take, as a JSON array of minutes (see
+	// parseEffortOptions); stored sorted ascending.
+	"effort_options": DefaultEffortOptions,
+}
+
+// DefaultEffortOptions is 15m, 30m, 1h, 2h, 4h, 8h, 16h, 32h and 64h.
+const DefaultEffortOptions = `[15,30,60,120,240,480,960,1920,3840]`
+
+// MaxEffortOptions caps the number of entries in the effort_options setting.
+const MaxEffortOptions = 50
+
+// FormatEffort renders minutes the way the client shows effort: 15m, 1h,
+// "1h 30m", 64h.
+func FormatEffort(minutes int) string {
+	h, m := minutes/60, minutes%60
+	switch {
+	case h == 0:
+		return fmt.Sprintf("%dm", m)
+	case m == 0:
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
+// parseEffortOptions checks an effort_options value (a non-empty JSON array
+// of distinct positive integer minutes, at most MaxEffortOptions of them)
+// and returns the options sorted ascending.
+func parseEffortOptions(v string) ([]int, error) {
+	var opts []int
+	if err := json.Unmarshal([]byte(v), &opts); err != nil || len(opts) == 0 {
+		return nil, verr("effort_options must be a non-empty JSON array of minutes")
+	}
+	if len(opts) > MaxEffortOptions {
+		return nil, verr("effort_options may hold at most %d entries", MaxEffortOptions)
+	}
+	seen := make(map[int]bool, len(opts))
+	for _, o := range opts {
+		if o <= 0 {
+			return nil, verr("effort_options entries must be positive integers (minutes)")
+		}
+		if seen[o] {
+			return nil, verr("effort_options entries must be distinct: %s appears twice", FormatEffort(o))
+		}
+		seen[o] = true
+	}
+	slices.Sort(opts)
+	return opts, nil
+}
+
+// effortOptions reads the effort_options setting (or its default) as sorted
+// minutes, within tx when one is given.
+func effortOptions(q interface {
+	QueryRow(query string, args ...any) *sql.Row
+}) ([]int, error) {
+	v := SettingDefaults["effort_options"]
+	err := q.QueryRow(`SELECT value FROM settings WHERE key = 'effort_options'`).Scan(&v)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	return parseEffortOptions(v)
+}
+
+// checkEffortOptionsRemoval rejects dropping an option that a live, open
+// (not done or cancelled) task still uses. Closed and deleted tasks keep
+// their value and do not stand in the way.
+func checkEffortOptionsRemoval(tx *sql.Tx, old, new []int) error {
+	keep := make(map[int]bool, len(new))
+	for _, o := range new {
+		keep[o] = true
+	}
+	var problems []string
+	for _, o := range old {
+		if keep[o] {
+			continue
+		}
+		rows, err := tx.Query(`SELECT key FROM items WHERE deleted_at IS NULL AND type = 'task' AND effort = ?
+			AND status NOT IN ('done','cancelled') ORDER BY num`, o)
+		if err != nil {
+			return err
+		}
+		var keys []string
+		for rows.Next() {
+			var k string
+			if err := rows.Scan(&k); err != nil {
+				rows.Close()
+				return err
+			}
+			keys = append(keys, k)
+		}
+		rows.Close()
+		if len(keys) > 0 {
+			problems = append(problems, fmt.Sprintf("effort option %s is used by %s", FormatEffort(o), strings.Join(keys, ", ")))
+		}
+	}
+	if len(problems) > 0 {
+		return verr("%s", strings.Join(problems, "; "))
+	}
+	return nil
 }
 
 // LevelCount is the number of urgency/importance values (0-10).
@@ -447,6 +652,10 @@ func validSetting(k, v string) error {
 		if !validStatuses[v] {
 			return verr("default_status must be one of idea, backlog, todo, in-progress, done, cancelled")
 		}
+	case "effort_options":
+		if _, err := parseEffortOptions(v); err != nil {
+			return err
+		}
 	default:
 		return verr("unknown setting %q", k)
 	}
@@ -454,6 +663,8 @@ func validSetting(k, v string) error {
 }
 
 // UpdateSettings stores the given values and returns the full settings.
+// effort_options is stored sorted, and dropping an option that an open task
+// still uses is a ValidationError naming the option and the tasks.
 func (s *Store) UpdateSettings(vals map[string]string) (map[string]string, error) {
 	for k, v := range vals {
 		if err := validSetting(k, v); err != nil {
@@ -465,6 +676,19 @@ func (s *Store) UpdateSettings(vals map[string]string) (map[string]string, error
 		return nil, err
 	}
 	defer tx.Rollback()
+	if v, ok := vals["effort_options"]; ok {
+		opts, _ := parseEffortOptions(v) // validated above
+		old, err := effortOptions(tx)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkEffortOptionsRemoval(tx, old, opts); err != nil {
+			return nil, err
+		}
+		canon, _ := json.Marshal(opts)
+		vals = maps.Clone(vals)
+		vals["effort_options"] = string(canon)
+	}
 	for k, v := range vals {
 		if _, err := tx.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, k, v); err != nil {
 			return nil, err
@@ -487,6 +711,7 @@ var PrefDefaults = map[string]string{
 	"collapsed":    "[]", // JSON array of collapsed parent item ids
 	"sort":         "[]", // JSON array of {"key": ..., "dir": "asc"|"desc"}
 	"blocked_last": "0",
+	"closed_last":  "0",        // sink done/cancelled items below everything, including blocked ones
 	"bar_color":    "assignee", // assignee | owner | importance | urgency | combo | parent
 	"hidden_cols":  "[]",       // JSON array of hidden table columns (see validColumns)
 	// Colour-coding by Ongoing/Project (the items' own colours are shared;
@@ -518,12 +743,12 @@ const MaxSortKeys = 12
 // action buttons always show).
 var validColumns = map[string]bool{
 	"key": true, "parent": true, "status": true, "owner": true, "assignee": true,
-	"start": true, "end": true, "urgency": true, "importance": true, "blocked": true,
+	"start": true, "end": true, "urgency": true, "importance": true, "effort": true, "blocked": true,
 }
 
 var validSortKeys = map[string]bool{
 	"parent": true, "key": true, "title": true, "status": true, "owner": true, "assignee": true,
-	"start": true, "end": true, "urgency": true, "importance": true, "blocked": true,
+	"start": true, "end": true, "urgency": true, "importance": true, "effort": true, "blocked": true,
 }
 
 func oneOf(v string, opts ...string) bool {
@@ -541,7 +766,7 @@ func validPref(k, v string) error {
 		if !oneOf(v, "table", "timeline", "matrix") {
 			return verr("view must be one of table, timeline, matrix")
 		}
-	case "narrow", "flat", "blocked_last", "scratch_open", "scratch_wrap":
+	case "narrow", "flat", "blocked_last", "closed_last", "scratch_open", "scratch_wrap":
 		if v != "0" && v != "1" {
 			return verr("%s must be \"0\" or \"1\"", k)
 		}
@@ -917,7 +1142,7 @@ func (s *Store) DeleteUser(id int64) error {
 
 const itemCols = `i.id, i.type, i.key, i.num, i.parent_id, i.title, i.description, i.owner_id,
 	i.assignee_id, i.status, i.start_date, i.start_firm, i.end_date, i.end_firm,
-	i.urgency, i.importance, i.blocked, i.color, i.sort_order, i.created_at, i.updated_at,
+	i.urgency, i.importance, i.effort, i.blocked, i.color, i.sort_order, i.created_at, i.updated_at,
 	CASE WHEN i.status IN ('done','cancelled') THEN
 		(SELECT h.changed_at FROM status_history h WHERE h.item_id = i.id ORDER BY h.id DESC LIMIT 1)
 	END AS closed_at`
@@ -929,7 +1154,7 @@ func scanItem(r scanner) (*Item, error) {
 	var sfirm, efirm, blocked int
 	err := r.Scan(&it.ID, &it.Type, &it.Key, &it.Num, &it.ParentID, &it.Title, &it.Description, &it.OwnerID,
 		&it.AssigneeID, &it.Status, &it.StartDate, &sfirm, &it.EndDate, &efirm,
-		&it.Urgency, &it.Importance, &blocked, &it.Color, &it.SortOrder, &it.CreatedAt, &it.UpdatedAt, &it.ClosedAt)
+		&it.Urgency, &it.Importance, &it.Effort, &blocked, &it.Color, &it.SortOrder, &it.CreatedAt, &it.UpdatedAt, &it.ClosedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1167,12 +1392,12 @@ func (s *Store) CreateItem(in NewItem) (*Item, error) {
 
 	ts := now()
 	res, err := tx.Exec(`INSERT INTO items (type, num, key, parent_id, title, description, owner_id, assignee_id,
-		status, start_date, start_firm, end_date, end_firm, urgency, importance, blocked, color,
+		status, start_date, start_firm, end_date, end_firm, urgency, importance, effort, blocked, color,
 		sort_order, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		in.Type, num, key, base.ParentID, base.Title, base.Description, base.OwnerID, base.AssigneeID,
 		base.Status, base.StartDate, base.StartFirm, base.EndDate, base.EndFirm,
-		base.Urgency, base.Importance, base.Blocked, base.Color, order, ts, ts)
+		base.Urgency, base.Importance, base.Effort, base.Blocked, base.Color, order, ts, ts)
 	if err != nil {
 		return nil, err
 	}
@@ -1288,8 +1513,8 @@ func applyPatch(tx *sql.Tx, it *Item, p Patch) error {
 		}
 	}
 	if !isTask {
-		if p.Urgency != nil || p.Importance != nil || p.Blocked != nil {
-			return verr("only tasks have urgency, importance and blocked")
+		if p.Urgency != nil || p.Importance != nil || p.Effort != nil || p.ClearEffort || p.Blocked != nil {
+			return verr("only tasks have urgency, importance, effort and blocked")
 		}
 	} else {
 		if p.Urgency != nil {
@@ -1299,10 +1524,26 @@ func applyPatch(tx *sql.Tx, it *Item, p Patch) error {
 			it.Urgency = p.Urgency
 		}
 		if p.Importance != nil {
-			if *p.Importance < 0 || *p.Importance > 10 {
-				return verr("importance must be 0-10")
+			if *p.Importance < -1 || *p.Importance > 10 {
+				return verr("importance must be -1 to 10")
 			}
 			it.Importance = p.Importance
+		}
+		if p.ClearEffort {
+			it.Effort = nil
+		} else if p.Effort != nil {
+			opts, err := effortOptions(tx)
+			if err != nil {
+				return err
+			}
+			if !slices.Contains(opts, *p.Effort) {
+				names := make([]string, len(opts))
+				for i, o := range opts {
+					names[i] = FormatEffort(o)
+				}
+				return verr("effort must be one of the effort options (%s)", strings.Join(names, ", "))
+			}
+			it.Effort = p.Effort
 		}
 		if p.Blocked != nil {
 			it.Blocked = *p.Blocked
@@ -1348,10 +1589,10 @@ func (s *Store) UpdateItem(id int64, p Patch) (*Item, error) {
 	}
 	ts := now()
 	_, err = tx.Exec(`UPDATE items SET parent_id=?, title=?, description=?, owner_id=?, assignee_id=?,
-		status=?, start_date=?, start_firm=?, end_date=?, end_firm=?, urgency=?, importance=?, blocked=?, color=?,
+		status=?, start_date=?, start_firm=?, end_date=?, end_firm=?, urgency=?, importance=?, effort=?, blocked=?, color=?,
 		sort_order=?, updated_at=? WHERE id = ?`,
 		cur.ParentID, cur.Title, cur.Description, cur.OwnerID, cur.AssigneeID,
-		cur.Status, cur.StartDate, cur.StartFirm, cur.EndDate, cur.EndFirm, cur.Urgency, cur.Importance, cur.Blocked, cur.Color,
+		cur.Status, cur.StartDate, cur.StartFirm, cur.EndDate, cur.EndFirm, cur.Urgency, cur.Importance, cur.Effort, cur.Blocked, cur.Color,
 		order, ts, id)
 	if err != nil {
 		return nil, err

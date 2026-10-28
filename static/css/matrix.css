@@ -1,5 +1,7 @@
 /* Matrix view (see js/matrix.js): urgency x importance scatter, Eisenhower
-   orientation (urgency 10 at the left, importance 10 at the top). The SVG is
+   orientation (urgency 10 at the left, importance 10 at the top, -1 at the
+   bottom). Dot size shows effort (the script sets each point's radius and
+   --r); a task with no effort is a hollow dashed dot. The SVG is
    sized by the script to the panel width and remaining viewport height; the
    max-width below only scales it down when the panel is narrower than the
    plot's minimum size. */
@@ -22,8 +24,16 @@
 }
 
 /* Point colouring picker and the Keys | Titles label toggle, in a strip
-   above the plot (right-aligned). */
+   above the plot (right-aligned); the dot size legend sits at its left. */
 .matrix-controls { display: flex; justify-content: flex-end; align-items: center; gap: 6px; padding: 0 0 4px; }
+.matrix-size-legend {
+  display: inline-flex; align-items: center; gap: 3px; margin-right: auto;
+  font-size: 11px; line-height: 18px; color: var(--fg-muted); white-space: nowrap; cursor: help;
+}
+.matrix-size-legend .legend-dot { display: block; flex: none; }
+.matrix-size-legend .legend-dot .dot { fill: var(--fg-muted); }
+.matrix-size-legend .legend-dot .dot.hollow { fill: none; stroke: var(--fg-muted); stroke-width: 1.5; stroke-dasharray: 2 1.5; }
+.matrix-size-legend .legend-dot + .legend-dot { margin-left: -3px; margin-right: 2px; }
 .matrix-labels { display: flex; gap: 0; }
 .matrix-labels button {
   box-sizing: border-box; height: 22px; padding: 0 8px; font-size: 12px; line-height: 18px;
@@ -93,6 +103,16 @@
   stroke-width: 1.5;
   stroke-dasharray: 2 2;
 }
+/* No effort set: a hollow dot with a dashed outline in its own colour, over
+   a halo in the surface colour (the stroke no longer gives the ring). */
+.matrix-plot .pt .halo { fill: var(--bg); stroke: none; }
+.matrix-plot .pt.no-effort .dot {
+  fill-opacity: 0.45;
+  stroke: var(--pt, var(--pt-neutral));
+  stroke-width: 1.5;
+  stroke-dasharray: 2 1.5;
+  paint-order: normal;
+}
 .matrix-plot .pt .label {
   fill: var(--fg-muted);
   font-family: var(--mono);
@@ -107,7 +127,7 @@
 
 .matrix-plot .pt.hover .dot,
 .matrix-plot .pt:hover .dot {
-  r: 7;
+  r: calc(var(--r, 5px) + 2px);
   opacity: 1;
   stroke: var(--accent);
 }

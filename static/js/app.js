@@ -5,7 +5,8 @@
 // from the gear at the far left. Routes: #/ and #/settings; #/active,
 // #/backlog, #/ideas and #/all (or #/everything) apply that filter template.
 //
-// View, Flat, Narrow, collapsed parents, sort order, the filter settings,
+// View, Flat, Narrow, collapsed parents, sort order (and the blocked-last and
+// done-last switches), the filter settings,
 // the Timeline bar and Matrix point colours and the row colour-coding are
 // preferences (prefs.js) belonging to the account picked in the account
 // menu at the far right. The menu lists the users; a browser that has not
@@ -23,7 +24,7 @@ import { renderTable, expandableIds } from './table.js';
 import { renderTimeline } from './timeline.js';
 import { renderMatrix } from './matrix.js';
 import { renderSettings } from './settings.js';
-import { renderSearch, applyPreset, newStatus, typeAllowed, restoreFilters, persistFilters } from './search.js';
+import { renderSearch, applyPreset, newStatus, typeAllowed, restoreFilters, persistFilters, captureFocus as captureSearchFocus } from './search.js';
 import { el, toast, contrastText } from './util.js';
 import { beginNew, discardNew, draft } from './cells.js';
 import { prefs } from './prefs.js';
@@ -33,6 +34,7 @@ import { icon, keyGlyph } from './icons.js';
 import { renderColorsMenu } from './colors.js';
 import { startRealtime } from './realtime.js';
 import { renderScratch } from './scratch.js';
+import { formatEffort, effortSums } from './effort.js';
 
 const main = document.getElementById('main');
 const toolbar = document.getElementById('toolbar');
@@ -204,6 +206,7 @@ settingsBtn.addEventListener('click', () => { location.hash = '#/settings'; });
 
 function render() {
   const r = route();
+  captureSearchFocus(); // before the toolbar (and the search box with it) is rebuilt
   renderAccount();
   renderScratch({ account: prefs.account, page: r.page });
   settingsBtn.classList.toggle('active', r.page === 'settings');
@@ -238,6 +241,7 @@ function render() {
     return out;
   };
   const blockedLast = flag('blocked_last');
+  const closedLast = flag('closed_last');
   const hidden = normalizeHidden(prefs.getJSON('hidden_cols'));
 
   // ---- toolbar ----
@@ -277,13 +281,18 @@ function render() {
   toolbar.append(el('div', { class: 'spacer' }));
 
   // Sort menu: the current column order (headers add to it) and the
-  // user-defined option; also "blocked items last".
+  // user-defined option; also "blocked items last" and "done / cancelled
+  // items last".
+  // The effort total over the tasks in view sits just before Sort; it is
+  // filled once the filters have run (below).
+  const effortSlot = el('div', { class: 'effort-slot', id: 'effort-slot', hidden: true });
   const sortSlot = el('div', { class: 'sort-slot' });
-  toolbar.append(sortSlot);
+  toolbar.append(effortSlot, sortSlot);
   const sortCtx = {
-    sort, blockedLast, flat,
+    sort, blockedLast, closedLast, flat,
     setSort: (keys, all = false) => { prefs.set('sort', all ? keys : mergeSort(keys)); render(); },
     setBlockedLast: (on) => { prefs.set('blocked_last', on ? '1' : '0'); render(); },
+    setClosedLast: (on) => { prefs.set('closed_last', on ? '1' : '0'); render(); },
   };
   renderSortMenu(sortSlot, sortCtx);
 
@@ -346,6 +355,7 @@ function render() {
   if (!ui.searchFilter) ui.searchFilter = renderSearch(searchSlot, { rerender: render });
   else renderSearch(searchSlot, { rerender: render }); // re-mount controls into the fresh toolbar
   currentGroups = ui.searchFilter(currentGroups);
+  renderEffortTotal(effortSlot, currentGroups);
 
   // First-run guidance: an empty database has no users to pick as owner/assignee.
   const hint = (!state.users.length && !state.items.length)
@@ -354,7 +364,7 @@ function render() {
     : null;
 
   const tableOpts = {
-    groups: currentGroups, expanded: ui.expanded, actions, collapsed, flat, sort, blockedLast, hidden,
+    groups: currentGroups, expanded: ui.expanded, actions, collapsed, flat, sort, blockedLast, closedLast, hidden,
     onCollapse: () => prefs.set('collapsed', [...collapsed]),
     onSort: sortCtx.setSort,
   };
@@ -386,6 +396,20 @@ function render() {
     };
     renderTable(wrap, { ...tableOpts, mode: 'title-only', onRendered: draw });
   }
+}
+
+/** The badge beside Sort (no label: the tooltip says what it is): the effort over every task in view that is not
+ *  done or cancelled (the same tasks the parent rows sum), with the done or
+ *  cancelled part in the tooltip. Absent while no task in view has an effort. */
+function renderEffortTotal(slot, groups) {
+  const { open, closed } = effortSums(groups.flatMap((g) => g.tasks));
+  slot.replaceChildren();
+  slot.hidden = !(open || closed);
+  if (slot.hidden) return;
+  const parts = [`${formatEffort(open)} of effort over the tasks in view that are not done or cancelled`];
+  if (closed) parts.push(`${formatEffort(closed)} in done or cancelled tasks`);
+  slot.title = parts.join('; ');
+  slot.append(el('span', { class: 'effort-total', id: 'effort-total', dataset: { open, closed } }, open ? formatEffort(open) : '—'));
 }
 
 // Ctrl+Z / Cmd+Z undoes the last change made in this browser session, unless
