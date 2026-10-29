@@ -39,6 +39,7 @@ export const PREF_DEFAULTS = {
   point_color: 'assignee', // Matrix points: assignee | owner | parent
   filters: '',             // JSON of the Filters panel criteria (search.js), '' = the Active template
   matrix_labels: 'key',    // Matrix point labels: key | title
+  matrix_size: 'effort',   // Matrix dot size: effort (shows the task's effort) | same (every dot alike)
   // The scratch pad panel (scratch.js): open, width in px, the global pane's
   // share of the height in percent, and line wrapping.
   scratch_open: '0',

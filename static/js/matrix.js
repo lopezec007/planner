@@ -4,12 +4,15 @@
 //   panel   the right-hand container element
 //   handle  the table handle from renderTable: rows [{ item, el, kind }]
 //   ctx     { rerender(), onChanged(), pointColor, setPointColor(mode),
-//             labelMode, setLabelMode(mode) }
+//             labelMode, setLabelMode(mode), sizeMode, setSizeMode(mode) }
 //           pointColor is the point colouring mode (a preference: assignee,
 //           owner or the task's Ongoing/Project, see colors.js) picked with
 //           the dropdown above the plot; setPointColor persists a new one.
 //           labelMode ('key' | 'title', a preference) picks what each point
 //           is labelled with, via the Keys | Titles toggle beside it.
+//           sizeMode ('effort' | 'same', a preference) picks whether dot
+//           size shows effort or every dot is the same size, via the
+//           Effort | Same toggle at the left of the strip.
 //
 // Classic Eisenhower orientation: urgency runs 10 on the left to 0 on the
 // right, importance -1 at the bottom to 10 at the top (the quadrant midline
@@ -21,11 +24,13 @@
 // resize.
 //
 // Only rows of kind 'task' are plotted (parents have no urgency/importance).
-// A dot's radius shows the task's effort on a log scale between the smallest
-// and largest configured effort options (R_MIN..R_MAX px; the default 15m to
-// 64h); a task with no effort keeps the default radius and is drawn hollow
-// with a dashed outline (.no-effort) so "unknown" reads differently from
-// "small". A line in the controls strip explains the encoding.
+// In the Effort size mode a dot's radius shows the task's effort on a log
+// scale between the smallest and largest configured effort options
+// (R_MIN..R_MAX px; the default 15m to 64h); a task with no effort keeps the
+// default radius and is drawn hollow with a dashed outline (.no-effort) so
+// "unknown" reads differently from "small". A legend beside the Effort |
+// Same toggle explains the encoding. In the Same mode every dot has the
+// R_SAME radius and nothing marks a missing effort.
 // Tasks sharing the same (urgency, importance) are spread evenly around the
 // grid point, ordered by id, so the layout is deterministic and every point
 // stays visibly attached to its integer value. Labels sit on the outward
@@ -54,8 +59,9 @@ const MAX = 10;
 const IMP_MIN = -1;        // importance runs IMP_MIN..MAX; urgency 0..MAX
 const MARGIN = { top: 14, right: 18, bottom: 46, left: 52 };
 const POINT_R = 5;         // radius of a dot with no effort (px)
-const R_MIN = 4;           // radius at the smallest effort option (px)
-const R_MAX = 11;          // radius at the largest effort option (px)
+const R_MIN = 3;           // radius at the smallest effort option (px)
+const R_MAX = 15;          // radius at the largest effort option (px)
+const R_SAME = 6;          // radius of every dot in the Same size mode (px)
 const HIT_PAD = 8;         // hit radius beyond the dot's radius (px)
 const MIN_PLOT = 320;      // minimum plot-area width and height (px)
 const BOTTOM_GAP = 16;     // viewport margin kept below the plot (px)
@@ -64,6 +70,7 @@ const LABEL_MAX = 28;      // title labels longer than this are cut with an elli
 const LABEL_CHAR_W = 6;    // estimated label width per character (10px font), px
 const LABEL_GAP = 4;       // space between a dot's edge and its label (px)
 const LABEL_MODES = [['key', 'Keys', 'Label the points with task keys'], ['title', 'Titles', 'Label the points with task titles']];
+const SIZE_MODES = [['effort', 'Effort', 'Dot size shows the task\'s effort'], ['same', 'Same', 'Every dot the same size']];
 
 function svg(tag, attrs = {}, ...children) {
   const node = document.createElementNS(SVG_NS, tag);
@@ -87,8 +94,9 @@ const impLevel = (n) => (n == null ? 5 : Math.max(IMP_MIN, Math.min(MAX, Number(
 
 /** Dot radius (px) for an effort in minutes: a log scale between the
  *  smallest and largest options (clamped outside them); POINT_R when the
- *  task has no effort. */
-function pointRadius(effort, opts) {
+ *  task has no effort. In the Same size mode every dot is R_SAME. */
+function pointRadius(effort, opts, sizeMode = 'effort') {
+  if (sizeMode === 'same') return R_SAME;
   if (effort == null || !(Number(effort) > 0)) return POINT_R;
   const min = opts[0], max = opts[opts.length - 1];
   if (!(max > min)) return (R_MIN + R_MAX) / 2;
@@ -128,8 +136,8 @@ function scales(plotW, plotH) {
 }
 
 /** Lay out points: returns [{ item, row, x, y, r, angle }] in pixel
- *  coordinates, r being the dot radius for the task's effort. */
-function layout(rows, plotW, plotH) {
+ *  coordinates, r being the dot radius for the task's effort (or R_SAME). */
+function layout(rows, plotW, plotH, sizeMode) {
   const { cell, sx, sy } = scales(plotW, plotH);
   const opts = effortOptions();
   const groups = new Map();
@@ -142,7 +150,7 @@ function layout(rows, plotW, plotH) {
   for (const group of groups.values()) {
     group.sort((a, b) => a.item.id - b.item.id);
     const n = group.length;
-    const radii = group.map((row) => pointRadius(row.item.effort, opts));
+    const radii = group.map((row) => pointRadius(row.item.effort, opts, sizeMode));
     const jr = jitterRadius(n, cell, Math.max(...radii));
     // Deterministic start angle derived from the first id, so clusters at
     // different grid points do not all line up the same way.
@@ -174,11 +182,14 @@ function labelText(item, mode) {
 /** Estimated rendered width of a label (px), for the edge-flip decision. */
 const labelWidth = (text) => text.length * LABEL_CHAR_W + LABEL_GAP;
 
-function pointClass(item) {
+/** A task with no effort is marked (.no-effort) only while size shows effort. */
+const noEffort = (item, sizeMode) => sizeMode !== 'same' && item.effort == null;
+
+function pointClass(item, sizeMode) {
   const cls = ['pt'];
   if (isClosed(item.status)) cls.push('closed');
   if (isBlocked(item)) cls.push('blocked');
-  if (item.effort == null) cls.push('no-effort');
+  if (noEffort(item, sizeMode)) cls.push('no-effort');
   return cls.join(' ');
 }
 
@@ -234,7 +245,7 @@ function drawDependencies(pts) {
 
 // ---------------------------------------------------------------- plot
 
-function drawPlot(root, rows, width, height, colorMode, labelMode) {
+function drawPlot(root, rows, width, height, colorMode, labelMode, sizeMode) {
   const plotW = Math.max(MIN_PLOT, width - MARGIN.left - MARGIN.right);
   const plotH = Math.max(MIN_PLOT, height - MARGIN.top - MARGIN.bottom);
   const W = plotW + MARGIN.left + MARGIN.right;
@@ -277,7 +288,7 @@ function drawPlot(root, rows, width, height, colorMode, labelMode) {
     svg('text', { class: 'quad-label', x: x0 + 6, y: y1 + 14, 'text-anchor': 'start' }, 'urgent & important'),
   );
 
-  const pts = layout(rows, plotW, plotH);
+  const pts = layout(rows, plotW, plotH, sizeMode);
   // Draw closed/blocked first so live points sit on top of muted ones.
   pts.sort((a, b) => Number(isClosed(a.item.status) || isBlocked(a.item)) - Number(isClosed(b.item.status) || isBlocked(b.item)));
   for (const p of pts) p.lines = [];
@@ -287,7 +298,7 @@ function drawPlot(root, rows, width, height, colorMode, labelMode) {
   for (const p of pts) {
     const color = pointColor(p.item, colorMode);
     const g = svg('g', {
-      class: pointClass(p.item),
+      class: pointClass(p.item, sizeMode),
       dataset: { id: p.item.id, key: p.item.key },
       // --r lets the stylesheet grow the dot on hover relative to its size.
       style: `--r: ${p.r}px${color ? `; --pt: ${color}` : ''}`,
@@ -311,7 +322,7 @@ function drawPlot(root, rows, width, height, colorMode, labelMode) {
     g.append(
       svg('circle', { class: 'hit', cx: p.x, cy: p.y, r: p.r + HIT_PAD }),
       isBlocked(p.item) ? svg('circle', { class: 'ring', cx: p.x, cy: p.y, r: p.r + 3.5 }) : null,
-      p.item.effort == null ? svg('circle', { class: 'halo', cx: p.x, cy: p.y, r: p.r + 1.75 }) : null,
+      noEffort(p.item, sizeMode) ? svg('circle', { class: 'halo', cx: p.x, cy: p.y, r: p.r + 1.75 }) : null,
       svg('circle', { class: 'dot', cx: p.x, cy: p.y, r: p.r }),
       svg('text', {
         class: `label ${labelMode === 'title' ? 'title' : 'key'}`, x: lx, y: ly,
@@ -329,11 +340,29 @@ function drawPlot(root, rows, width, height, colorMode, labelMode) {
 
 // ---------------------------------------------------------------- entry
 
-/** A dot of radius r for the size legend (hollow: the no-effort style). */
+/** A dot of radius r for the size legend (hollow: the no-effort style). The
+ *  box is just wide enough for the dot (plus the hollow dot's outline) and
+ *  as tall as the largest dot, so the dots sit on one centre line. */
 function legendDot(r, hollow = false) {
-  const size = 2 * R_MAX + 2;
-  return svg('svg', { class: 'legend-dot', width: size, height: size, viewBox: `0 0 ${size} ${size}`, 'aria-hidden': 'true' },
-    svg('circle', { class: hollow ? 'dot hollow' : 'dot', cx: size / 2, cy: size / 2, r }));
+  const h = 2 * R_MAX + 2;
+  const w = 2 * r + 2;
+  return svg('svg', { class: 'legend-dot', width: w, height: h, viewBox: `0 0 ${w} ${h}`, 'aria-hidden': 'true' },
+    svg('circle', { class: hollow ? 'dot hollow' : 'dot', cx: w / 2, cy: h / 2, r }));
+}
+
+/** A two-button toggle (Keys | Titles, Effort | Same): `modes` are
+ *  [value, label, title] triples, `attr` the data attribute naming the
+ *  value on each button. */
+function toggle(cls, label, modes, attr, current, onPick) {
+  const group = el('div', { class: cls, role: 'group', 'aria-label': label });
+  for (const [m, text, title] of modes) {
+    group.append(el('button', {
+      type: 'button', class: m === current ? 'active' : '', dataset: { [attr]: m },
+      'aria-pressed': m === current ? 'true' : 'false', title,
+      onClick: () => { if (m !== current) onPick(m); },
+    }, text));
+  }
+  return group;
 }
 
 export function renderMatrix(panel, handle, ctx) {
@@ -353,22 +382,23 @@ export function renderMatrix(panel, handle, ctx) {
   colorSel.addEventListener('change', () => ctx.setPointColor?.(colorSel.value));
   // Point labels (a preference): a Keys | Titles toggle beside the picker.
   const labelMode = ctx.labelMode === 'title' ? 'title' : 'key';
-  const labelsGroup = el('div', { class: 'matrix-labels', role: 'group', 'aria-label': 'Point labels' });
-  for (const [m, label, title] of LABEL_MODES) {
-    labelsGroup.append(el('button', {
-      type: 'button', class: m === labelMode ? 'active' : '', dataset: { labels: m },
-      'aria-pressed': m === labelMode ? 'true' : 'false', title,
-      onClick: () => { if (m !== labelMode) ctx.setLabelMode?.(m); },
-    }, label));
-  }
-  // Dot size legend: the smallest and largest effort options, and the
-  // hollow dashed dot for tasks without one.
+  const labelsGroup = toggle('matrix-labels', 'Point labels', LABEL_MODES, 'labels', labelMode, (m) => ctx.setLabelMode?.(m));
+  // Dot size (a preference): an Effort | Same toggle at the left of the
+  // strip, with a legend in the Effort mode (the smallest and largest
+  // effort options, and the hollow dashed dot for tasks without one).
+  const sizeMode = ctx.sizeMode === 'same' ? 'same' : 'effort';
   const opts = effortOptions();
-  const sizeLegend = el('span', {
+  const sizeLegend = sizeMode === 'same' ? null : el('span', {
     class: 'matrix-size-legend',
     title: `Dot size shows effort: ${formatEffort(opts[0])} smallest, ${formatEffort(opts[opts.length - 1])} largest (log scale). A hollow dashed dot has no effort set.`,
-  }, legendDot(R_MIN), legendDot(R_MAX), 'dot size: effort', legendDot(POINT_R, true), 'none');
-  const controls = el('div', { class: 'matrix-controls', role: 'group', 'aria-label': 'Matrix controls' }, sizeLegend, colorSel, labelsGroup);
+  }, legendDot(R_MIN), legendDot(R_MAX), `${formatEffort(opts[0])} to ${formatEffort(opts[opts.length - 1])}`, legendDot(POINT_R, true), 'none');
+  // The group is as tall as the legend's largest dot in both modes, so the
+  // strip (and the plot below it) keeps its height when the mode changes.
+  const sizeGroup = el('div', { class: 'matrix-size', style: { minHeight: `${2 * R_MAX + 2}px` } },
+    el('span', { class: 'matrix-size-label' }, 'Dot size'),
+    toggle('matrix-sizes', 'Dot size', SIZE_MODES, 'size', sizeMode, (m) => ctx.setSizeMode?.(m)),
+    sizeLegend);
+  const controls = el('div', { class: 'matrix-controls', role: 'group', 'aria-label': 'Matrix controls' }, sizeGroup, colorSel, labelsGroup);
   const plotRoot = el('div', { class: 'matrix-plot-wrap' });
   wrap.append(controls, plotRoot);
   const tip = itemTooltip();
@@ -401,7 +431,7 @@ export function renderMatrix(panel, handle, ctx) {
     if (width === drawnW && height === drawnH) return;
     drawnW = width;
     drawnH = height;
-    const res = drawPlot(plotRoot, rows, width, height, colorMode, labelMode);
+    const res = drawPlot(plotRoot, rows, width, height, colorMode, labelMode, sizeMode);
     pts = res.pts;
     const { ux, iy } = res.inv;
     const svgNode = res.svg;

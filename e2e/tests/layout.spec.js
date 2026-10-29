@@ -244,28 +244,59 @@ test('the collapsed task count follows the filters', async ({ page, request }) =
   await expect(page.locator('.row.task', { hasText: 'Clean gutters' })).toBeVisible();
 });
 
-test('the header row stays under the title bar while the page scrolls, in every view', async ({ page }) => {
-  await page.setViewportSize({ width: 1500, height: 420 });
+test('the title bar and the header row stay put while the page scrolls, in every view and layout', async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 300 }); // short, so even the Flat list scrolls past one screen
   await page.goto('/#/all');
   const edges = () => page.evaluate(() => ({
+    barTop: document.querySelector('.topbar').getBoundingClientRect().top,
     bar: document.querySelector('.topbar').getBoundingClientRect().bottom,
     header: document.querySelector('.row.header').getBoundingClientRect().top,
+    axis: document.querySelector('.timeline-axis')?.getBoundingClientRect().top ?? null,
     z: Number(getComputedStyle(document.querySelector('.row.header')).zIndex),
+    scrollY: window.scrollY,
   }));
-  for (const view of ['table', 'timeline', 'matrix']) {
-    await page.locator(`button[data-view=${view}]`).click();
-    await expect(page.locator('.row[data-id]').first()).toBeVisible();
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await page.evaluate(() => window.scrollBy(0, 300));
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
-    const e = await edges();
-    expect(Math.abs(e.header - e.bar)).toBeLessThan(1);
-    expect(e.z).toBeGreaterThan(0);
-    expect(e.z).toBeLessThan(20); // under menus (20), the item tooltip (50) and the colour popover (60)
+  for (const layout of ['nested', 'flat']) {
+    await page.locator(`#btn-${layout}`).click();
+    for (const view of ['table', 'timeline', 'matrix']) {
+      await page.locator(`button[data-view=${view}]`).click();
+      await expect(page.locator('.row[data-id]').first()).toBeVisible();
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const rest = await edges();
+      // The header rests in the page gap under the title bar (inside the
+      // table's frame in Flat) and is pinned exactly there, so it does not
+      // move at all: not by the gap at the start of a scroll, nor off the
+      // screen after a long one (the title bar once did, past one screen).
+      expect(rest.header - rest.bar).toBeCloseTo(layout === 'flat' ? 13 : 12, 0);
+      for (const dy of [5, 300, 5000]) {
+        await page.evaluate((dy) => window.scrollBy(0, dy), dy);
+        await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(rest.scrollY);
+        const e = await edges();
+        expect(e.barTop).toBe(0);
+        expect(e.bar).toBe(rest.bar);
+        expect(Math.abs(e.header - rest.header)).toBeLessThan(1);
+        // The axis stays level with the header (its shift is applied on the scroll event, a frame later).
+        if (view === 'timeline') await expect.poll(async () => { const m = await edges(); return Math.abs(m.axis - m.header); }).toBeLessThan(1);
+        rest.scrollY = e.scrollY;
+      }
+      expect(rest.scrollY).toBeGreaterThan(300); // the page was scrolled further than one screen
+      const e = await edges();
+      expect(e.z).toBeGreaterThan(0);
+      expect(e.z).toBeLessThan(20); // under menus (20), the item tooltip (50) and the colour popover (60)
+    }
   }
+  await page.locator('#btn-nested').click();
   await page.locator('button[data-view=table]').click();
   // The table is not a scroll container (that would pin the header to it, not the window).
   expect(await page.locator('.table').evaluate((e) => getComputedStyle(e).overflowX)).toBe('visible');
+  // Rows scrolling through the gap between the title bar and the header are
+  // hidden under a strip in the page colour (main::before).
+  await page.evaluate(() => window.scrollTo(0, 300));
+  const gapHit = await page.evaluate(() => {
+    const bar = document.querySelector('.topbar').getBoundingClientRect();
+    const hit = document.elementFromPoint(bar.left + 300, bar.bottom + 6);
+    return hit ? `${hit.tagName.toLowerCase()}${hit.id ? '#' + hit.id : ''}.${hit.className}` : null;
+  });
+  expect(gapHit).toBe('main#main.'); // the strip is main's own pseudo-element: nothing else is hit there
   await page.evaluate(() => window.scrollTo(0, 0));
 });
 

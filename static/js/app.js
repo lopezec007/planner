@@ -390,6 +390,9 @@ function render() {
         // Matrix point labels (a preference): key | title.
         labelMode: prefs.get('matrix_labels'),
         setLabelMode: (mode) => { prefs.set('matrix_labels', mode); render(); },
+        // Matrix dot size (a preference): effort | same.
+        sizeMode: prefs.get('matrix_size'),
+        setSizeMode: (mode) => { prefs.set('matrix_size', mode); render(); },
       };
       if (currentView === 'timeline') renderTimeline(panel, handle, ctx);
       else renderMatrix(panel, handle, ctx);

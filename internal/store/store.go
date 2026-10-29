@@ -724,6 +724,8 @@ var PrefDefaults = map[string]string{
 	"filters": "",
 	// Matrix point labels: the task key or its title.
 	"matrix_labels": "key", // key | title
+	// Matrix dot size: the task's effort, or every dot the same size.
+	"matrix_size": "effort", // effort | same
 	// The scratch pad panel (see static/js/scratch.js): whether it is open,
 	// its width in px, the height of the global pane as a percentage of the
 	// panel, and whether lines wrap.
@@ -773,6 +775,10 @@ func validPref(k, v string) error {
 	case "matrix_labels":
 		if !oneOf(v, "key", "title") {
 			return verr("matrix_labels must be key or title")
+		}
+	case "matrix_size":
+		if !oneOf(v, "effort", "same") {
+			return verr("matrix_size must be effort or same")
 		}
 	case "scratch_width":
 		if n, err := strconv.Atoi(v); err != nil || n < 160 || n > 2000 {

@@ -1,7 +1,8 @@
 /* Matrix view (see js/matrix.js): urgency x importance scatter, Eisenhower
    orientation (urgency 10 at the left, importance 10 at the top, -1 at the
-   bottom). Dot size shows effort (the script sets each point's radius and
-   --r); a task with no effort is a hollow dashed dot. The SVG is
+   bottom). Dot size shows effort, or is the same for every dot, per the
+   toggle above the plot (the script sets each point's radius and --r); a
+   task with no effort is a hollow dashed dot in the Effort mode. The SVG is
    sized by the script to the panel width and remaining viewport height; the
    max-width below only scales it down when the panel is narrower than the
    plot's minimum size. */
@@ -24,25 +25,28 @@
 }
 
 /* Point colouring picker and the Keys | Titles label toggle, in a strip
-   above the plot (right-aligned); the dot size legend sits at its left. */
+   above the plot (right-aligned); the Effort | Same dot size toggle sits at
+   its left with the size legend (Effort mode only) beside it. */
 .matrix-controls { display: flex; justify-content: flex-end; align-items: center; gap: 6px; padding: 0 0 4px; }
+.matrix-size { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; min-height: 22px; }
+.matrix-size-label { font-size: 11px; line-height: 18px; color: var(--fg-muted); white-space: nowrap; }
 .matrix-size-legend {
-  display: inline-flex; align-items: center; gap: 3px; margin-right: auto;
+  display: inline-flex; align-items: center; gap: 3px;
   font-size: 11px; line-height: 18px; color: var(--fg-muted); white-space: nowrap; cursor: help;
 }
 .matrix-size-legend .legend-dot { display: block; flex: none; }
 .matrix-size-legend .legend-dot .dot { fill: var(--fg-muted); }
 .matrix-size-legend .legend-dot .dot.hollow { fill: none; stroke: var(--fg-muted); stroke-width: 1.5; stroke-dasharray: 2 1.5; }
-.matrix-size-legend .legend-dot + .legend-dot { margin-left: -3px; margin-right: 2px; }
-.matrix-labels { display: flex; gap: 0; }
-.matrix-labels button {
+.matrix-size-legend .legend-dot + .legend-dot { margin-right: 2px; }
+.matrix-labels, .matrix-sizes { display: flex; gap: 0; }
+.matrix-labels button, .matrix-sizes button {
   box-sizing: border-box; height: 22px; padding: 0 8px; font-size: 12px; line-height: 18px;
   color: var(--fg-muted); background: var(--bg); border-radius: 0;
 }
-.matrix-labels button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
-.matrix-labels button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
-.matrix-labels button:hover { color: var(--fg); background: var(--bg-hover); }
-.matrix-labels button.active { color: var(--fg); }
+.matrix-labels button:first-child, .matrix-sizes button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.matrix-labels button:last-child, .matrix-sizes button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.matrix-labels button:hover, .matrix-sizes button:hover { color: var(--fg); background: var(--bg-hover); }
+.matrix-labels button.active, .matrix-sizes button.active { color: var(--fg); }
 .matrix-controls select.matrix-color {
   box-sizing: border-box; height: 22px; padding: 0 4px; font-size: 12px; line-height: 18px;
   color: var(--fg-muted); background: var(--bg); cursor: pointer;

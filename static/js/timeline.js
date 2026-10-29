@@ -520,13 +520,17 @@ export function renderTimeline(panel, handle, ctx) {
   }
 
   // ---- axis stays readable while the page scrolls ----
-  // The amount the canvas top has scrolled under the title bar (the table
-  // header is sticky there) is applied as a translate to the axis band, the
-  // floating controls and the Today label (see css, --axis-shift).
+  // The amount the canvas top has scrolled above the line the table header
+  // row is pinned at (its sticky top: the page gap under the title bar, see
+  // app.css) is applied as a translate to the axis band, the floating
+  // controls and the Today label (see css, --axis-shift), so the axis stays
+  // level with the header.
   function shiftAxis() {
-    const topbar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topbar-h')) || 0;
+    const header = headers[headers.length - 1];
+    const pin = (header && parseFloat(getComputedStyle(header).top))
+      || parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topbar-h')) || 0;
     const top = canvas.getBoundingClientRect().top;
-    const dy = Math.max(0, Math.min(topbar - top, canvas.offsetHeight - axisH));
+    const dy = Math.max(0, Math.min(pin - top, canvas.offsetHeight - axisH));
     plan.style.setProperty('--axis-shift', `${Math.round(dy)}px`);
   }
 

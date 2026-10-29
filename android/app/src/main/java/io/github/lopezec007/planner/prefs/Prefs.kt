@@ -25,6 +25,9 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 enum class View(val label: String) { LIST("List"), TIMELINE("Timeline"), MATRIX("Matrix") }
 
+/** Matrix dot size: the task's effort, or every dot the same size (the web UI's matrix_size preference). */
+enum class DotSize(val label: String) { EFFORT("Effort"), SAME("Same") }
+
 data class AppPrefs(
     val serverUrl: String = "",
     val accountId: Long? = null,
@@ -34,6 +37,7 @@ data class AppPrefs(
     val collapsed: Set<Long> = emptySet(),   // parents whose tasks are hidden in the list
     val barColor: ColorMode = ColorMode.ASSIGNEE,
     val pointColor: ColorMode = ColorMode.ASSIGNEE,
+    val dotSize: DotSize = DotSize.EFFORT,
     val notifyEnabled: Boolean = true,
     val notifyHour: Int = 8,
     val notifyMinute: Int = 0,
@@ -61,6 +65,7 @@ class Prefs(private val context: Context) {
         val collapsed = stringPreferencesKey("collapsed")
         val barColor = stringPreferencesKey("bar_color")
         val pointColor = stringPreferencesKey("point_color")
+        val dotSize = stringPreferencesKey("matrix_size")
         val notifyEnabled = booleanPreferencesKey("notify_enabled")
         val notifyHour = intPreferencesKey("notify_hour")
         val notifyMinute = intPreferencesKey("notify_minute")
@@ -84,6 +89,7 @@ class Prefs(private val context: Context) {
         collapsed = p[K.collapsed]?.let { s -> runCatching { json.decodeFromString<List<Long>>(s) }.getOrDefault(emptyList()) }?.toSet() ?: emptySet(),
         barColor = ColorMode.fromWire(p[K.barColor]),
         pointColor = ColorMode.fromWire(p[K.pointColor]),
+        dotSize = DotSize.entries.firstOrNull { it.name == p[K.dotSize] } ?: DotSize.EFFORT,
         notifyEnabled = p[K.notifyEnabled] ?: true,
         notifyHour = p[K.notifyHour] ?: 8,
         notifyMinute = p[K.notifyMinute] ?: 0,
@@ -108,6 +114,7 @@ class Prefs(private val context: Context) {
     suspend fun setCollapsed(ids: Set<Long>) = context.dataStore.edit { it[K.collapsed] = json.encodeToString(ids.toList()) }
     suspend fun setBarColor(m: ColorMode) = context.dataStore.edit { it[K.barColor] = m.wire }
     suspend fun setPointColor(m: ColorMode) = context.dataStore.edit { it[K.pointColor] = m.wire }
+    suspend fun setDotSize(s: DotSize) = context.dataStore.edit { it[K.dotSize] = s.name }
     suspend fun setNotify(enabled: Boolean, hour: Int, minute: Int) = context.dataStore.edit {
         it[K.notifyEnabled] = enabled
         it[K.notifyHour] = hour.coerceIn(0, 23)

@@ -20,6 +20,7 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --row-h: 36px; /* item rows have this exact height in every view and browser */
+  --page-gap: 12px; /* between the title bar and the content; the sticky header row rests here (see main::before) */
   /* Row tints by item type; set from Settings (see app.js applySettings). */
   --row-ongoing: #2a9d8f;
   --row-project: #5b6cff;
@@ -60,7 +61,11 @@ body.tasks-by-parent { --tint-parent: 34%; --tint-task: 9%; }
 
 /* ---------- base ---------- */
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; }
+/* The body grows with the page (min-height, not height): a sticky element
+   only stays put within its containing block, so a body fixed at the
+   viewport height let the title bar scroll away after one screen. */
+html { height: 100%; }
+body { margin: 0; min-height: 100%; }
 body {
   font-family: var(--font);
   font-size: 14px;
@@ -127,7 +132,17 @@ button:disabled { opacity: 0.5; cursor: default; }
 .account { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
 .account-select { max-width: 130px; padding: 3px 4px; font-size: 13px; cursor: pointer; }
 
-main { padding: 12px 16px; flex: 1; }
+/* The gap between the title bar and the content (--page-gap) is a sticky
+   strip in the page colour rather than padding: the table's header row (and
+   the Timeline axis level with it) pin at their resting position, so they
+   never move while the page scrolls, and rows passing through the gap are
+   hidden under the strip. Above row content, the Timeline frames (6) and
+   its floating controls (7); below menus and popovers (20+). */
+main { padding: 0 16px var(--page-gap); flex: 1; }
+main::before {
+  content: ''; display: block; position: sticky; top: var(--topbar-h, 48px); z-index: 8;
+  height: var(--page-gap); margin: 0 -16px; background: var(--bg);
+}
 .empty { color: var(--fg-muted); padding: 24px; text-align: center; }
 .hint { color: var(--fg-muted); margin: 0 0 12px; }
 .toast {
@@ -141,7 +156,7 @@ main { padding: 12px 16px; flex: 1; }
 .split .table-wrap { flex: 0 0 auto; min-width: 320px; max-width: 45%; }
 .split .panel { flex: 1 1 auto; min-width: 0; position: relative; }
 /* The Matrix panel keeps its place in the viewport while the list scrolls. */
-.split .panel.sticky { position: sticky; top: calc(var(--topbar-h, 48px) + 12px); }
+.split .panel.sticky { position: sticky; top: calc(var(--topbar-h, 48px) + var(--page-gap)); }
 
 /* ---------- hierarchical table ----------
    One grid template for every row so the shared columns line up across
@@ -225,13 +240,18 @@ main { padding: 12px 16px; flex: 1; }
 .row.parent[data-type="project"] { --row-color: var(--row-project); }
 .row.parent, .row.description.kind-parent { background: color-mix(in srgb, var(--row-color, transparent) var(--tint-parent), var(--bg)); }
 .row.task, .row.description.kind-task { --row-color: var(--row-task); background: color-mix(in srgb, var(--row-color) var(--tint-task), var(--bg)); }
-/* The header row stays in view under the title bar while the page scrolls:
-   above row content (handles, chips), below popovers and menus. */
+/* The header row stays in view while the page scrolls, pinned exactly where
+   it rests (the page gap below the title bar, see main::before), so it does
+   not move at all: above row content (handles, chips), below popovers and
+   menus. */
 .row.header {
   background: var(--bg-alt); color: var(--fg-muted); font-weight: 600; font-size: 12px;
   text-transform: uppercase; letter-spacing: 0.02em; min-height: 36px;
-  position: sticky; top: var(--topbar-h, 48px); z-index: 5;
+  position: sticky; top: calc(var(--topbar-h, 48px) + var(--page-gap)); z-index: 5;
 }
+/* Flat: the header rests inside the table's 1px frame, so it pins 1px lower,
+   and carries the frame's top rule along while the table scrolls under it. */
+.table.flat .row.header { top: calc(var(--topbar-h, 48px) + var(--page-gap) + 1px); box-shadow: 0 -1px 0 var(--border); }
 .row:not(.header):not(.editing):not(.edit-detail):hover { background: var(--bg-hover); }
 /* An expanded row and its detail row below highlight together: hovering
    either one lights up the other. */

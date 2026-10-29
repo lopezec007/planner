@@ -108,7 +108,8 @@ the single SQLite file. The directory containing it must already exist.
 6. **Timeline** shows a Gantt chart beside the titles (zoom with the +/−
    buttons or Ctrl+wheel; Shift+wheel, Alt+wheel or drag to pan; a plain
    wheel scrolls the page; Today recentres). The date axis stays in view
-   under the title bar while the page scrolls, like the table header. Drag
+   under the title bar while the page scrolls, level with the table header
+   (which never moves). Drag
    a bar to move its dates or an end to resize; drag or click in a bar's
    faded tail to pin the missing date; click or drag on an empty row to
    create dates; hover a bar for × buttons that remove a date. A Project
@@ -121,11 +122,12 @@ the single SQLite file. The directory containing it must already exist.
    important, amber = urgent, grey = neither), with a legend. Tooltips name
    a task's Ongoing or Project above its title. **Matrix**
    plots tasks by urgency (0 to 10) and importance (-1 to 10) and stays in
-   view while the list scrolls; dot size follows effort on a logarithmic
-   scale from the smallest to the largest configured option, and a task
-   without an effort is a hollow dashed dot of middling size; hover a point
-   for its description; the Keys / Titles toggle
-   above the plot labels points with the task key or its title.
+   view while the list scrolls; with the Dot size switch above the plot on
+   **Effort**, dot size follows effort on a logarithmic scale from the
+   smallest to the largest configured option (a legend shows the two
+   sizes), and a task without an effort is a small hollow dashed dot; on
+   **Same** every dot is alike; hover a point for its description; the
+   Keys / Titles toggle labels points with the task key or its title.
    Settings has the first day of the week, the default status for new
    projects and tasks, the effort options (add any duration such as 1h 30m;
    an option still used by an open task cannot be removed, and done or
@@ -161,7 +163,7 @@ the single SQLite file. The directory containing it must already exist.
    that has not picked anyone gets the first user and remembers the choice.
    The view, Flat, Narrow, collapsed parents, sort, hidden columns, filters,
    Timeline and Matrix colouring, the Colours menu, the Matrix labels and
-   the scratch pad layout are saved with the account, so they follow you to
+   dot size and the scratch pad layout are saved with the account, so they follow you to
    any browser; until the first user exists they are kept in the browser.
 11. **Live updates**: a change made in another browser (or from the Android
    app) shows up here within a moment, no refresh needed. A page waits
@@ -331,7 +333,7 @@ API summary (all JSON):
     GET    /api/users/{id}/prefs      PATCH /api/users/{id}/prefs {key: value}
                                       (view, narrow, flat, collapsed, sort, blocked_last, bar_color, hidden_cols,
                                        closed_last, parent_colors, task_colors, point_color, filters,
-                                       matrix_labels, scratch_open, scratch_width, scratch_split, scratch_wrap)
+                                       matrix_labels, matrix_size, scratch_open, scratch_width, scratch_split, scratch_wrap)
     GET    /api/users/{id}/scratch    PUT /api/users/{id}/scratch {text}   the user's scratch pad {text, updated_at}
     GET    /api/scratch               PUT /api/scratch {text}              the shared scratch pad (1 MiB cap)
     GET    /api/events                server-sent events: {"kind": items|users|settings|scratch, "scope"?,

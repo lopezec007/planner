@@ -142,9 +142,10 @@ network never blocks a screen.
 - **Matrix**: full-screen urgency × importance scatter of the visible
   tasks, Eisenhower orientation (the importance axis runs -1 to 10, so it
   has one more row than urgency), deterministic jitter, dependency arrows;
-  a dot's radius grows with the task's effort (log2 of effort over 15
-  minutes: 4dp at 15m to 11dp at 64h; 6dp without one), and the jitter
-  spacing and hit radius follow the dot size. Tap a point for its card (its
+  with the Dot size toggle above the plot (a preference, like the web UI's)
+  on Effort a dot's radius grows with the task's effort (log2 of effort over
+  15 minutes: 3dp at 15m to 15dp at 64h; 5dp without one), on Same every dot
+  is 6dp; the jitter spacing and hit radius follow the dot size. Tap a point for its card (its
   underlined title, like the Open button, opens the task), drag a point to
   change its values.
 - **Scratch**: from the toolbar's note icon. Two tabs, "Shared" and the

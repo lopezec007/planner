@@ -231,7 +231,8 @@ right-hand side of the screen.
 - The time window defaults to one month before today through three months after today.  It must be zoomable and
   scrollable: a plain mouse wheel scrolls the page, Shift or Alt with the wheel pans the timeline sideways, Ctrl
   with the wheel zooms, and dragging the background pans.  The date axis stays visible under the title bar while
-  the page scrolls, as does the table's header row in every view.
+  the page scrolls, as does the table's header row in every view: the title bar never scrolls away however far
+  the page goes, and the header row is pinned exactly where it rests, so it does not move at all.
 - A Project missing its own start or end, and every Ongoing (which has no dates), gets that end from its tasks:
   the earliest task start and the latest task end.  A derived end is drawn distinctly (hatched, dashed edge),
   is never firm, has no remove button and cannot be dragged; on a Project, clicking or dragging it pins a real
@@ -248,9 +249,11 @@ right-hand side of the screen.
 
 "Matrix" view should plot all visible tasks (tasks only, since parents have no urgency/importance) in an X-Y scatter
 with "Importance" plotted on the y-axis (-1 to 10) and "Urgency" plotted on the x-axis (0 to 10).  Points should be
-jittered so that tasks with identical values are all visible.  The size of a point follows the task's effort on
-a logarithmic scale from the smallest to the largest configured option; a task without an effort is drawn as a
-hollow dot.  Mousing-over a point should display its title and description.  A toggle
+jittered so that tasks with identical values are all visible.  A "Dot size" switch above the plot (a per-user
+preference) sets whether every point is the same size or its size follows the task's effort on a logarithmic
+scale from the smallest to the largest configured option, with a clear difference between the smallest and the
+largest; in that mode a task without an effort is drawn as a hollow dot and a legend shows the two sizes.
+Mousing-over a point should display its title and description.  A toggle
 above the plot (a per-user preference) labels the points with the task key or with its title.  The plot keeps its
 place in the viewport while the list beside it scrolls.
 
@@ -328,8 +331,8 @@ A phone client for the same server, kept in `android/` of this repository and bu
   the phone and saved through the offline queue (one queued write per pad), refreshed on open and on every sync;
   a remote change never replaces text being typed.
 - Timeline and Matrix: full-screen versions of the web views (no adjacent table), with the same drawing rules,
-  colouring modes, zoom/pan, and drag editing (including the importance range of -1 to 10 and effort-scaled
-  dots).  In the Matrix, tapping the selected task's title opens it.
+  colouring modes, zoom/pan, and drag editing (including the importance range of -1 to 10, effort-scaled
+  dots and the Dot size switch).  In the Matrix, tapping the selected task's title opens it.
 - Attachments: files and photos from the device, and photos taken with the camera.
 - Settings: server and account, sync status and errors, notification time, users, app settings including the
   effort options (with the same removal guard as the web UI).

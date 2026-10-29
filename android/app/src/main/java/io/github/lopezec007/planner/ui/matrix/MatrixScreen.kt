@@ -2,11 +2,13 @@
 // the Eisenhower orientation (urgency 10 at the left, importance 10 at the
 // top, so urgent-and-important is top-left), a port of static/js/matrix.js.
 // Urgency runs 0..10; importance -1..10, so the y axis has one more cell.
-// A dot's radius grows with the task's effort (log2 of effort over 15
-// minutes: 4dp at 15m up to 11dp at 64h); no effort gives the default 6dp.
+// With the Dot size toggle (a preference) on Effort, a dot's radius grows
+// with the task's effort (log2 of effort over 15 minutes: 3dp at 15m up to
+// 15dp at 64h) and no effort gives the default 5dp; on Same every dot is 6dp.
 //
-// Layout: the point-colouring picker in a strip at the top right, then a
-// Canvas filling the rest of the screen. The plot area is the canvas less
+// Layout: the Dot size toggle at the left and the point-colouring picker at
+// the right of a strip at the top, then a Canvas filling the rest of the
+// screen. The plot area is the canvas less
 // margins for the tick numbers and axis titles; each axis uses its own pixel
 // extent, with half a cell of padding so the 0 and 10 rows stay clear of the
 // frame. Tasks sharing a grid point are spread evenly on a small circle
@@ -46,6 +48,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -98,6 +103,7 @@ import io.github.lopezec007.planner.data.repo.ItemPatch
 import io.github.lopezec007.planner.data.repo.Opt
 import io.github.lopezec007.planner.data.repo.Snapshot
 import io.github.lopezec007.planner.data.repo.set
+import io.github.lopezec007.planner.prefs.DotSize
 import io.github.lopezec007.planner.ui.PlannerViewModel
 import io.github.lopezec007.planner.ui.components.EffortBadge
 import io.github.lopezec007.planner.ui.components.KeyText
@@ -130,6 +136,7 @@ fun MatrixScreen(vm: PlannerViewModel, groups: List<Group>, onOpen: (Long) -> Un
     val palette = LocalPalette.current
 
     val mode = prefs?.pointColor?.takeIf { it in ColorMode.forPoints } ?: ColorMode.ASSIGNEE
+    val dotSize = prefs?.dotSize ?: DotSize.EFFORT
     // Only tasks with both values are plotted (parents have neither).
     val tasks = remember(groups) {
         groups.flatMap { g -> g.tasks }.filter { it.type == ItemType.TASK && it.urgency != null && it.importance != null }
@@ -149,9 +156,10 @@ fun MatrixScreen(vm: PlannerViewModel, groups: List<Group>, onOpen: (Long) -> Un
     Column(modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.End,
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            DotSizeToggle(size = dotSize, onPick = { vm.setDotSize(it) })
             PointColorPicker(mode = mode, onPick = { vm.setPointColor(it) })
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -164,6 +172,7 @@ fun MatrixScreen(vm: PlannerViewModel, groups: List<Group>, onOpen: (Long) -> Un
                     tasks = shown,
                     snap = snap,
                     mode = mode,
+                    dotSize = dotSize,
                     selectedId = selectedId,
                     onSelect = { selectedId = it },
                     onMove = { item, u, i ->
@@ -209,9 +218,10 @@ private class Drag(val point: PlotPoint, val dx: Float, val dy: Float)
 
 /** Every size in pixels, from dp once per density. */
 private class Metrics(density: Density) {
-    val pointR = with(density) { 6.dp.toPx() }        // a task without effort
-    val pointMin = with(density) { 4.dp.toPx() }      // 15m
-    val pointMax = with(density) { 11.dp.toPx() }     // 64h and above
+    val pointR = with(density) { 5.dp.toPx() }        // a task without effort (Effort mode)
+    val pointMin = with(density) { 3.dp.toPx() }      // 15m
+    val pointMax = with(density) { 15.dp.toPx() }     // 64h and above
+    val pointSame = with(density) { 6.dp.toPx() }     // every dot in the Same mode
     val hitR = with(density) { 14.dp.toPx() }
     val ring = with(density) { 2.dp.toPx() }         // surface ring around a dot
     val ringGap = with(density) { 3.5.dp.toPx() }    // radius offset of the blocked ring
@@ -232,8 +242,10 @@ private class Metrics(density: Density) {
     val marginBottom = with(density) { 44.dp.toPx() }
     val marginLeft = with(density) { 44.dp.toPx() }
 
-    /** The dot radius for an effort: log2(effort / 15m) scaled over 15m..64h, clamped; the default without one. */
-    fun radiusFor(effort: Int?): Float {
+    /** The dot radius for an effort: log2(effort / 15m) scaled over 15m..64h, clamped; the default without
+     *  one. In the Same mode every dot has the same radius. */
+    fun radiusFor(effort: Int?, size: DotSize = DotSize.EFFORT): Float {
+        if (size == DotSize.SAME) return pointSame
         if (effort == null || effort <= 0) return pointR
         val t = (ln(effort / EFFORT_BASE) / ln(EFFORT_TOP / EFFORT_BASE)).toFloat().coerceIn(0f, 1f)
         return pointMin + (pointMax - pointMin) * t
@@ -276,14 +288,14 @@ private fun jitterRadius(n: Int, maxR: Float, plot: Plot, m: Metrics): Float {
 }
 
 /** Lays out the points: tasks sharing a grid point are spread around it, ordered by id. */
-private fun layoutPoints(tasks: List<Item>, plot: Plot, m: Metrics): List<PlotPoint> {
+private fun layoutPoints(tasks: List<Item>, plot: Plot, m: Metrics, size: DotSize): List<PlotPoint> {
     val clusters = LinkedHashMap<Pair<Int, Int>, MutableList<Item>>()
     for (t in tasks) clusters.getOrPut(urgencyLevel(t.urgency) to importanceLevel(t.importance)) { ArrayList() }.add(t)
     val out = ArrayList<PlotPoint>(tasks.size)
     for ((key, cluster) in clusters) {
         cluster.sortBy { it.id }
         val n = cluster.size
-        val radii = cluster.map { m.radiusFor(it.effort) }
+        val radii = cluster.map { m.radiusFor(it.effort, size) }
         val jr = jitterRadius(n, radii.max(), plot, m)
         val cx = plot.sx(key.first.toFloat())
         val cy = plot.sy(key.second.toFloat())
@@ -334,6 +346,7 @@ private fun MatrixPlot(
     tasks: List<Item>,
     snap: Snapshot,
     mode: ColorMode,
+    dotSize: DotSize,
     selectedId: Long?,
     onSelect: (Long?) -> Unit,
     onMove: (Item, Int, Int) -> Unit,
@@ -390,7 +403,7 @@ private fun MatrixPlot(
             )
         }
     }
-    val points = remember(tasks, plot, m) { if (plot == null) emptyList() else layoutPoints(tasks, plot, m) }
+    val points = remember(tasks, plot, m, dotSize) { if (plot == null) emptyList() else layoutPoints(tasks, plot, m, dotSize) }
     // Muted (closed or blocked) points are drawn first so live ones sit on top.
     val ordered = remember(points, snap) { points.sortedBy { if (it.item.isClosed || snap.isBlocked(it.item)) 0 else 1 } }
     val edges = remember(points, snap) {
@@ -593,6 +606,28 @@ private fun MatrixPlot(
 }
 
 // ---------------------------------------------------------------- chrome
+
+/** "Dot size" Effort | Same toggle (a preference): whether dot size shows the task's effort. */
+@Composable
+private fun DotSizeToggle(size: DotSize, onPick: (DotSize) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Dot size", style = MaterialTheme.typography.labelMedium, color = LocalPalette.current.subtle)
+        SingleChoiceSegmentedButtonRow(Modifier.heightIn(max = 32.dp)) {
+            DotSize.entries.forEachIndexed { i, s ->
+                SegmentedButton(
+                    selected = s == size,
+                    onClick = { if (s != size) onPick(s) },
+                    shape = SegmentedButtonDefaults.itemShape(index = i, count = DotSize.entries.size),
+                    icon = {},
+                    label = { Text(s.label, style = MaterialTheme.typography.labelMedium) },
+                    modifier = Modifier.semantics {
+                        contentDescription = if (s == DotSize.EFFORT) "Dot size shows effort" else "Every dot the same size"
+                    },
+                )
+            }
+        }
+    }
+}
 
 /** "Colour by …" button opening the point-colouring modes (a preference). */
 @Composable

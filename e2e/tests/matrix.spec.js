@@ -515,6 +515,9 @@ async function dotSizes(page) {
   return Object.fromEntries(list.map((d) => [d.key, d]));
 }
 
+const R_MIN = 3, R_MAX = 15; // radii at the smallest and largest effort options
+const R_SAME = 6;            // every dot's radius in the Same size mode
+
 test('dot size grows with effort on a log scale; a task without effort keeps the default size and is marked', async ({ page, request }) => {
   const items = await (await request.get('/api/items')).json();
   const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
@@ -527,9 +530,10 @@ test('dot size grows with effort on a log scale; a task without effort keeps the
     page.on('pageerror', (e) => errors.push(e.message));
     await openMatrix(page);
     const d = await dotSizes(page);
-    expect(d['T-9'].r).toBeCloseTo(4, 3);
-    expect(d['T-7'].r).toBeCloseTo(4 + 7 * (2 / 8), 3);
-    expect(d['T-1'].r).toBeCloseTo(11, 3);
+    expect(d['T-9'].r).toBeCloseTo(R_MIN, 3);
+    expect(d['T-7'].r).toBeCloseTo(R_MIN + (R_MAX - R_MIN) * (2 / 8), 3);
+    expect(d['T-1'].r).toBeCloseTo(R_MAX, 3);
+    expect(R_MAX / R_MIN).toBeGreaterThanOrEqual(5); // a clearly visible range
     expect(d['T-9'].r).toBeLessThan(d['T-7'].r);
     expect(d['T-7'].r).toBeLessThan(d['T-1'].r);
     for (const k of Object.keys(efforts)) {
@@ -539,8 +543,8 @@ test('dot size grows with effort on a log scale; a task without effort keeps the
       // Hit area and label offset follow the dot's radius.
       expect(d[k].hit).toBeCloseTo(d[k].r + 8, 3);
     }
-    expect(d['T-1'].labelX - d['T-1'].cx).toBeCloseTo(11 + 4, 3);
-    expect(d['T-9'].labelX - d['T-9'].cx).toBeCloseTo(4 + 4, 3);
+    expect(d['T-1'].labelX - d['T-1'].cx).toBeCloseTo(R_MAX + 4, 3);
+    expect(d['T-9'].labelX - d['T-9'].cx).toBeCloseTo(R_MIN + 4, 3);
     // No effort: the default radius, the marker class and the halo under the dashed dot.
     expect(d['T-6'].r).toBe(POINT_R);
     expect(d['T-6'].noEffort).toBe(true);
@@ -551,10 +555,10 @@ test('dot size grows with effort on a log scale; a task without effort keeps the
     expect(dash).not.toBe('none');
     expect(await page.locator('.matrix-plot .pt[data-key="T-9"] .dot').evaluate((e) => getComputedStyle(e).strokeDasharray)).toBe('none');
 
-    // Dependency lines stop at the actual dot edges (T-9 r=4 -> T-10 r=5; T-7 r=5.75 -> T-6 r=5).
+    // Dependency lines stop at the actual dot edges (T-9 r=3 -> T-10 r=5; T-7 r=6 -> T-6 r=5).
     const lines = await depLines(page);
-    expect(lines['T-9->T-10'].a.r).toBeCloseTo(4, 3);
-    expect(lines['T-7->T-6'].a.r).toBeCloseTo(5.75, 3);
+    expect(lines['T-9->T-10'].a.r).toBeCloseTo(R_MIN, 3);
+    expect(lines['T-7->T-6'].a.r).toBeCloseTo(6, 3);
     for (const l of Object.values(lines)) expectOnDotEdges(l);
 
     // A cluster with a large dot is jittered by the largest radius: the
@@ -568,10 +572,13 @@ test('dot size grows with effort on a log scale; a task without effort keeps the
       }
     }
 
-    // The controls strip explains the encoding; the tooltip shows the effort.
+    // The controls strip explains the encoding (the legend's dots are the
+    // smallest and largest sizes); the tooltip shows the effort.
     const legend = page.locator('.matrix-controls .matrix-size-legend');
-    await expect(legend).toContainText('dot size: effort');
+    await expect(legend).toContainText('15m to 64h');
+    await expect(legend).toContainText('none');
     await expect(legend).toHaveAttribute('title', /15m smallest, 64h largest/);
+    expect(await legend.locator('.legend-dot .dot').evaluateAll((els) => els.map((c) => +c.getAttribute('r')))).toEqual([R_MIN, R_MAX, POINT_R]);
     await page.locator('.matrix-plot .pt[data-key="T-7"]').hover();
     const tip = page.locator('.item-tip');
     await expect(tip).toBeVisible();
@@ -583,9 +590,76 @@ test('dot size grows with effort on a log scale; a task without effort keeps the
     await expect(tip.locator('.tip-effort')).toHaveCount(0);
     // Hover grows the dot relative to its own size.
     await page.locator('.matrix-plot .pt[data-key="T-1"] .dot').hover();
-    await expect.poll(() => page.locator('.matrix-plot .pt[data-key="T-1"] .dot').evaluate((e) => parseFloat(getComputedStyle(e).r))).toBeCloseTo(13, 1);
+    await expect.poll(() => page.locator('.matrix-plot .pt[data-key="T-1"] .dot').evaluate((e) => parseFloat(getComputedStyle(e).r))).toBeCloseTo(R_MAX + 2, 1);
     expect(errors).toEqual([]);
   } finally {
+    for (const k of Object.keys(efforts)) await request.patch(`/api/items/${byKey[k].id}`, { data: { effort: null } });
+  }
+});
+
+test('the Dot size switch makes every dot the same size, and the choice is a preference', async ({ page, request }) => {
+  const items = await (await request.get('/api/items')).json();
+  const byKey = Object.fromEntries(items.map((i) => [i.key, i]));
+  const efforts = { 'T-9': 15, 'T-1': 3840 };
+  for (const [k, e] of Object.entries(efforts)) expect((await request.patch(`/api/items/${byKey[k].id}`, { data: { effort: e } })).ok()).toBe(true);
+  try {
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await openMatrix(page);
+    const effort = page.locator('.matrix-sizes button[data-size="effort"]');
+    const same = page.locator('.matrix-sizes button[data-size="same"]');
+    await expect(page.locator('.matrix-controls .matrix-size-label')).toHaveText('Dot size');
+    await expect(effort).toHaveAttribute('aria-pressed', 'true');
+    await expect(same).toHaveAttribute('aria-pressed', 'false');
+    const before = await dotSizes(page);
+    expect(before['T-9'].r).toBeCloseTo(R_MIN, 3);
+    expect(before['T-1'].r).toBeCloseTo(R_MAX, 3);
+    expect(before['T-6'].noEffort).toBe(true);
+    const stripH = await page.locator('.matrix-controls').evaluate((e) => e.offsetHeight);
+    const plotH = await page.locator('.matrix-plot').evaluate((e) => +e.getAttribute('height'));
+
+    await same.click();
+    await expect(same).toHaveAttribute('aria-pressed', 'true');
+    await expect(effort).toHaveAttribute('aria-pressed', 'false');
+    const d = await dotSizes(page);
+    for (const p of Object.values(d)) {
+      expect(p.r).toBe(R_SAME);
+      expect(p.hit).toBe(R_SAME + 8);
+      expect(p.varR).toBe(`${R_SAME}px`);
+      // Nothing marks a missing effort when size does not show it.
+      expect(p.noEffort).toBe(false);
+      expect(p.halo).toBeNull();
+    }
+    expect(d['T-6'].ring).toBeCloseTo(R_SAME + 3.5, 3); // the blocked ring still follows the radius
+    expect(await page.locator('.matrix-plot .pt[data-key="T-6"] .dot').evaluate((e) => getComputedStyle(e).strokeDasharray)).toBe('none');
+    // The legend goes with the encoding; the strip and the plot keep their height.
+    await expect(page.locator('.matrix-size-legend')).toHaveCount(0);
+    expect(await page.locator('.matrix-controls').evaluate((e) => e.offsetHeight)).toBe(stripH);
+    expect(await page.locator('.matrix-plot').evaluate((e) => +e.getAttribute('height'))).toBe(plotH);
+    // Dependency lines still end on the dots' edges.
+    for (const l of Object.values(await depLines(page))) expectOnDotEdges(l);
+
+    // The choice is a preference: it survives a reload, and Effort restores the sizes.
+    await page.reload();
+    await expect(page.locator('.matrix-plot')).toBeVisible();
+    await expect(page.locator('.matrix-sizes button[data-size="same"]')).toHaveAttribute('aria-pressed', 'true');
+    expect((await dotSizes(page))['T-1'].r).toBe(R_SAME);
+    await page.locator('.matrix-sizes button[data-size="effort"]').click();
+    await expect(page.locator('.matrix-size-legend')).toBeVisible();
+    const again = await dotSizes(page);
+    expect(again['T-1'].r).toBeCloseTo(R_MAX, 3);
+    expect(again['T-6'].noEffort).toBe(true);
+    expect(errors).toEqual([]);
+
+    // The server keeps it with the account's other preferences and checks the value.
+    const users = await (await request.get('/api/users')).json();
+    const prefs = `/api/users/${users[0].id}/prefs`;
+    expect((await request.patch(prefs, { data: { matrix_size: 'same' } })).ok()).toBe(true);
+    expect((await (await request.get(prefs)).json()).matrix_size).toBe('same');
+    expect((await request.patch(prefs, { data: { matrix_size: 'big' } })).status()).toBe(400);
+    await request.patch(prefs, { data: { matrix_size: 'effort' } });
+  } finally {
+    await page.locator('.matrix-sizes button[data-size="effort"]').click().catch(() => {});
     for (const k of Object.keys(efforts)) await request.patch(`/api/items/${byKey[k].id}`, { data: { effort: null } });
   }
 });

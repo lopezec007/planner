@@ -15,6 +15,7 @@ import io.github.lopezec007.planner.data.repo.PlannerRepository
 import io.github.lopezec007.planner.data.repo.Snapshot
 import io.github.lopezec007.planner.data.sync.SyncState
 import io.github.lopezec007.planner.prefs.AppPrefs
+import io.github.lopezec007.planner.prefs.DotSize
 import io.github.lopezec007.planner.prefs.Prefs
 import io.github.lopezec007.planner.prefs.View
 import io.github.lopezec007.planner.ui.scratch.ScratchEditor
@@ -66,6 +67,7 @@ class PlannerViewModel(val graph: Graph) : ViewModel() {
     }
     fun setBarColor(m: ColorMode) = viewModelScope.launch { prefsStore.setBarColor(m) }
     fun setPointColor(m: ColorMode) = viewModelScope.launch { prefsStore.setPointColor(m) }
+    fun setDotSize(s: DotSize) = viewModelScope.launch { prefsStore.setDotSize(s) }
     fun setAccount(id: Long?) = viewModelScope.launch { prefsStore.setAccount(id) }
     fun setNotify(enabled: Boolean, hour: Int, minute: Int) = viewModelScope.launch { prefsStore.setNotify(enabled, hour, minute) }
     fun setNotifyDays(days: Int) = viewModelScope.launch { prefsStore.setNotifyDays(days) }
