@@ -490,10 +490,14 @@ export function renderTimeline(panel, handle, ctx) {
     canvas.append(axis);
 
     // Today marker.
-    canvas.append(el('div', { class: 'timeline-today', style: { left: `${x(0)}px` } },
-      el('span', { class: 'timeline-today-label' }, 'Today')));
+    // The label is a sibling of the line, not a child, so it can sit above
+    // the axis band (the line itself scrolls under the page's gap strip).
+    canvas.append(
+      el('div', { class: 'timeline-today', style: { left: `${x(0)}px` } }),
+      el('span', { class: 'timeline-today-label', style: { left: `${x(0) - 1}px` } }, 'Today'),
+    );
 
-    if (nested) drawFrames(canvasTop, tableRect);
+    drawFrames(canvasTop, tableRect);
 
     scroll.scrollLeft = Math.round((view.leftDay - rangeStart) * ppd);
     btnIn.disabled = ppd >= MAX_PPD - 1e-6;
@@ -501,15 +505,17 @@ export function renderTimeline(panel, handle, ctx) {
     shiftAxis();
   }
 
-  /** Nested: an outline around the axis and around each parent row with
-   *  everything beneath it up to the next parent (its tasks and any open
-   *  detail rows), taken from the table's row boxes. The frames sit outside
-   *  the scroll container, so their edges stay at the panel's edges. */
+  /** An outline around the axis band (pinned with it, so the band keeps its
+   *  frame while the chart scrolls under it) and, in Nested, around each
+   *  parent row with everything beneath it up to the next parent (its tasks
+   *  and any open detail rows), taken from the table's row boxes. The
+   *  frames sit outside the scroll container, so their edges stay at the
+   *  panel's edges. */
   function drawFrames(canvasTop, tableRect) {
     const planTop = plan.getBoundingClientRect().top;
     const frame = (cls, top, bottom) => el('div', { class: `timeline-frame ${cls}`, style: { top: `${top - planTop}px`, height: `${bottom - top}px` } });
-    const out = [frame('axis', canvasTop, canvasTop + axisH)];
-    const parents = rows.filter((r) => r.kind === 'parent').map((r) => r.el);
+    const out = [frame(nested ? 'axis' : 'axis flat', canvasTop, canvasTop + axisH)];
+    const parents = nested ? rows.filter((r) => r.kind === 'parent').map((r) => r.el) : [];
     parents.forEach((p, i) => {
       const next = parents[i + 1];
       const last = next ? next.previousElementSibling : null;

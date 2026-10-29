@@ -21,6 +21,7 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --row-h: 36px; /* item rows have this exact height in every view and browser */
   --page-gap: 12px; /* between the title bar and the content; the sticky header row rests here (see main::before) */
+  --gap-overlap: 3px; /* how far the gap strip reaches under the things pinned below it */
   /* The table's header row: a band tinted with the accent, framed a shade
      darker than the rows, with its text darker than muted labels. */
   --header-bg: color-mix(in srgb, var(--accent) 9%, var(--bg-alt));
@@ -145,16 +146,20 @@ button:disabled { opacity: 0.5; cursor: default; }
    strip in the page colour rather than padding: the table's header row (and
    the Timeline axis level with it) pin at their resting position, so they
    never move while the page scrolls, and rows passing through the gap are
-   hidden under the strip. Above row content, the Timeline frames (6) and
-   its floating controls (7); below menus and popovers (20+). The strip is
-   1px taller than the gap and starts that 1px up, under the title bar
-   (which paints over it; the negative bottom margin keeps the content
-   where it was), so no seam shows between the two at a fractional device
-   pixel ratio. */
+   hidden under the strip. The strip is above row content and the Timeline
+   group frames (6), and below the things pinned level with its bottom edge
+   (the header row, the Timeline axis band and the Matrix panel, 9), the
+   title bar (10) and menus and popovers (20+). It is sticky on its own, so
+   its edges and theirs can snap to device pixels differently while the
+   page scrolls; it therefore reaches 1px up under the title bar and
+   --gap-overlap down under the pinned things, which paint over it, so no
+   seam or sliver shows at any scroll position or device pixel ratio. The
+   negative bottom margin keeps the content where it was. */
 main { padding: 0 16px var(--page-gap); flex: 1; }
 main::before {
   content: ''; display: block; position: sticky; top: calc(var(--topbar-h, 48px) - 1px); z-index: 8;
-  height: calc(var(--page-gap) + 1px); margin: 0 -16px -1px; background: var(--bg);
+  height: calc(var(--page-gap) + 1px + var(--gap-overlap)); margin: 0 -16px calc(-1px - var(--gap-overlap));
+  background: var(--bg);
 }
 .empty { color: var(--fg-muted); padding: 24px; text-align: center; }
 .hint { color: var(--fg-muted); margin: 0 0 12px; }
@@ -168,8 +173,9 @@ main::before {
 .split { display: flex; gap: 16px; align-items: flex-start; }
 .split .table-wrap { flex: 0 0 auto; min-width: 320px; max-width: 45%; }
 .split .panel { flex: 1 1 auto; min-width: 0; position: relative; }
-/* The Matrix panel keeps its place in the viewport while the list scrolls. */
-.split .panel.sticky { position: sticky; top: calc(var(--topbar-h, 48px) + var(--page-gap)); }
+/* The Matrix panel keeps its place in the viewport while the list scrolls
+   (above the gap strip, see main::before). */
+.split .panel.sticky { position: sticky; top: calc(var(--topbar-h, 48px) + var(--page-gap)); z-index: 9; }
 
 /* ---------- hierarchical table ----------
    One grid template for every row so the shared columns line up across
@@ -177,7 +183,9 @@ main::before {
    The table is not a scroll container (that would pin the sticky header to
    the table instead of the window): it grows to its columns' minimum width
    and the page scrolls sideways on a narrow window. Flat is one framed
-   table (the clip keeps the sticky header inside its rounded corners);
+   table (no clip-path: that would make the table a stacking context and
+   keep the header row from painting above the page's gap strip, see
+   main::before; the header and the last row round their own corners);
    Nested frames the header and each Ongoing/Project with its tasks
    separately, see below. */
 .table {
@@ -189,8 +197,8 @@ main::before {
 .table.flat {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  clip-path: inset(0 round var(--radius));
 }
+.table.flat .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 .table:not(.flat) > .empty { border: 1px solid var(--border); border-radius: var(--radius); margin-top: 6px; }
 .table.title-only { --cols: 28px 92px minmax(200px, 1fr); }
 /* Flat: tasks only, with the parent's key (its type chip, hence the wider
@@ -227,16 +235,14 @@ main::before {
    group's last row (the one before the next parent, or the last row) the
    bottom, and every row the sides. Flat has no parent rows and keeps a
    heavier rule above the first task of each parent (see edit.css).
-   The header's rounded frame is drawn by a pseudo-element over the row's
-   own square page-colour background, so rows scrolling beneath do not show
-   through the corners outside the rounding. (The row keeps a transparent
-   border so its cells line up with the framed rows below.) */
-.table:not(.flat) .row.header { border: 1px solid transparent; background: var(--bg); }
-.table:not(.flat) .row.header::before {
-  content: ''; position: absolute; inset: -1px; z-index: -1;
-  background: var(--header-bg); border: 1px solid var(--header-border); border-radius: var(--radius);
-  box-shadow: var(--header-shadow);
-}
+   The header's frame (rounded all round in Nested, at the top in Flat) is
+   drawn by a pseudo-element over the row's own square page-colour
+   background, so rows scrolling beneath do not show through the corners
+   outside the rounding (see .row.header below). The Nested header keeps a
+   transparent border so its cells line up with the framed rows below. */
+.table:not(.flat) .row.header { border: 1px solid transparent; }
+.table:not(.flat) .row.header::before { border-radius: var(--radius); }
+.table.flat .row.header::before { border-radius: var(--radius) var(--radius) 0 0; }
 .table:not(.flat) .row:not(.header) { border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
 .table:not(.flat) .row.parent {
   margin-top: 6px;
@@ -264,22 +270,27 @@ main::before {
 .row.task, .row.description.kind-task { --row-color: var(--row-task); background: color-mix(in srgb, var(--row-color) var(--tint-task), var(--bg)); }
 /* The header row stays in view while the page scrolls, pinned exactly where
    it rests (the page gap below the title bar, see main::before), so it does
-   not move at all: above row content (handles, chips), below popovers and
-   menus. A tinted, framed band (--header-* tokens) so it stands apart from
-   the rows. */
+   not move at all: above row content (handles, chips) and the gap strip
+   (8, which reaches under its top edge), below popovers and menus. A
+   tinted, framed band (--header-* tokens) so it stands apart from the
+   rows: the row itself is a square page-colour backing, the pseudo-element
+   over it (behind the cells) the tinted frame, 1px wider all round so it
+   covers the table's own border in Flat and lines up with the framed rows
+   in Nested. */
 .row.header {
-  background: var(--header-bg); color: var(--header-fg); font-weight: 600; font-size: 12px;
+  background: var(--bg); color: var(--header-fg); font-weight: 600; font-size: 12px;
   text-transform: uppercase; letter-spacing: 0.04em; min-height: 36px;
-  position: sticky; top: calc(var(--topbar-h, 48px) + var(--page-gap)); z-index: 5;
+  position: sticky; top: calc(var(--topbar-h, 48px) + var(--page-gap)); z-index: 9;
 }
-/* Flat: the header rests inside the table's 1px frame, so it pins 1px lower,
-   and carries the frame's top rule along while the table scrolls under it;
-   its bottom rule and shadow set it off from the rows. */
-.table.flat .row.header {
-  top: calc(var(--topbar-h, 48px) + var(--page-gap) + 1px);
-  border-bottom: 1px solid var(--header-border);
-  box-shadow: 0 -1px 0 var(--border), var(--header-shadow);
+.row.header::before {
+  content: ''; position: absolute; inset: -1px; z-index: -1;
+  background: var(--header-bg); border: 1px solid var(--header-border);
+  box-shadow: var(--header-shadow);
 }
+/* Flat: the header rests inside the table's 1px frame, so it pins 1px lower;
+   its frame's top rule stands in for the table's while the table scrolls
+   under it. */
+.table.flat .row.header { top: calc(var(--topbar-h, 48px) + var(--page-gap) + 1px); }
 .row:not(.header):not(.editing):not(.edit-detail):hover { background: var(--bg-hover); }
 /* An expanded row and its detail row below highlight together: hovering
    either one lights up the other. */

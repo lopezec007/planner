@@ -442,9 +442,15 @@ test('in Nested the chart has no frame of its own; the axis and each parent grou
   const bottom2 = await page.locator('.row.description[data-desc-for]').last().evaluate((e) => e.getBoundingClientRect().bottom);
   const f2 = await page.locator('.timeline-frame.group').nth(i).evaluate((e) => e.getBoundingClientRect());
   expect(Math.abs(f2.bottom - bottom2)).toBeLessThanOrEqual(1);
-  // Flat: one framed chart, no group frames.
+  // Flat: one framed chart, no group frames; only the axis band keeps a
+  // frame of its own (rounded at the top like the chart's, no halo), so it
+  // still looks framed once pinned while the chart scrolls under it.
   await page.locator('#btn-flat').click();
-  await expect(page.locator('.timeline-frame')).toHaveCount(0);
+  await expect(page.locator('.timeline-frame')).toHaveCount(1);
+  await expect(page.locator('.timeline-frame.axis.flat')).toHaveCount(1);
+  expect(await page.locator('.timeline-frame.axis').evaluate((e) => getComputedStyle(e).borderTopLeftRadius)).not.toBe('0px');
+  expect(await page.locator('.timeline-frame.axis').evaluate((e) => getComputedStyle(e).borderBottomLeftRadius)).toBe('0px');
+  expect(await page.locator('.timeline-frame.axis').evaluate((e) => getComputedStyle(e).boxShadow)).toBe('none');
   expect(await border(page.locator('.timeline-scroll'))).toBe('1px');
   await page.locator('#btn-nested').click();
 });

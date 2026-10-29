@@ -35,6 +35,9 @@
    between groups (grid lines, connectors and the Today line stop there, as
    nothing crosses the gaps in the table either). */
 .timeline.nested .timeline-scroll { border: none; border-radius: 0; }
+/* Nested: an outline around the axis band and each parent group. Flat: the
+   axis band only, rounded at the top like the chart's own frame it sits in
+   (and without the page-colour halo, which would cut into the rows). */
 .timeline-frames { position: absolute; inset: 0; pointer-events: none; }
 .timeline-frame {
   position: absolute;
@@ -45,7 +48,10 @@
   box-shadow: 0 0 0 3px var(--bg);
   z-index: 6;
 }
-.timeline-frame.axis { transform: translateY(var(--axis-shift, 0px)); }
+/* The axis frame is pinned with the band, above the page's gap strip (8, see
+   app.css main::before); the group frames scroll under that strip. */
+.timeline-frame.axis { transform: translateY(var(--axis-shift, 0px)); z-index: 9; }
+.timeline-frame.axis.flat { border-radius: var(--radius) var(--radius) 0 0; box-shadow: none; }
 .timeline-scroll::-webkit-scrollbar { display: none; }
 
 /* No overflow clipping here: the scroll container must stay the nearest
@@ -58,19 +64,25 @@
 /* ---- axis (two tiers, level with the table header row) ----
    The axis band holds the tick labels and paints above the bars, so it can
    be shifted down (--axis-shift, set by timeline.js on page scroll) to stay
-   in view under the sticky title bar. The tick columns themselves are empty
-   full-height lines behind the bars. */
+   in view, level with the table's header row and like it above the page's
+   gap strip (8, see app.css main::before). Like the header row it is a
+   square page-colour backing with the band itself on a pseudo-element
+   behind the ticks, rounded at the top in Flat to match the chart's frame
+   at rest, so nothing shows through the corners once it is pinned. The
+   tick columns themselves are empty full-height lines behind the bars. */
 .timeline-axis {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  background: var(--bg-alt);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
-  z-index: 5;
+  z-index: 9;
   pointer-events: none;
   transform: translateY(var(--axis-shift, 0px));
 }
+.timeline-axis::before { content: ''; position: absolute; inset: 0; z-index: -1; background: var(--bg-alt); }
+.timeline:not(.nested) .timeline-axis::before { border-radius: var(--radius) var(--radius) 0 0; }
 
 .timeline-tick {
   position: absolute;
@@ -221,8 +233,8 @@
 .timeline-today-label {
   position: absolute;
   top: 2px;
+  z-index: 10; /* on the axis band (9); timeline.js sets left beside the line */
   transform: translateY(var(--axis-shift, 0px));
-  left: -1px;
   padding: 0 5px;
   font-size: 10px;
   font-weight: 600;
@@ -240,7 +252,7 @@
   position: absolute;
   top: 4px;
   right: 6px;
-  z-index: 7;
+  z-index: 10; /* on the axis band (9) */
   transform: translateY(var(--axis-shift, 0px));
   display: flex;
   gap: 2px;
@@ -272,7 +284,7 @@
   position: absolute;
   top: 34px;
   right: 6px;
-  z-index: 7;
+  z-index: 10; /* on the axis band (9) */
   transform: translateY(var(--axis-shift, 0px));
   display: flex;
   flex-wrap: wrap;
@@ -303,7 +315,7 @@
 /* ---- tooltip ---- */
 .timeline-tooltip {
   position: absolute;
-  z-index: 8;
+  z-index: 11; /* above the axis band and its chrome */
   max-width: 360px;
   padding: 6px 10px;
   background: var(--bg);
