@@ -29,7 +29,7 @@ var staticFS embed.FS
 // Version is the semantic version of this release and VersionDate the day it
 // was cut. build is the git description, set via -ldflags "-X main.build=...".
 const (
-	Version     = "1.6.0"
+	Version     = "1.6.1"
 	VersionDate = "2026-10-29"
 )
 

@@ -213,7 +213,11 @@ test('in Nested each parent and its tasks is a framed block of its own; Flat is 
   expect(await last.evaluate((e) => getComputedStyle(e).borderBottomLeftRadius)).not.toBe('0px');
   expect(await finance.evaluate((e) => getComputedStyle(e).borderTopLeftRadius)).not.toBe('0px');
   expect(await page.locator('.row.task', { hasText: 'Pay insurance' }).evaluate((e) => getComputedStyle(e).borderBottomWidth)).toBe('0px');
-  expect(await page.locator('.row.header').evaluate((e) => getComputedStyle(e).borderBottomLeftRadius)).not.toBe('0px'); // the header is its own block
+  // The header is its own rounded block, drawn by its pseudo-element over a
+  // square page-colour background (so nothing shows through the corners).
+  expect(await page.locator('.row.header').evaluate((e) => getComputedStyle(e, '::before').borderBottomLeftRadius)).not.toBe('0px');
+  expect(await page.locator('.row.header').evaluate((e) => getComputedStyle(e, '::before').borderBottomWidth)).toBe('1px');
+  expect(await page.locator('.row.header').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe(await page.evaluate(() => getComputedStyle(document.body).backgroundColor));
   await page.locator('#btn-flat').click();
   expect(await sides(page.locator('.table'))).toEqual(['1px', '1px']); // Flat: one framed table
   expect(await sides(page.locator('.row.task', { hasText: 'Review budget' }))).toEqual(['0px', '0px']);

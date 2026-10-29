@@ -47,7 +47,9 @@ const VIEWS = ['table', 'timeline', 'matrix'];
 // header row, the Matrix panel, the scratch pad) can sit just beneath it
 // whatever the toolbar wraps to.
 const topbar = document.querySelector('.topbar');
-function syncTopbarHeight() { document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`); }
+// The exact height (fractional at a non-integer device pixel ratio), so the
+// things pinned beneath the bar meet it without a seam.
+function syncTopbarHeight() { document.documentElement.style.setProperty('--topbar-h', `${topbar.getBoundingClientRect().height}px`); }
 new ResizeObserver(syncTopbarHeight).observe(topbar);
 syncTopbarHeight();
 
