@@ -2,7 +2,8 @@
    orientation (urgency 10 at the left, importance 10 at the top, -1 at the
    bottom). Dot size shows effort, or is the same for every dot, per the
    toggle above the plot (the script sets each point's radius and --r); a
-   task with no effort is a hollow dashed dot in the Effort mode. The SVG is
+   task with no effort is a hollow dashed dot in the Effort mode; done and
+   cancelled tasks are very faint. The SVG is
    sized by the script to the panel width and remaining viewport height; the
    max-width below only scales it down when the panel is narrower than the
    plot's minimum size. */
@@ -38,6 +39,13 @@
 .matrix-size-legend .legend-dot .dot { fill: var(--fg-muted); }
 .matrix-size-legend .legend-dot .dot.hollow { fill: none; stroke: var(--fg-muted); stroke-width: 1.5; stroke-dasharray: 2 1.5; }
 .matrix-size-legend .legend-dot + .legend-dot { margin-right: 2px; }
+/* "Closed": whether done/cancelled tasks are plotted (faintly) at all. */
+.matrix-closed {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px;
+  font-size: 12px; line-height: 18px; color: var(--fg-muted); white-space: nowrap; cursor: pointer;
+}
+.matrix-closed:hover { color: var(--fg); }
+.matrix-closed input { margin: 0; padding: 0; cursor: pointer; }
 .matrix-labels, .matrix-sizes { display: flex; gap: 0; }
 .matrix-labels button, .matrix-sizes button {
   box-sizing: border-box; height: 22px; padding: 0 8px; font-size: 12px; line-height: 18px;
@@ -68,7 +76,12 @@
 .matrix-plot .grid line { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; opacity: 0.6; }
 .matrix-plot .grid line.major { opacity: 1; }
 .matrix-plot .ticks text { fill: var(--fg-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.matrix-plot .axis-label { fill: var(--fg); font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
+.matrix-plot .axis-label { fill: var(--fg); font-size: 12px; font-weight: 600; letter-spacing: 0.02em; cursor: help; }
+/* Axis numbers: an invisible box makes the small text easy to hover; a
+   value described in Settings (its tooltip) is drawn stronger. */
+.matrix-plot .tick .tick-hit { fill: transparent; stroke: none; pointer-events: all; }
+.matrix-plot .tick.described { cursor: help; }
+.matrix-plot .tick.described text { fill: var(--fg); font-weight: 700; }
 .matrix-plot .quad-label {
   fill: var(--red);
   font-size: 10px;
@@ -87,6 +100,7 @@
   transition: opacity 0.08s;
 }
 .matrix-plot .deps .dep.open { stroke: var(--hl-alert); opacity: 0.5; }
+.matrix-plot .deps .dep.faint { opacity: 0.14; } /* to or from a done/cancelled task */
 .matrix-plot .deps .dep.lit { opacity: 0.9; stroke-width: 1.5; }
 .matrix-plot .dep-arrow path { fill: var(--fg-muted); }
 .matrix-plot .dep-arrow.open path { fill: var(--hl-alert); }
@@ -124,8 +138,12 @@
   pointer-events: none;
 }
 .matrix-plot .pt .label.title { font-family: var(--font); }
-.matrix-plot .pt.closed .dot { fill: var(--pt-neutral); opacity: 0.45; }
-.matrix-plot .pt.closed .label { opacity: 0.6; text-decoration: line-through; }
+/* Done / cancelled: barely there (history, not work to weigh up); the hover
+   rules below bring a point back to full strength under the pointer. */
+.matrix-plot .pt.closed .dot { fill: var(--pt-neutral); opacity: 0.16; }
+.matrix-plot .pt.closed .label { opacity: 0.28; text-decoration: line-through; }
+.matrix-plot .pt.closed .ring { opacity: 0.2; }
+.matrix-plot .pt.closed .halo { opacity: 0; }
 .matrix-plot .pt.blocked .dot { opacity: 0.55; }
 .matrix-plot .pt.blocked .label { opacity: 0.7; }
 

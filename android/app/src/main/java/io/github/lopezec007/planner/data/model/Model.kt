@@ -23,12 +23,15 @@ enum class ItemType(val wire: String, val label: String, val keyPrefix: String) 
     }
 }
 
+/** In display and sort order. */
 @Serializable
 enum class Status(val wire: String, val label: String) {
     @SerialName("idea") IDEA("idea", "Idea"),
     @SerialName("backlog") BACKLOG("backlog", "Backlog"),
     @SerialName("todo") TODO("todo", "To-Do"),
     @SerialName("in-progress") IN_PROGRESS("in-progress", "In-Progress"),
+    /** Finished but still being checked: open in every respect, like In-Progress. */
+    @SerialName("validating") VALIDATING("validating", "Validating"),
     @SerialName("done") DONE("done", "Done"),
     @SerialName("cancelled") CANCELLED("cancelled", "Cancelled");
 
@@ -130,11 +133,31 @@ data class AppSettings(val values: Map<String, String>) {
         return ramp(field).getOrNull(n) ?: ""
     }
 
+    /**
+     * What an urgency or importance value means (the `urgency_descriptions`
+     * and `importance_descriptions` settings: a JSON object from the value to
+     * its text), or "" when it has no description.
+     */
+    fun levelDescription(field: String, n: Int?): String {
+        if (n == null) return ""
+        return parseDescriptions(values["${field}_descriptions"])[n.toString()]?.trim().orEmpty()
+    }
+
     /** The effort choices in minutes, ascending (the `effort_options` setting; the server's default when absent). */
     val effortOptions: List<Int> get() = Effort.parseOptions(values["effort_options"])
 
     companion object {
         val EMPTY = AppSettings(emptyMap())
+
+        /** Parses a descriptions setting leniently: an empty map when blank or malformed. */
+        fun parseDescriptions(json: String?): Map<String, String> {
+            if (json.isNullOrBlank()) return emptyMap()
+            return try {
+                Json.decodeFromString<Map<String, String>>(json)
+            } catch (_: Exception) {
+                emptyMap()
+            }
+        }
 
         /** Parses the JSON array of colour strings the server stores, leniently. */
         fun parseRamp(json: String?): List<String> {

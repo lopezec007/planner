@@ -26,6 +26,15 @@ p.settings-help { margin: 0 0 8px; }
 .ramp { margin-bottom: 14px; }
 .ramp-cell input[type="color"] { width: 40px; height: 24px; padding: 1px; }
 .ramp-clear { font-size: 11px; padding: 1px 6px; }
+/* Urgency / importance descriptions: the two lists side by side (stacked on
+   a narrow window), each a column of value + text box. */
+.level-description-lists { display: flex; flex-wrap: wrap; gap: 8px 40px; }
+.level-descriptions { flex: 1 1 380px; min-width: 0; max-width: 520px; }
+.level-descriptions h3 { font-size: 13px; margin: 6px 0 6px; }
+.level-description { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.level-description .ramp-sample { flex: 0 0 auto; width: 34px; }
+.level-description .ramp-sample.unset { color: var(--fg-muted); border-color: var(--border); border-style: dashed; }
+.level-description input { flex: 1 1 auto; min-width: 0; }
 /* Effort options: one chip per configured duration with its remove button,
    then the add field and the reset. */
 .effort-options { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 8px; }

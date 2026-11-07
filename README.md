@@ -25,8 +25,8 @@ the single SQLite file. The directory containing it must already exist.
    three characters (initials, or the start of the name) that is what the
    chips show; the full name is in the tooltip.
 2. The planner is a single page. **Active**, **Backlog** and **Ideas** beside
-   the search box are filter templates: Active sets To-Do and In-Progress
-   plus anything closed in the last 14 days, the other two set that status
+   the search box are filter templates: Active sets To-Do, In-Progress and
+   Validating plus anything closed in the last 14 days, the other two set that status
    for projects and tasks. They are toggles that combine: click one to turn
    it on, click it again to turn it off, and turn on two or three to see
    their statuses together (Active + Backlog shows both and hides ideas).
@@ -52,8 +52,10 @@ the single SQLite file. The directory containing it must already exist.
    otherwise; click the pressed chip to clear). The `~` before a date marks it approximate; click it to
    pin it firm (the `~` becomes a 📌; click again to make it approximate).
    In the urgency and importance fields a single key sets the
-   value: 1 to 9, 0 for 10, ` for 0 and, for importance only, - for -1;
-   nothing but digits can be typed there. **Effort** is a dropdown of the
+   value: 0 to 9 for themselves, the `~` key (left of 1; Shift is not
+   needed) for 10 and, for importance only, - for -1;
+   nothing but digits can be typed there. Resting the pointer on a value
+   shows what it means, when Settings describes it. **Effort** is a dropdown of the
    durations configured in Settings (15m to 64h by default); an Ongoing or
    Project row shows the effort of the open tasks listed beneath it, and a
    badge in the page header, beside Sort, carries the total over every open
@@ -77,7 +79,7 @@ the single SQLite file. The directory containing it must already exist.
    each Ongoing/Project with its tasks is a framed block of its own, with a
    gap between blocks; the Timeline beside it is framed the same way).
    Dependencies: "Blocked by" and
-   "Blocks" lists of item keys with a dropdown to add more; hover a key for
+   "Blocks" lists of item keys with a search box to add more; hover a key for
    the item's title, status and description.
    An item blocked by anything still open has its Blocked box locked on. Two
    items cannot block each other, directly or through a chain. The Timeline
@@ -90,8 +92,16 @@ the single SQLite file. The directory containing it must already exist.
    among any tasks. Dropping a task among another parent's tasks, or onto a
    parent row, moves it to that parent (in Flat a task only moves among its
    own parent's tasks). The ⇄ button on a task row moves it to another
-   Ongoing or Project (it goes last there). The **Wide / Narrow** icon pair
-   caps the table width on very wide screens, and **Nested / Flat** next to
+   Ongoing or Project (it goes last there), through the same kind of
+   search box as the dependencies. The **Wide / Narrow / Columns** icons
+   choose the table's width: Wide uses the whole window, Narrow caps the
+   width on very wide screens, and Columns continues the table in a second
+   (third, ...) column beside the first whenever the window has room for
+   more than one, each with its own header and with every Ongoing/Project
+   kept whole in one column (on a narrower window it is the same as Wide;
+   hiding columns makes room for more). A dropdown beside the group then
+   sets the number of columns: Auto (as many as fit) or 2 to 6, used as
+   far as the window has room for them. **Nested / Flat** next to
    it switches the layout (see Flat above).
    **Sort**: click a column header to sort by it (again for the other
    direction, a third time to remove it); Urgency and Importance start
@@ -103,7 +113,9 @@ the single SQLite file. The directory containing it must already exist.
    blocked when both are on). While sorted, rows cannot be dragged. The **Columns**
    menu next to it hides or shows any column (the title always shows).
    Dependencies and attachments in the expanded row each have a small **+**
-   (the dropdown of items, or the file picker).
+   (a search box that lists the items whose key or title contains what you
+   type, any part of it, as you type; Enter or a click adds the highlighted
+   one; or the file picker).
    The toolbar buttons are icons; hover one for what it does.
 6. **Timeline** shows a Gantt chart beside the titles (zoom with the +/−
    buttons or Ctrl+wheel; Shift+wheel, Alt+wheel or drag to pan; a plain
@@ -127,18 +139,24 @@ the single SQLite file. The directory containing it must already exist.
    smallest to the largest configured option (a legend shows the two
    sizes), and a task without an effort is a small hollow dashed dot; on
    **Same** every dot is alike; hover a point for its description; the
-   Keys / Titles toggle labels points with the task key or its title.
+   Keys / Titles toggle labels points with the task key or its title. Done
+   and cancelled tasks are drawn very faintly (full strength under the
+   pointer); untick **Closed** above the plot to leave them out altogether.
+   The numbers and names along the axes show the urgency and importance
+   descriptions from Settings on mouseover.
    Settings has the first day of the week, the default status for new
    projects and tasks, the effort options (add any duration such as 1h 30m;
    an option still used by an open task cannot be removed, and done or
    cancelled tasks keep a removed one), the row tint colours for
    Ongoing, Project and Task rows, the end-date highlight colours and
-   windows, and a colour for each urgency and importance value (two ramps,
-   with presets).
-   **Item colours**: the key of every Ongoing and Project is a chip in the
-   type colour from Settings with a type glyph (a loop for Ongoing, a flag
-   for Project), whatever the row's tint, so the type is always obvious;
-   task keys are plain. Beyond that, every Ongoing and Project can have a
+   windows, a colour for each urgency and importance value (two ramps,
+   with presets), and an optional description of what each of those values
+   means (shown on mouseover in the table and on the Matrix axes).
+   **Item colours**: the key of every Ongoing and Project is a chip with a
+   type glyph (a loop for Ongoing, a flag for Project), so the type is
+   always obvious; the chip is in the type colour from Settings, or, when
+   you have the rows coloured by type (see the Colours menu below), in the
+   item's own colour, so each row shows both. Task keys are plain. Beyond that, every Ongoing and Project can have a
    colour of its own.
    Expand the row and click the swatch in its Colour box for a palette, a
    custom colour, or back
@@ -161,7 +179,7 @@ the single SQLite file. The directory containing it must already exist.
 10. **Accounts**: the menu at the far right of the title bar says who you
    are (one of the users from Settings; there is no password). A browser
    that has not picked anyone gets the first user and remembers the choice.
-   The view, Flat, Narrow, collapsed parents, sort, hidden columns, filters,
+   The view, Flat, the table width, collapsed parents, sort, hidden columns, filters,
    Timeline and Matrix colouring, the Colours menu, the Matrix labels and
    dot size and the scratch pad layout are saved with the account, so they follow you to
    any browser; until the first user exists they are kept in the browser.
@@ -331,9 +349,10 @@ API summary (all JSON):
     GET    /api/users                 PATCH /api/users/{id}  {name?, color?, short?}
     POST   /api/users {name, color?, short?}  DELETE /api/users/{id}   (409 if referenced)
     GET    /api/users/{id}/prefs      PATCH /api/users/{id}/prefs {key: value}
-                                      (view, narrow, flat, collapsed, sort, blocked_last, bar_color, hidden_cols,
-                                       closed_last, parent_colors, task_colors, point_color, filters,
-                                       matrix_labels, matrix_size, scratch_open, scratch_width, scratch_split, scratch_wrap)
+                                      (view, narrow, multicol, multicol_count, flat, collapsed, sort, blocked_last, bar_color,
+                                       hidden_cols, closed_last, parent_colors, task_colors, point_color, filters,
+                                       matrix_labels, matrix_size, matrix_hide_closed, scratch_open, scratch_width,
+                                       scratch_split, scratch_wrap)
     GET    /api/users/{id}/scratch    PUT /api/users/{id}/scratch {text}   the user's scratch pad {text, updated_at}
     GET    /api/scratch               PUT /api/scratch {text}              the shared scratch pad (1 MiB cap)
     GET    /api/events                server-sent events: {"kind": items|users|settings|scratch, "scope"?,
@@ -353,10 +372,12 @@ API summary (all JSON):
     POST   /api/dependencies {blocker_id, blocked_id}   400 on self/ongoing/cycle
     DELETE /api/dependencies/{blocker}/{blocked}
     GET    /api/settings              PATCH /api/settings {key: value}  (week_start, default_status, effort_options,
-                                      color_*, ...; removing an effort option an open task uses is a 400)
+                                      color_*, urgency_descriptions and importance_descriptions: JSON objects
+                                      {"<value>": "text"}, ...; removing an effort option an open task uses is a 400)
 
 Item JSON fields: id, type (ongoing|project|task), key, num, parent_id, title,
-description, owner_id, assignee_id, status, start_date,
+description, owner_id, assignee_id, status (idea, backlog, todo, in-progress,
+validating, done or cancelled; null on an Ongoing), start_date,
 start_firm, end_date, end_firm, urgency (0-10), importance (-1 to 10),
 effort (minutes, one of the effort_options, or null; tasks only), blocked, color (an
 Ongoing's or Project's own "#rrggbb", or "" for the type colour), sort_order,

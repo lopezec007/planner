@@ -10,7 +10,8 @@
 //   parentColor(item)        the colour of the Ongoing/Project an item is under
 //   rowTint(item, kind)      inline --row-color for a table/timeline row, or null
 //   renderColorsMenu(slot, ctx)  the toolbar's Colours menu
-//   typeChip(parent, opts)   an Ongoing's/Project's key as a chip in its type colour
+//   chipColor(parent)        the colour of an Ongoing's/Project's key chip
+//   typeChip(parent, opts)   an Ongoing's/Project's key as a chip with its type glyph
 //
 // Every Ongoing and Project may carry a colour of its own (item.color, shared
 // by everyone; picked with the swatch in its expanded details, see swatch.js
@@ -21,6 +22,12 @@
 // take the Task tint from Settings; parent: their Ongoing/Project colour).
 // The Timeline and Matrix have their own pickers with an "Ongoing / Project"
 // mode that uses the same effective colour.
+//
+// The key chip of an Ongoing/Project carries whichever of the two colours
+// the row does not: the type colour while rows show the items' own colours,
+// and the item's own colour (when it has one) while rows are coloured by
+// type. Either way both the type and the item's colour can be read from the
+// row, and the chip's glyph always tells the type.
 //
 // Bar modes:
 //   assignee / owner   that person's colour, else the "unassigned" setting
@@ -71,18 +78,28 @@ export function typeColor(type) {
   return (type === 'ongoing' ? s.color_ongoing : type === 'project' ? s.color_project : '') || '';
 }
 
+/** The colour of an Ongoing's or Project's key chip: the type colour from
+ *  Settings, except when the "parent_colors" preference colours the rows by
+ *  type, where the chip is what shows the item's own colour (if it has one).
+ *  '' when there is no colour to show. */
+export function chipColor(item) {
+  if (item.color && prefs.get('parent_colors') === 'type') return item.color;
+  return typeColor(item.type);
+}
+
 /** An Ongoing's or Project's key as a chip that tells its type (app.css
- *  .type-chip): the type glyph (icons.js) before the key, on the type colour
- *  from Settings whatever the colour preferences and the item's own colour
- *  say, so two parents tinted in their own colours are still told apart. A
- *  neutral outline chip when Settings has no colour for the type. `label`
- *  replaces the key text (a new row's "N-?") and `keyClass` the class of
- *  the text span. The title names the type. */
+ *  .type-chip): the type glyph (icons.js) before the key, on chipColor():
+ *  the type colour from Settings while rows show the items' own colours (so
+ *  two parents tinted in their own colours are still told apart), the
+ *  item's own colour while rows are coloured by type. A neutral outline chip
+ *  when there is no colour. `label` replaces the key text (a new row's
+ *  "N-?") and `keyClass` the class of the text span. The title names the
+ *  type; data-chip-color says which colour shows ("own" or "type"). */
 export function typeChip(item, { label = item.key, keyClass = 'key-text' } = {}) {
-  const color = typeColor(item.type);
+  const color = chipColor(item);
   return el('span', {
     class: `type-chip${color ? '' : ' plain'}`,
-    dataset: { type: item.type },
+    dataset: { type: item.type, chipColor: color && color === item.color && prefs.get('parent_colors') === 'type' ? 'own' : 'type' },
     style: color ? { background: color, color: contrastText(color) } : null,
     title: `${item.type === 'ongoing' ? 'Ongoing' : 'Project'} ${label}`,
   }, icon(item.type), el('span', { class: keyClass }, label));
@@ -197,7 +214,7 @@ let listeners = false;
 export function renderColorsMenu(slot, ctx) {
   const changed = ctx.parentColors === 'type' || ctx.taskColors === 'parent';
   const summary = [
-    ctx.parentColors === 'type' ? 'Ongoing/Project rows in their type colours' : 'Ongoing/Project rows in their own colours',
+    ctx.parentColors === 'type' ? 'Ongoing/Project rows in their type colours (their own on the key chip)' : 'Ongoing/Project rows in their own colours',
     ctx.taskColors === 'parent' ? 'tasks in their Ongoing/Project colour' : 'tasks in the Task tint',
   ].join(', ');
   const btn = el('button', {
@@ -218,7 +235,7 @@ export function renderColorsMenu(slot, ctx) {
   panel.append(
     radios('Ongoing / Project rows', 'parent-colors', ctx.parentColors, [
       ['custom', 'Their own colour, when one is set'],
-      ['type', 'Always the type colour from Settings'],
+      ['type', 'Always the type colour from Settings (their own colour on the key chip)'],
     ], ctx.setParentColors),
     radios('Task rows', 'task-colors', ctx.taskColors, [
       ['type', 'The Task tint from Settings'],

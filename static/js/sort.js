@@ -34,8 +34,8 @@ export const SORT_COLUMNS = {
   assignee: { label: 'Assignee' },
   start: { label: 'Start' },
   end: { label: 'End' },
-  urgency: { label: 'Urgency', defaultDir: 'desc' },   // the most urgent first
-  importance: { label: 'Importance', defaultDir: 'desc' },
+  importance: { label: 'Importance', defaultDir: 'desc' }, // the most important first
+  urgency: { label: 'Urgency', defaultDir: 'desc' },
   effort: { label: 'Effort' },                           // the quickest first; tasks with none last
   blocked: { label: 'Blocked' },
 };

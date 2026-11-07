@@ -1,5 +1,5 @@
-// The main screen: the shared toolbar (search, Active/Backlog/Ideas,
-// the Nested/Flat toggle, filters, the scratch pads), the view switcher
+// The main screen: the shared toolbar (search, Active/Backlog/Ideas and the
+// Sort chip beside them, the Nested/Flat toggle, filters, the scratch pads), the view switcher
 // (List / Timeline / Matrix) in a bottom bar, and the content for the chosen view. The sync state shows as a thin
 // banner under the toolbar when something is worth knowing.
 package io.github.lopezec007.planner.ui.home
@@ -14,8 +14,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
@@ -65,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.lopezec007.planner.data.model.Criteria
 import io.github.lopezec007.planner.data.model.ItemType
 import io.github.lopezec007.planner.data.model.Preset
+import io.github.lopezec007.planner.data.model.SortSpec
 import io.github.lopezec007.planner.data.sync.SyncPhase
 import io.github.lopezec007.planner.prefs.View
 import io.github.lopezec007.planner.ui.PlannerViewModel
@@ -82,10 +87,13 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val p = prefs ?: return
     val snap by vm.snapshot.collectAsStateWithLifecycle()
-    val groups by vm.visibleGroups.collectAsStateWithLifecycle()
+    // The groups come with the layout they were sorted for (see Listing).
+    val listing by vm.listing.collectAsStateWithLifecycle()
+    val groups = listing.groups
     val sync by vm.sync.collectAsStateWithLifecycle()
     val search by vm.searchText.collectAsStateWithLifecycle()
     var filtersOpen by remember { mutableStateOf(false) }
+    var sortOpen by remember { mutableStateOf(false) }
     var addMenu by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
 
@@ -156,6 +164,10 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
                     onPreset = { vm.setCriteria(it.criteria(p.criteria)) },
                     showAll = p.criteria.isActive || search.isNotEmpty(),
                     onAll = { vm.searchText.value = ""; vm.setCriteria(Criteria()) },
+                    // The Matrix has no row order, so Sort hides there (like Nested/Flat).
+                    sort = if (p.view != View.MATRIX) p.sort else null,
+                    flat = p.flat,
+                    onSort = { sortOpen = true },
                 )
                 SyncBanner(sync.phase, sync.pending, sync.lastError, sync.lastSuccess, onRetry = { vm.requestSync() })
             }
@@ -192,13 +204,13 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
         val content = Modifier.fillMaxSize().padding(padding)
         when (p.view) {
             View.LIST -> ItemList(
-                vm = vm, groups = groups, snapshot = snap, flat = p.flat, collapsed = p.collapsed,
+                vm = vm, groups = groups, snapshot = snap, flat = listing.flat, grouped = listing.grouped, sort = listing.sort, collapsed = p.collapsed,
                 onOpen = { nav.push(Screen.Detail(it)) },
                 onAddTask = { nav.push(Screen.New(ItemType.TASK, it)) },
                 snackbar = snackbar,
                 modifier = content,
             )
-            View.TIMELINE -> TimelineScreen(vm, groups, flat = p.flat, onOpen = { nav.push(Screen.Detail(it)) }, modifier = content)
+            View.TIMELINE -> TimelineScreen(vm, groups, flat = listing.flat, grouped = listing.grouped, onOpen = { nav.push(Screen.Detail(it)) }, modifier = content)
             View.MATRIX -> MatrixScreen(vm, groups, onOpen = { nav.push(Screen.Detail(it)) }, modifier = content)
         }
     }
@@ -211,11 +223,21 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
             onDismiss = { filtersOpen = false },
         )
     }
+    if (sortOpen) {
+        SortSheet(sort = p.sort, flat = p.flat, onChange = { vm.setSort(it) }, onDismiss = { sortOpen = false })
+    }
 }
 
-/** Active / Backlog / Ideas, plus "All" to clear everything when a filter is on. */
+/**
+ * Active / Backlog / Ideas, plus "All" to clear everything when a filter is
+ * on; at the right end the Sort chip (when [sort] is given): selected while
+ * a sort is in effect, with the number of sort columns beside the icon.
+ */
 @Composable
-private fun PresetRow(current: Preset?, onPreset: (Preset) -> Unit, showAll: Boolean, onAll: () -> Unit) {
+private fun PresetRow(
+    current: Preset?, onPreset: (Preset) -> Unit, showAll: Boolean, onAll: () -> Unit,
+    sort: SortSpec?, flat: Boolean, onSort: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -224,11 +246,32 @@ private fun PresetRow(current: Preset?, onPreset: (Preset) -> Unit, showAll: Boo
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        for (preset in Preset.entries) {
-            FilterChip(selected = current == preset, onClick = { onPreset(preset) }, label = { Text(preset.title) })
+        // The templates scroll sideways on a narrow phone; Sort stays put.
+        Row(
+            modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            for (preset in Preset.entries) {
+                FilterChip(selected = current == preset, onClick = { onPreset(preset) }, label = { Text(preset.title) })
+            }
+            if (showAll) {
+                FilterChip(selected = false, onClick = onAll, label = { Text("All") })
+            }
         }
-        if (showAll) {
-            FilterChip(selected = false, onClick = onAll, label = { Text("All") })
+        if (sort != null) {
+            val columns = sort.keysFor(flat).size
+            val active = columns > 0 || sort.blockedLast || sort.closedLast
+            val extras = listOfNotNull("blocked last".takeIf { sort.blockedLast }, "done and cancelled last".takeIf { sort.closedLast })
+            val description = "Sort: ${sort.summary(flat)}" + if (extras.isEmpty()) "" else ", ${extras.joinToString(", ")}"
+            FilterChip(
+                selected = active,
+                onClick = onSort,
+                label = {
+                    Icon(Icons.AutoMirrored.Filled.Sort, description, Modifier.size(18.dp))
+                    if (columns > 0) Text(columns.toString(), modifier = Modifier.padding(start = 4.dp))
+                },
+            )
         }
     }
 }

@@ -21,7 +21,7 @@ test('toolbar buttons are icons with mouseover descriptions and accessible names
     await expect(page.locator(`button[data-view=${v}]`).locator('svg')).toHaveCount(1);
     expect((await page.locator(`button[data-view=${v}]`).getAttribute('title')).toLowerCase()).toContain(v);
   }
-  await expect(page.locator('.search-preset[data-preset=active]')).toHaveAttribute('title', /To-Do and In-Progress/);
+  await expect(page.locator('.search-preset[data-preset=active]')).toHaveAttribute('title', /To-Do, In-Progress and Validating/);
   expect(await page.locator('.topbar').evaluate((e) => e.getBoundingClientRect().height)).toBeLessThan(60); // one line at 1500px
   await page.goto('/#/settings');
   await expect(page.locator('#btn-back')).toHaveAttribute('title', 'Back to the items');
@@ -138,12 +138,12 @@ test('dependency chips show the key only with the item in a tooltip; attachments
   expect(desc.x + desc.width).toBeLessThanOrEqual(deps.x + 1);        // not squeezing the description
 });
 
-test('the Move dropdown closes on a click elsewhere', async ({ page }) => {
+test('the Move search box closes on a click elsewhere', async ({ page }) => {
   await page.goto('/#/all');
   const row = page.locator('.row.task', { hasText: 'Clean gutters' });
   await row.locator('button.reparent').click();
-  await expect(row.locator('select[name=reparent]')).toBeVisible();
+  await expect(row.locator('input[name=reparent]')).toBeVisible();
   await page.mouse.click(5, 600); // one click, anywhere
   await expect(row.locator('button.reparent')).toBeVisible();
-  await expect(row.locator('select[name=reparent]')).toHaveCount(0);
+  await expect(row.locator('input[name=reparent]')).toHaveCount(0);
 });

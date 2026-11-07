@@ -18,6 +18,11 @@
 //   opts.closedLast   true: done/cancelled items sink below the blocked ones
 //   opts.onSort(sort)  called when a column header is clicked
 //   opts.hidden    Set of hidden column names (see columns.js)
+//   opts.multicol  true: on a window wide enough for more than one copy of
+//                  the table, the rows continue in further columns beside
+//                  the first (full table only; see "Several columns" below)
+//   opts.columnCount  'auto' (as many columns as fit comfortably) or a number
+//                  of columns, used as far as the window has room for them
 //
 // Every field is edited in place (see cells.js): there is no edit mode. A
 // single unsaved "new row" (cells.draft) is rendered where it will live and
@@ -49,6 +54,20 @@
 // there is no actions column: the details caret sits at the right end of the
 // title cell, always visible, before the hover-revealed buttons.
 //
+// Several columns (opts.multicol): when the container has room for two or
+// more tables side by side (tableColumnCount: each at least the columns'
+// minimum width plus some slack, or, with a number asked for in
+// opts.columnCount, that many as long as each gets the bare minimum), the
+// table gets the class "multicol" and a
+// different structure: a sticky ".table-head" holding one header row per
+// column, then a ".table-body" laid out with CSS columns (app.css), whose
+// children are ".tgroup" wrappers that are never split between columns: in
+// Nested a parent with its tasks and detail rows, in Flat a task with its
+// detail row. The browser balances the column heights. With room for one
+// column only the table is exactly the single-column one. A ResizeObserver
+// on the container re-renders when the number of columns that fit changes
+// (not while a text edit is open; it catches up on the next render).
+//
 // Reordering: every saved row has a drag handle at the right end of its
 // actions. Top-level rows can be dropped among top-level rows; tasks among any parent's tasks or
 // onto a parent row (which reparents them). In Flat there are no parent rows
@@ -61,17 +80,37 @@ import { state, isClosed, isBlocked } from './state.js';
 import { api, group } from './api.js';
 import { el, contrastText, toast } from './util.js';
 import {
-  draft, discardNew, commitNew, isDraft, makeSaver, closeOnOutsidePointer,
+  draft, discardNew, commitNew, isDraft, makeSaver,
   titleControl, statusControl, userControl, dateControl, levelControl, blockedControl, effortControl,
-  descriptionControl, dependencyPanel, attachmentsPanel, attachmentBadge,
+  descriptionControl, dependencyPanel, attachmentsPanel, attachmentBadge, itemPicker,
 } from './cells.js';
 import { formatEffort, effortSums } from './effort.js';
 import { SORT_COLUMNS, normalizeSort, compareItems, toggleSort, defaultDir } from './sort.js';
-import { visibleColumns, gridTemplate } from './columns.js';
+import { visibleColumns, gridTemplate, minTableWidth } from './columns.js';
 import { rowTint, typeChip } from './colors.js';
 import { colorSwatch, colorLabel } from './swatch.js';
 import { icon } from './icons.js';
 import { prefs } from './prefs.js';
+
+// Several columns: the gap between them (app.css --col-gap), the room each
+// needs beyond the bare minimum of its grid before another column is worth
+// having, and a ceiling.
+const COL_GAP = 16;
+const COL_SLACK = 120;
+const MAX_TABLE_COLS = 6;
+
+/** How many copies of the table with these columns to lay side by side in
+ *  `container` (at least 1): with `want` 'auto', as many as fit with some
+ *  slack each; with a number, that many as long as each column gets the
+ *  bare minimum width of its grid (rows would overlap otherwise), else as
+ *  many as do. */
+export function tableColumnCount(container, columns, mode, flat, want = 'auto') {
+  const min = minTableWidth(columns, mode, flat);
+  const fits = (each) => Math.floor((container.clientWidth + COL_GAP) / (each + COL_GAP));
+  const asked = Number(want);
+  const n = Number.isInteger(asked) && asked >= 2 ? Math.min(asked, fits(min)) : fits(min + COL_SLACK);
+  return Math.max(1, Math.min(MAX_TABLE_COLS, n));
+}
 
 export function userChip(id) {
   if (id == null) return '';
@@ -105,42 +144,33 @@ function iconButton(name, attrs) {
   return el('button', { type: 'button', ...attrs, class: `icon ${attrs.class || ''}` }, icon(name));
 }
 
-/** "Move to another Ongoing/Project": the button becomes a dropdown of the
- *  other parents; picking one reparents the task (it goes last there). */
+/** "Move to another Ongoing/Project": the button becomes a search box
+ *  (cells.js itemPicker) listing the other parents whose key or title
+ *  contains what is typed; picking one reparents the task (it goes last
+ *  there). */
 function reparentButton(item, ctx) {
   const btn = iconButton('move', { class: 'reparent', title: 'Move to another Ongoing or Project', 'aria-label': `Move ${item.key} to another Ongoing or Project` });
   btn.addEventListener('click', () => {
-    const sel = el('select', { class: 'cell-select reparent-select', name: 'reparent', 'aria-label': 'Move to' }, el('option', { value: '' }, 'Move to…'));
-    for (const p of state.items) {
-      if (p.type === 'task' || p.id === item.parent_id) continue;
-      sel.append(el('option', { value: String(p.id) }, `${p.key} ${p.title}`));
-    }
-    let done = false;
-    const finish = async (save) => {
-      if (done) return;
-      done = true;
-      stopOutside();
-      const v = sel.value ? Number(sel.value) : null;
-      if (!save || v == null) { sel.replaceWith(btn); return; }
-      try {
-        // One undo step: back to the old parent and back into its old place.
-        await group(`moving ${item.key}`, async () => {
-          api.rememberOrder(item.parent_id);
-          await api.updateItem(item.id, { parent_id: v });
-        });
-        await ctx.onChanged();
-      } catch (e) {
-        toast(e.message);
-        sel.replaceWith(btn);
-      }
-    };
-    sel.addEventListener('change', () => finish(true));
-    sel.addEventListener('blur', () => finish(false));
-    sel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
-    const stopOutside = closeOnOutsidePointer(sel, () => finish(false));
-    btn.replaceWith(sel);
-    sel.focus();
-    try { sel.showPicker?.(); } catch {}
+    const picker = itemPicker({
+      label: 'Move to', name: 'reparent', placeholder: 'Move to…', className: 'compact',
+      candidates: state.items.filter((p) => p.type !== 'task' && p.id !== item.parent_id),
+      onCancel: () => picker.replaceWith(btn),
+      onPick: async (parent) => {
+        try {
+          // One undo step: back to the old parent and back into its old place.
+          await group(`moving ${item.key}`, async () => {
+            api.rememberOrder(item.parent_id);
+            await api.updateItem(item.id, { parent_id: parent.id });
+          });
+          await ctx.onChanged();
+        } catch (e) {
+          toast(e.message);
+          picker.replaceWith(btn);
+        }
+      },
+    });
+    btn.replaceWith(picker);
+    picker.focus();
   });
   return btn;
 }
@@ -461,6 +491,10 @@ export function renderTable(container, opts) {
   const handle = { rows: [], rerender: () => renderTable(container, opts) };
   const order = orderGroups(groups, sort, blockedLast, closedLast, flat);
   const columns = visibleColumns(mode, flat, hidden);
+  // Several columns: only the full table. `fit` is how many the container
+  // has room for.
+  const wantCols = !!opts.multicol && mode === 'full';
+  const fit = wantCols ? tableColumnCount(container, columns, mode, flat, opts.columnCount) : 1;
 
   // Tints: when tasks take their parent's colour, parents and tasks mix it
   // in clearly different amounts (see app.css --tint-parent / --tint-task).
@@ -493,12 +527,34 @@ export function renderTable(container, opts) {
   // A new task row only makes sense under a parent shown on this page.
   if (draft.item && draft.item.type === 'task' && !groups.some((g) => g.parent.id === draft.item.parent_id)) discardNew();
 
+  // An empty table stays a single one (there is nothing to spread out).
+  const ncols = groups.length || draft.item ? fit : 1;
+  const multi = ncols > 1;
+
   const table = el('div', {
-    class: `table ${mode === 'title-only' ? 'title-only' : ''} ${flat ? 'flat' : ''} ${order.sorting ? 'sorted' : ''}`,
-    dataset: { columns: columns.join(' ') },
+    class: `table ${mode === 'title-only' ? 'title-only' : ''} ${flat ? 'flat' : ''} ${order.sorting ? 'sorted' : ''} ${multi ? 'multicol' : ''}`,
+    dataset: { columns: columns.join(' '), tableCols: ncols },
   });
   table.style.setProperty('--cols', gridTemplate(columns, mode, flat));
-  table.append(headerRow(ctx));
+  // Rows go into `sink`: the table itself, or (several columns) the current
+  // unbreakable group of the body.
+  let sink = table;
+  let body = null;
+  if (multi) {
+    table.style.setProperty('--table-cols', String(ncols));
+    const head = el('div', { class: 'table-head' });
+    for (let i = 0; i < ncols; i++) head.append(headerRow(ctx));
+    body = el('div', { class: 'table-body' });
+    table.append(head, body);
+  } else {
+    table.append(headerRow(ctx));
+  }
+  /** Start a new unbreakable group (a no-op with a single column). */
+  const startGroup = () => {
+    if (!multi) return;
+    sink = el('div', { class: 'tgroup' });
+    body.append(sink);
+  };
 
   if (!groups.length && !draft.item) {
     table.append(el('div', { class: 'empty' }, 'Nothing to show.'));
@@ -508,13 +564,13 @@ export function renderTable(container, opts) {
     const isExpanded = expanded.has(item.id);
     const row = itemRow(item, kind, mode, isExpanded, ctx);
     if (extraClass) row.classList.add(extraClass);
-    table.append(row);
+    sink.append(row);
     handle.rows.push({ item, el: row, kind });
-    if (isExpanded) table.append(detailRow(item, kind, ctx));
+    if (isExpanded) sink.append(detailRow(item, kind, ctx));
   };
   const appendNewRow = (kind) => {
     const row = itemRow(draft.item, kind, mode, true, ctx);
-    table.append(row, detailRow(draft.item, kind, ctx));
+    sink.append(row, detailRow(draft.item, kind, ctx));
     queueMicrotask(() => { const t = row.querySelector('input[name="title"]'); if (t && row.isConnected && !captureFocusActive) t.focus(); });
   };
   let captureFocusActive = false;
@@ -525,18 +581,20 @@ export function renderTable(container, opts) {
     let prevParent = null;
     for (const t of order.flatTasks) {
       const starts = order.grouped && prevParent != null && t.parent_id !== prevParent;
+      startGroup();
       appendRow(t, 'task', starts ? 'group-start' : '');
       prevParent = t.parent_id;
     }
-    if (draft.item && draft.item.type === 'task') appendNewRow('task');
+    if (draft.item && draft.item.type === 'task') { startGroup(); appendNewRow('task'); }
   } else {
     for (const g of order.groups) {
+      startGroup();
       appendRow(g.parent, 'parent');
       const hidden = collapsed.has(g.parent.id);
       if (!hidden) for (const t of g.tasks) appendRow(t, 'task');
       if (draft.item && draft.item.type === 'task' && draft.item.parent_id === g.parent.id) appendNewRow('task');
     }
-    if (draft.item && draft.item.type !== 'task') appendNewRow('parent');
+    if (draft.item && draft.item.type !== 'task') { startGroup(); appendNewRow('parent'); }
   }
 
   if (!order.sorting) installDragAndDrop(table, ctx);
@@ -545,8 +603,26 @@ export function renderTable(container, opts) {
   captureFocusActive = !!focus;
   container.replaceChildren(table);
   restoreFocus(container, focus);
+  watchColumnCount(container, opts, wantCols ? { columns, mode, flat, fit } : null);
   if (opts.onRendered) opts.onRendered(handle);
   return handle;
+}
+
+/** Several columns: re-render when the number that fits changes with the
+ *  container's width. `shown` is what the current render used (null: this
+ *  table is not a multi-column one, so only the old observer is dropped).
+ *  An open text edit is left alone: its unsaved text lives in the DOM. */
+function watchColumnCount(container, opts, shown) {
+  if (container._colsObserver) { container._colsObserver.disconnect(); container._colsObserver = null; }
+  if (!shown || typeof ResizeObserver === 'undefined') return;
+  const ro = new ResizeObserver(() => {
+    if (!container.isConnected) { ro.disconnect(); return; }
+    if (tableColumnCount(container, shown.columns, shown.mode, shown.flat, opts.columnCount) === shown.fit) return;
+    if (draft.item || container.querySelector('.title-input, .date-input, .desc-textarea')) return;
+    renderTable(container, opts);
+  });
+  ro.observe(container);
+  container._colsObserver = ro;
 }
 
 // ---------------------------------------------------------------- drag and drop

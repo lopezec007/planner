@@ -78,7 +78,7 @@ export function colorSwatch(item, saver) {
   const typeName = item.type === 'ongoing' ? 'Ongoing' : 'Project';
   const hiddenByPref = own && prefs.get('parent_colors') === 'type';
   const title = own
-    ? `Colour ${own}${hiddenByPref ? ' (your Colours menu shows the type colour instead)' : ''}: click to change it. Everyone sees it.`
+    ? `Colour ${own}${hiddenByPref ? ' (your Colours menu keeps rows in the type colour, so it shows on the key chip)' : ''}: click to change it. Everyone sees it.`
     : `${typeName} colour from Settings: click to give this item a colour of its own (everyone sees it).`;
   const btn = el('button', {
     type: 'button', name: 'color', class: `color-swatch ${own ? 'own' : 'type'}${effective ? '' : ' none'}`,

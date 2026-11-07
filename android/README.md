@@ -12,7 +12,7 @@ the wrapper.
 
     cd android
     ./gradlew assembleDebug            # app/build/outputs/apk/debug/app-debug.apk
-    ./gradlew test                     # JVM unit tests (sync, filters, dates, scratch pads, schema migration)
+    ./gradlew test                     # JVM unit tests (sync, filters, sort, dates, scratch pads, schema migration)
     ./gradlew connectedAndroidTest     # instrumented tests on a device/emulator
     ./gradlew installDebug             # onto the device on adb
 
@@ -34,7 +34,8 @@ The app is a second client of the same JSON API the web UI uses (see
 "API summary" in the top-level README), including the scratch pads
 (`/api/scratch`, `/api/users/{id}/scratch`), the `default_status` setting,
 the task `effort` field (minutes, one of the `effort_options` setting's
-values, null to clear) and importance from -1 to 10. Nothing in the API is
+values, null to clear), importance from -1 to 10, the `validating` status
+and the `urgency_descriptions` / `importance_descriptions` settings. Nothing in the API is
 specific to a client; the only things that live on the phone are its own
 view preferences and the offline queue.
 
@@ -110,14 +111,26 @@ network never blocks a screen.
   on its own fields; a parent shows when it or a task matches; Active hides
   parents without matching tasks). Owner and Assignee are multi-select
   chips: any chosen user, or "No owner" / "Unassigned", matches, and no
-  choice means any. The Nested/Flat toggle is in the top bar (tinted while
+  choice means any. **Sort** is the chip at the right of the template row
+  (tinted while a sort is in effect, with the number of sort columns): its
+  sheet has a chip per column that follows the web's header-click rule (tap
+  to sort by it, again to reverse, once more to remove; Importance and
+  Urgency start descending), so the order of tapping is the multi-column
+  order, numbered on the chips; "User-defined" returns to the order kept
+  by the server, and two switches sink blocked items and done / cancelled
+  items whatever the sort. Nested sorts the parents among themselves and
+  the tasks within each parent; Flat sorts every task together and also
+  offers the Ongoing / Project column. The sort is a phone preference
+  (`data/model/Sort.kt`, a port of `static/js/sort.js`, stored in the web's
+  JSON shape); it orders the Timeline's rows too, and changing it takes
+  the list back to its top. The Nested/Flat toggle is in the top bar (tinted while
   Flat; also governs the Timeline, hidden on the Matrix), not in the filter
   sheet. Nested: each parent and its tasks is one rounded, outlined card,
   the parent row its tinted header (a collapsed parent is a single-row
   card); Flat is a plain list of tasks with the parent named on each row.
-  Row chips: status, assignee, end date (orange within 7 days, red
-  today/overdue), urgency/importance per the server's colour ramps, the
-  task's effort ("1h 30m"); blocked rows are dimmed; closed rows carry no
+  Row chips: status, assignee, importance and urgency per the server's
+  colour ramps, the task's effort ("1h 30m"), end date (orange within 7
+  days, red today/overdue); blocked rows are dimmed; closed rows carry no
   highlighting. A parent row shows the effort of its open tasks shown
   under it ("3h", or "3h · 5h with closed" when Done/Cancelled tasks add
   to it), and a strip above the list gives the task count and the same
@@ -128,8 +141,9 @@ network never blocks a screen.
   hidden at once); the owner is the account; a task's effort is "None"
   until picked.
 - **Detail**: every field editable in place (no edit mode): title, status,
-  owner, assignee, dates with firm toggles, urgency (0-10), importance
-  (-1 to 10), effort (a menu of the planner's options plus None; a value
+  owner, assignee, dates with firm toggles, importance (-1 to 10) and
+  urgency (0-10), each with the planner's description of the chosen value
+  beneath its slider when Settings on the web gives it one, effort (a menu of the planner's options plus None; a value
   that is no longer an option is still listed so it can be kept or
   changed), blocked, description (Markdown preview, tap to edit),
   dependencies (blocked by / blocks), attachments, status history. Delete
@@ -145,7 +159,9 @@ network never blocks a screen.
   with the Dot size toggle above the plot (a preference, like the web UI's)
   on Effort a dot's radius grows with the task's effort (log2 of effort over
   15 minutes: 3dp at 15m to 15dp at 64h; 5dp without one), on Same every dot
-  is 6dp; the jitter spacing and hit radius follow the dot size. Tap a point for its card (its
+  is 6dp; the jitter spacing and hit radius follow the dot size. Done and
+  Cancelled tasks are very faint outlines, and the "Closed" chip beside the
+  colour picker (a phone preference) leaves them out altogether. Tap a point for its card (its
   underlined title, like the Open button, opens the task), drag a point to
   change its values.
 - **Scratch**: from the toolbar's note icon. Two tabs, "Shared" and the
@@ -198,14 +214,14 @@ days"). It needs no network, so it works offline. Tapping opens the item
     app/src/main/java/io/github/lopezec007/planner/
       PlannerApp.kt            Application: builds the dependency graph (Graph)
       MainActivity.kt          single activity, Compose content, notification intents
-      data/model/              Item, User, Attachment, AppSettings, Effort, enums, dates
+      data/model/              Item, User, Attachment, AppSettings, Effort, enums, dates, filters, sort
       data/api/                PlannerApi (OkHttp + kotlinx.serialization), wire DTOs
       data/db/                 Room database, entities, DAOs
       data/sync/               PendingOp, SyncEngine, SyncWorker, ConnectivityProbe
       data/repo/               PlannerRepository: Flows for the UI, mutations that
                                write Room and enqueue ops
-      prefs/                   DataStore: server URL, account, view prefs, notify time and window,
-                               scratch pad wrap
+      prefs/                   DataStore: server URL, account, view prefs (incl. the sort), notify time
+                               and window, scratch pad wrap
       ui/theme/                Material 3 theme (dynamic colour off; follows system
                                light/dark)
       ui/nav/                  Screen stack (no Navigation library)
@@ -226,7 +242,10 @@ days"). It needs no network, so it works offline. Tapping opens the item
   strings and are kept as strings; `closed_at` is parsed only for the
   "closed within N days" rule.
 - Status strings are the server's (`idea`, `backlog`, `todo`, `in-progress`,
-  `done`, `cancelled`); `Status` is the enum with those wire values.
+  `validating`, `done`, `cancelled`); `Status` is the enum with those wire
+  values, in display and sort order. Validating is open like In-Progress
+  (the Active template shows it); filters stored by an earlier version of
+  the app that show In-Progress gain it once (`Prefs`, `filters_rev`).
 - Scratch pad scopes are the server's (`global`, `user:<id>`, see
   `ScratchScope`) and key the cache and the queued op alike.
 - Colours arrive as `#rrggbb` strings; `parseColor()` is tolerant of "".

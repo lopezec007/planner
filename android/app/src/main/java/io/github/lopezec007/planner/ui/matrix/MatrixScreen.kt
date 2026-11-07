@@ -6,9 +6,12 @@
 // with the task's effort (log2 of effort over 15 minutes: 3dp at 15m up to
 // 15dp at 64h) and no effort gives the default 5dp; on Same every dot is 6dp.
 //
-// Layout: the Dot size toggle at the left and the point-colouring picker at
-// the right of a strip at the top, then a Canvas filling the rest of the
-// screen. The plot area is the canvas less
+// Done and Cancelled tasks are drawn as very faint outlines; the "Closed"
+// chip beside the picker (a phone preference) leaves them out altogether.
+//
+// Layout: the Dot size toggle at the left, and the Closed chip with the
+// point-colouring picker at the right, of a strip at the top, then a Canvas
+// filling the rest of the screen. The plot area is the canvas less
 // margins for the tick numbers and axis titles; each axis uses its own pixel
 // extent, with half a cell of padding so the 0 and 10 rows stay clear of the
 // frame. Tasks sharing a grid point are spread evenly on a small circle
@@ -51,6 +54,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -137,9 +141,12 @@ fun MatrixScreen(vm: PlannerViewModel, groups: List<Group>, onOpen: (Long) -> Un
 
     val mode = prefs?.pointColor?.takeIf { it in ColorMode.forPoints } ?: ColorMode.ASSIGNEE
     val dotSize = prefs?.dotSize ?: DotSize.EFFORT
-    // Only tasks with both values are plotted (parents have neither).
-    val tasks = remember(groups) {
-        groups.flatMap { g -> g.tasks }.filter { it.type == ItemType.TASK && it.urgency != null && it.importance != null }
+    // Only tasks with both values are plotted (parents have neither); Done
+    // and Cancelled ones are left out altogether when the phone says so
+    // (they are drawn very faintly otherwise).
+    val hideClosed = prefs?.matrixHideClosed == true
+    val tasks = remember(groups, hideClosed) {
+        groups.flatMap { g -> g.tasks }.filter { it.type == ItemType.TASK && it.urgency != null && it.importance != null && !(hideClosed && it.isClosed) }
     }
 
     var selectedId by remember { mutableStateOf<Long?>(null) }
@@ -160,7 +167,18 @@ fun MatrixScreen(vm: PlannerViewModel, groups: List<Group>, onOpen: (Long) -> Un
             verticalAlignment = Alignment.CenterVertically,
         ) {
             DotSizeToggle(size = dotSize, onPick = { vm.setDotSize(it) })
-            PointColorPicker(mode = mode, onPick = { vm.setPointColor(it) })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilterChip(
+                    selected = !hideClosed,
+                    onClick = { vm.setMatrixHideClosed(!hideClosed) },
+                    label = { Text("Closed", style = MaterialTheme.typography.labelMedium) },
+                    modifier = Modifier.semantics {
+                        contentDescription = if (hideClosed) "Done and cancelled tasks are hidden. Tap to show them faintly" else "Done and cancelled tasks are shown faintly. Tap to hide them"
+                    },
+                )
+                Spacer(Modifier.width(4.dp))
+                PointColorPicker(mode = mode, onPick = { vm.setPointColor(it) })
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (shown.isEmpty()) {
@@ -526,7 +544,9 @@ private fun MatrixPlot(
             val uy = dy / len
             val lit = selectedId != null && (selectedId == e.from.item.id || selectedId == e.to.item.id)
             val base = if (e.open) colors.alert else colors.subtle
-            val color = base.copy(alpha = if (lit) 0.9f else if (e.open) 0.5f else 0.35f)
+            // A line to or from a closed task is as faint as its dot.
+            val faint = e.from.item.isClosed || e.to.item.isClosed
+            val color = base.copy(alpha = if (lit) 0.9f else if (faint) 0.14f else if (e.open) 0.5f else 0.35f)
             val start = Offset(a.x + ux * e.from.r, a.y + uy * e.from.r)
             val end = Offset(b.x - ux * e.to.r, b.y - uy * e.to.r)
             drawLine(
@@ -549,10 +569,15 @@ private fun MatrixPlot(
             val closed = item.isClosed
             val blocked = !closed && snap.isBlocked(item)
             val r = if (lit) p.r + m.hairline else p.r
-            if (closed) {
-                // Hollow and faded: no highlighting on closed items.
+            if (closed && !lit) {
+                // Barely there: closed items are history, not work to weigh
+                // up. No surface disc beneath, so they hide nothing. (The
+                // selected or dragged one is drawn at full strength below.)
+                drawCircle(colors.subtle.copy(alpha = 0.2f), r - m.hairline / 2, c, style = Stroke(m.hairline * 1.5f))
+            } else if (closed) {
+                // Selected: hollow, no highlight colour.
                 drawCircle(colors.surface, r, c)
-                drawCircle(colors.subtle.copy(alpha = 0.5f), r - m.hairline / 2, c, style = Stroke(m.hairline * 1.5f))
+                drawCircle(colors.subtle.copy(alpha = 0.7f), r - m.hairline / 2, c, style = Stroke(m.hairline * 1.5f))
             } else {
                 val fill = hexColor(snap.colors.color(item, mode), colors.subtle)
                 drawCircle(colors.surface, r + m.ring, c) // surface ring so overlapping dots stay legible
@@ -694,8 +719,8 @@ private fun PointCard(item: Item, snap: Snapshot, onOpen: () -> Unit, onClose: (
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                LevelBadge("urgency", item.urgency, snap.settings, item.isClosed)
                 LevelBadge("importance", item.importance, snap.settings, item.isClosed)
+                LevelBadge("urgency", item.urgency, snap.settings, item.isClosed)
                 EffortBadge(item.effort)
                 UserChip(snap.user(item.assigneeId), muted = item.isClosed)
                 if (snap.isBlocked(item)) {

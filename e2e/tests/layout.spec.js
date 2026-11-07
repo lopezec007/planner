@@ -116,7 +116,7 @@ test('Ctrl+Z undoes edits, deletions, creations, reorders and dependency changes
   const budget = await byTitle(request, 'Review budget');
   await page.locator('.row.task', { hasText: 'Clean gutters' }).locator('.toggle button').click();
   await page.locator('.row.description[data-desc-for] [data-deps=blocked_by] .dep-add-btn').click();
-  await page.locator('.row.description[data-desc-for] [data-deps=blocked_by] select.dep-add').selectOption(String(budget.id));
+  await page.locator('.dep-pick-list .dep-pick-opt[data-id="' + budget.id + '"]').click();
   await expect.poll(async () => (await byTitle(request, 'Clean gutters')).blocked_by).toEqual([budget.id]);
   await expect(page.locator(`.row.description[data-desc-for] [data-deps=blocked_by] .dep-chip[data-id="${budget.id}"]`)).toBeVisible();
   await settled();
@@ -325,6 +325,9 @@ test('the carets, buttons and drag handle sit in the first and last columns', as
     expect(Math.abs(box.width - box.height)).toBeLessThan(1);
     await expect(b.locator('svg')).toHaveCount(1);
     expect((await b.textContent()).trim()).toBe('');
+    // Bare on the row's colour: no fill or frame of their own.
+    expect(await b.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+    expect(await b.evaluate((e) => getComputedStyle(e).borderTopColor)).toBe('rgba(0, 0, 0, 0)');
   }
   await expect(kitchen.locator('.actions .toggle button')).toHaveAttribute('aria-expanded', 'false');
   await kitchen.locator('.actions .toggle button').click();

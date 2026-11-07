@@ -435,17 +435,19 @@ private fun Fields(item: Item, snap: Snapshot, patch: (ItemPatch) -> Unit) {
         }
         if (item.type == ItemType.TASK) {
             LevelSlider(
-                label = "Urgency",
-                value = item.urgency,
-                onChange = { patch(ItemPatch(urgency = set(it))) },
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            LevelSlider(
                 label = "Importance",
                 value = item.importance,
                 onChange = { patch(ItemPatch(importance = set(it))) },
                 modifier = Modifier.padding(horizontal = 16.dp),
                 min = -1, // importance runs -1..10 (urgency 0..10)
+                describe = { snap.settings.levelDescription("importance", it) },
+            )
+            LevelSlider(
+                label = "Urgency",
+                value = item.urgency,
+                onChange = { patch(ItemPatch(urgency = set(it))) },
+                modifier = Modifier.padding(horizontal = 16.dp),
+                describe = { snap.settings.levelDescription("urgency", it) },
             )
             EffortField(
                 value = item.effort,

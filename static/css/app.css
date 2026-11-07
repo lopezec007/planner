@@ -128,6 +128,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 .toolbar button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 30px; }
 .toolbar button > .icon { display: block; }
 .toolbar .search-badge { margin-left: 2px; }
+/* The number of table columns, beside the Width group while Columns is on. */
+.toolbar .multicol-count { min-height: 30px; padding: 3px 4px; font-size: 13px; cursor: pointer; }
 /* The effort total (app.js): the sum over every open task in view, as a
    badge beside the Sort button; the tooltip has the done/cancelled part. */
 .toolbar .effort-slot { display: flex; align-items: center; margin-right: 4px; white-space: nowrap; cursor: help; }
@@ -221,6 +223,37 @@ main::before {
 .caret:hover { color: var(--fg); background: transparent; }
 .task-count { color: var(--fg-muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
 .table-wrap.constrained { max-width: 1500px; margin: 0 auto; }
+/* Several columns (table.js, the "Columns" width choice): on a window with
+   room for more than one table the rows continue in further columns beside
+   the first. One header row per column sits in a sticky strip above a body
+   laid out with CSS columns; each .tgroup (Nested: a parent with its tasks
+   and detail rows; Flat: a task with its detail row) stays in one column,
+   and the browser balances the column heights. --table-cols is the number
+   of columns (set inline); the gap matches COL_GAP in table.js. */
+.table.multicol { --col-gap: 16px; width: 100%; min-width: 0; }
+/* The strip of headers pins where a single header row would (the page gap
+   under the title bar, above the gap strip; see .row.header), each copy
+   keeping its own frame and backing. */
+.table.multicol > .table-head {
+  display: flex; gap: var(--col-gap);
+  position: sticky; top: calc(var(--topbar-h, 48px) + var(--page-gap)); z-index: 9;
+}
+.table.multicol.flat > .table-head { top: calc(var(--topbar-h, 48px) + var(--page-gap) + 1px); }
+/* relative, not static: each copy's ::before frame must size to that copy, not to the strip */
+.table.multicol > .table-head > .row.header { flex: 1 1 0; min-width: 0; position: relative; top: auto; }
+.table.multicol > .table-body { column-count: var(--table-cols, 2); column-gap: var(--col-gap); }
+.table.multicol .tgroup { break-inside: avoid; }
+/* Nested: the gap above each framed group is padding on its wrapper (a
+   margin would be dropped at the top of the second and later columns,
+   leaving their first group higher than the first column's). */
+.table.multicol:not(.flat) .tgroup { padding-top: 6px; }
+.table.multicol:not(.flat) .row.parent { margin-top: 0; }
+/* Flat: every task is the first child of its wrapper, and still needs the
+   rule above it; a hairline separates the columns inside the one frame. */
+.table.multicol.flat .tgroup > .row:first-child:not(.group-start) { border-top: 1px solid var(--border); }
+.table.multicol.flat .tgroup > .row:last-child { border-radius: 0; } /* only the table's last row rounds its corners */
+.table.multicol.flat .tgroup:last-child > .row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+.table.multicol.flat > .table-body { column-rule: 1px solid var(--border); }
 .row {
   display: grid;
   grid-template-columns: var(--cols);
@@ -299,9 +332,10 @@ main::before {
 .row.task .key, .row.task .title, .row.kind-task > .title { padding-left: calc(8px + var(--indent)); }
 .row .key { font-family: var(--mono); color: var(--fg-muted); font-size: 12px; }
 /* Ongoing/Project keys are chips (colors.js typeChip): the type glyph and
-   the key on the type colour from Settings, whatever tint the row has, so
-   the kind of parent is read at a glance; an outline when Settings gives
-   the type no colour. The background and the contrasting text colour are
+   the key, on the type colour from Settings while rows show the items' own
+   colours and on the item's own colour while rows are coloured by type, so
+   the kind of parent is read at a glance either way; an outline when there
+   is no colour. The background and the contrasting text colour are
    inline. The chip dims with a closed row; the blocked mask covers it. */
 .type-chip {
   display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; max-width: 100%;
@@ -333,6 +367,12 @@ main::before {
   display: inline-flex; align-items: center; justify-content: center;
 }
 .row .actions .icon { width: 14px; height: 14px; }
+/* The add, move and delete buttons sit bare on the row's own colour (no
+   fill or frame), like the details caret beside them, and get a soft fill
+   only under the pointer; a new row's Save keeps its accent. The border
+   stays, transparent, so the buttons keep their size. */
+.row .actions > button.icon:not(.primary) { background: transparent; border-color: transparent; color: var(--fg-muted); }
+.row .actions > button.icon:not(.primary):hover { background: var(--bg-hover); border-color: transparent; color: var(--fg); }
 .row .toggle { display: inline-flex; flex: 0 0 auto; }
 .toggle button { border: none; background: transparent; color: var(--fg-muted); }
 .toggle button:hover { color: var(--fg); background: transparent; }
@@ -442,6 +482,7 @@ main::before {
 .status.backlog::before { color: var(--fg-muted); }
 .status.todo::before { color: #4e79a7; }
 .status.in-progress::before { color: #f28e2b; }
+.status.validating::before { color: #17a2b8; }
 .status.done::before { color: #59a14f; }
 .status.cancelled::before { color: #888; }
 

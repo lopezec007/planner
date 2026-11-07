@@ -149,11 +149,20 @@ fun DatePickerDialogFor(initial: LocalDate?, allowClear: Boolean, onPick: (Local
     }
 }
 
-/** Urgency / importance: a slider from [min] (0, or -1 for importance) to 10 with the value beside it. */
+/**
+ * Urgency / importance: a slider from [min] (0, or -1 for importance) to 10
+ * with the value beside it and, beneath, what the value under the thumb
+ * means when the planner's settings describe it ([describe]).
+ */
 @Composable
-fun LevelSlider(label: String, value: Int?, onChange: (Int) -> Unit, modifier: Modifier = Modifier, min: Int = 0) {
+fun LevelSlider(
+    label: String, value: Int?, onChange: (Int) -> Unit, modifier: Modifier = Modifier, min: Int = 0,
+    describe: (Int) -> String = { "" },
+) {
     var v by remember(value) { mutableIntStateOf((value ?: 5).coerceIn(min, 10)) }
-    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    val meaning = describe(v)
+    Column(modifier = modifier.fillMaxWidth()) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(96.dp))
         Slider(
             value = v.toFloat(),
@@ -165,6 +174,15 @@ fun LevelSlider(label: String, value: Int?, onChange: (Int) -> Unit, modifier: M
         )
         Spacer(Modifier.width(8.dp))
         Text(v.toString(), style = MaterialTheme.typography.titleMedium, modifier = Modifier.width(28.dp).wrapContentWidth())
+    }
+    if (meaning.isNotEmpty()) {
+        Text(
+            meaning,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 96.dp, bottom = 4.dp),
+        )
+    }
     }
 }
 

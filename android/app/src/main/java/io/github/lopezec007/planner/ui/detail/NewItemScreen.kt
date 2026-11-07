@@ -192,17 +192,19 @@ fun NewItemScreen(vm: PlannerViewModel, nav: Nav, type: ItemType, parentId: Long
             }
             if (type == ItemType.TASK) {
                 LevelSlider(
-                    label = "Urgency",
-                    value = urgency,
-                    onChange = { urgency = it },
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-                LevelSlider(
                     label = "Importance",
                     value = importance,
                     onChange = { importance = it },
                     modifier = Modifier.padding(horizontal = 16.dp),
                     min = -1,
+                    describe = { snap.settings.levelDescription("importance", it) },
+                )
+                LevelSlider(
+                    label = "Urgency",
+                    value = urgency,
+                    onChange = { urgency = it },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    describe = { snap.settings.levelDescription("urgency", it) },
                 )
                 EffortField(value = effort, options = snap.settings.effortOptions, onChange = { effort = it })
             }

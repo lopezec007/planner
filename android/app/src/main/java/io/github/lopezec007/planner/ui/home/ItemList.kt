@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -74,6 +75,7 @@ import io.github.lopezec007.planner.data.model.Effort
 import io.github.lopezec007.planner.data.model.Group
 import io.github.lopezec007.planner.data.model.Item
 import io.github.lopezec007.planner.data.model.ItemType
+import io.github.lopezec007.planner.data.model.SortSpec
 import io.github.lopezec007.planner.data.model.User
 import io.github.lopezec007.planner.data.repo.Snapshot
 import io.github.lopezec007.planner.data.sync.SyncPhase
@@ -145,6 +147,8 @@ fun ItemList(
     groups: List<Group>,
     snapshot: Snapshot,
     flat: Boolean,
+    grouped: Boolean,       // Flat: each parent's tasks still sit together (false under most sorts)
+    sort: SortSpec,         // the order the groups are in: a change takes the list back to its top
     collapsed: Set<Long>,
     onOpen: (Long) -> Unit,
     onAddTask: (Long) -> Unit,
@@ -163,7 +167,17 @@ fun ItemList(
         }
     }
 
-    val rows = remember(groups, snapshot, flat, collapsed) { buildRows(groups, snapshot, flat, collapsed) }
+    val rows = remember(groups, snapshot, flat, grouped, collapsed) { buildRows(groups, snapshot, flat, grouped, collapsed) }
+    // A new sort starts from the top: the list would otherwise stay on the
+    // row that was first on screen, somewhere in the middle of the new order.
+    val listState = rememberLazyListState()
+    var shownSort by remember { mutableStateOf(sort) }
+    LaunchedEffect(sort) {
+        if (sort != shownSort) {
+            shownSort = sort
+            listState.scrollToItem(0)
+        }
+    }
     val totals = remember(groups) {
         val tasks = groups.flatMap { it.tasks }
         EffortTotals(tasks.size, Effort.sumOpen(tasks), Effort.sum(tasks))
@@ -176,6 +190,7 @@ fun ItemList(
                 EmptyState(snapshot, sync.phase)
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = if (flat) PaddingValues(0.dp) else PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                 ) {
@@ -197,13 +212,18 @@ fun ItemList(
     }
 }
 
-/** The rows in display order: nested, a header plus the tasks of each uncollapsed parent; flat, the tasks only. */
-private fun buildRows(groups: List<Group>, snap: Snapshot, flat: Boolean, collapsed: Set<Long>): List<ListRow> {
+/**
+ * The rows in display order: nested, a header plus the tasks of each
+ * uncollapsed parent; flat, the tasks only, with the heavier rule above the
+ * first task of each parent while the order keeps parents together
+ * ([grouped]; a sorted Flat list arrives as runs, see SortSpec.apply).
+ */
+private fun buildRows(groups: List<Group>, snap: Snapshot, flat: Boolean, grouped: Boolean, collapsed: Set<Long>): List<ListRow> {
     val out = ArrayList<ListRow>()
     for (g in groups) {
         if (flat) {
             g.tasks.forEachIndexed { i, t ->
-                out.add(ListRow.Task(t, g.parent, snap.user(t.assigneeId), snap.isBlocked(t), flat = true, firstOfParent = i == 0, lastOfCard = false))
+                out.add(ListRow.Task(t, g.parent, snap.user(t.assigneeId), snap.isBlocked(t), flat = true, firstOfParent = grouped && i == 0, lastOfCard = false))
             }
             continue
         }
@@ -414,8 +434,8 @@ private fun TaskRow(row: ListRow.Task, settings: AppSettings, onOpen: () -> Unit
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     StatusChip(item.status)
                     row.assignee?.let { UserChip(it, muted = item.isClosed) }
-                    LevelBadge("urgency", item.urgency, settings, item.isClosed)
                     LevelBadge("importance", item.importance, settings, item.isClosed)
+                    LevelBadge("urgency", item.urgency, settings, item.isClosed)
                     EffortBadge(item.effort)
                     EndDateText(item)
                     if (item.attachments.isNotEmpty()) {

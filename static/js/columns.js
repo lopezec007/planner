@@ -3,6 +3,7 @@
 //   COLUMNS                      ordered column definitions
 //   visibleColumns(mode, flat, hidden) -> [name...] of the columns to render
 //   gridTemplate(cols, flat)     the grid-template-columns value for them
+//   minTableWidth(cols, mode, flat)  the least width (px) they can be drawn in
 //   renderColumnsMenu(slot, ctx) ctx = { hidden (Set), flat, enabled, setHidden(names) }
 //
 // The title (and, in Flat, the task title) and the action buttons always
@@ -30,8 +31,8 @@ export const COLUMNS = [
   { name: 'assignee', label: 'Assignee', width: '136px', hidable: true },
   { name: 'start', label: 'Start', width: '150px', hidable: true },
   { name: 'end', label: 'End', width: '150px', hidable: true },
-  { name: 'urgency', label: 'Urgency', width: '44px', hidable: true },
   { name: 'importance', label: 'Importance', width: '44px', hidable: true },
+  { name: 'urgency', label: 'Urgency', width: '44px', hidable: true },
   // Tasks only: a dropdown of the configured durations; parents show the sum
   // of their open tasks (see table.js) and the toolbar the total (app.js).
   { name: 'effort', label: 'Effort', width: '76px', hidable: true },
@@ -72,6 +73,18 @@ export function gridTemplate(names, mode, flat) {
     if (flat && c.flatWidth) return c.flatWidth;
     return c.width;
   }).join(' ');
+}
+
+/** The narrowest these columns can be drawn, in px: the fixed widths plus
+ *  the minimum of each flexible one. Decides how many copies of the table
+ *  fit side by side (table.js tableColumnCount). */
+export function minTableWidth(names, mode, flat) {
+  let total = 0;
+  for (const part of gridTemplate(names, mode, flat).match(/minmax\([^)]*\)|\S+/g) || []) {
+    const m = /^(?:minmax\(\s*)?(\d+(?:\.\d+)?)px/.exec(part);
+    if (m) total += Number(m[1]);
+  }
+  return total;
 }
 
 // ---- toolbar menu ----

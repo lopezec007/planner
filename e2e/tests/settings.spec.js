@@ -107,8 +107,8 @@ test('highlight colours and date windows come from settings', async ({ page, req
 test('urgency and importance have their own colour ramps, with presets', async ({ page, request }) => {
   await page.goto('/');
   const gutters = page.locator('.row.task', { hasText: 'Clean gutters' }); // urgency 7, importance 4
-  await expect(gutters.locator('.num').nth(0).locator('.hl-level')).toHaveCount(1);
-  await expect(gutters.locator('.num').nth(1).locator('.hl-level')).toHaveCount(0);
+  await expect(gutters.locator('input[name=urgency].hl-level')).toHaveCount(1);
+  await expect(gutters.locator('input[name=importance].hl-level')).toHaveCount(0);
 
   // Importance ramp: colour value 4; urgency ramp: clear value 7. They are independent.
   const imp = ['', '', '', '', '#123456', '', '', '', '#f5a524', '#e5484d', '#e5484d'];
@@ -116,8 +116,8 @@ test('urgency and importance have their own colour ramps, with presets', async (
   await request.patch('/api/settings', { data: { importance_colors: JSON.stringify(imp), urgency_colors: JSON.stringify(urg) } });
   await page.reload();
   const g2 = page.locator('.row.task', { hasText: 'Clean gutters' });
-  await expect(g2.locator('.num').nth(0).locator('.hl-level')).toHaveCount(0);
-  const impCell = g2.locator('.num').nth(1).locator('.hl-level');
+  await expect(g2.locator('input[name=urgency].hl-level')).toHaveCount(0);
+  const impCell = g2.locator('input[name=importance].hl-level');
   await expect(impCell).toHaveCount(1);
   expect(await impCell.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgb(18, 52, 86)');
 
@@ -173,8 +173,9 @@ test('default status for new items is a setting that saves and reloads', async (
   await page.goto('/#/settings');
   const sel = page.locator('#setting-default-status');
   await expect(sel).toHaveValue('todo');
-  await expect(sel.locator('option')).toHaveCount(6);
+  await expect(sel.locator('option')).toHaveCount(7);
   await expect(sel.locator('option[value=in-progress]')).toHaveText('In-Progress');
+  await expect(sel.locator('option[value=validating]')).toHaveText('Validating');
   await sel.selectOption('backlog');
   await expect(sel).toHaveValue('backlog');
   await expect.poll(async () => (await (await request.get('/api/settings')).json()).default_status).toBe('backlog');

@@ -28,9 +28,11 @@ const PATHS = {
   // Layout: nested (parent rows with indented tasks) or flat (equal rows).
   nested: '<rect x="1.5" y="1.8" width="13" height="3" rx="0.8"/><rect x="5.5" y="6.5" width="9" height="3" rx="0.8"/><rect x="5.5" y="11.2" width="9" height="3" rx="0.8"/>',
   flat: '<rect x="1.5" y="1.8" width="13" height="3" rx="0.8"/><rect x="1.5" y="6.5" width="13" height="3" rx="0.8"/><rect x="1.5" y="11.2" width="13" height="3" rx="0.8"/>',
-  // Width: wide (arrows out to the edges) or narrow (arrows in to the middle).
+  // Width: wide (arrows out to the edges), narrow (arrows in to the middle).
   wide: '<path d="M8 2v12M5.5 8H1M3.2 5.8L1 8l2.2 2.2M10.5 8H15M12.8 5.8L15 8l-2.2 2.2"/>',
   narrow: '<path d="M8 2v12M1 8h4.5M3.3 5.8L5.5 8l-2.2 2.2M15 8h-4.5M12.7 5.8L10.5 8l2.2 2.2"/>',
+  // Width: several columns (two small tables side by side).
+  multicol: '<rect x="1.5" y="2.5" width="5.5" height="11" rx="1"/><rect x="9" y="2.5" width="5.5" height="11" rx="1"/><path d="M3.3 5.5h1.9M3.3 8h1.9M3.3 10.5h1.9M10.8 5.5h1.9M10.8 8h1.9M10.8 10.5h1.9" stroke-width="1.3"/>',
   // Colours menu: a painter's palette.
   colors: '<path d="M8 1.8a6.2 6.2 0 1 0 0 12.4h1.2a1.6 1.6 0 0 0 1.1-2.7 1.6 1.6 0 0 1 1.2-2.7h1.4A2.4 2.4 0 0 0 14.2 7 6.2 6.2 0 0 0 8 1.8z"/><circle cx="5" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="4.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="11" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="5" cy="9.6" r="1.1" fill="currentColor" stroke="none"/>',
   table: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.2"/><path d="M1.5 6.2h13M1.5 9.8h13M6 2.5v11"/>',

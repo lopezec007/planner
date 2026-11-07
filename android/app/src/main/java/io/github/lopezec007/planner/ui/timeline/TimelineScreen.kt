@@ -101,7 +101,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 @Composable
-fun TimelineScreen(vm: PlannerViewModel, groups: List<Group>, flat: Boolean, onOpen: (Long) -> Unit, modifier: Modifier = Modifier) {
+fun TimelineScreen(vm: PlannerViewModel, groups: List<Group>, flat: Boolean, grouped: Boolean, onOpen: (Long) -> Unit, modifier: Modifier = Modifier) {
     val snap by vm.snapshot.collectAsStateWithLifecycle()
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val barMode = prefs?.barColor ?: ColorMode.ASSIGNEE
@@ -114,7 +114,7 @@ fun TimelineScreen(vm: PlannerViewModel, groups: List<Group>, flat: Boolean, onO
         if (item == null || (item.startDate == p.start && item.endDate == p.end)) pending = null
     }
 
-    val model = remember(snap, groups, barMode, pending, flat) { buildTimelineModel(snap, groups, barMode, pending, flat) }
+    val model = remember(snap, groups, barMode, pending, flat, grouped) { buildTimelineModel(snap, groups, barMode, pending, flat, grouped) }
     val view = remember { TimelineView() }
     val today = remember(snap) { Dates.today() }
     val commit: (Item, LocalDate?, LocalDate?) -> Unit = { item, start, end ->

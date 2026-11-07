@@ -134,8 +134,22 @@
 .dep-chip.closed .dep-key { color: var(--fg-muted); text-decoration: line-through; }
 .dep-remove { border: none; background: transparent; padding: 0 3px; cursor: pointer; color: var(--fg-muted); line-height: 1; font-size: 14px; }
 .dep-remove:hover { color: var(--hl-alert); background: transparent; }
-.dep-add { font-size: 12px; padding: 1px 4px; max-width: 220px; }
-/* The small round "+" that opens the add dropdown (dependencies) or the file
+/* The dependency search box (cells.js itemPicker) and its list of matches,
+   a popup on the body under the box: key in mono, then the title; the
+   highlighted match is what Enter picks. */
+.dep-pick { display: inline-flex; }
+.dep-pick-input { font-size: 12px; padding: 2px 6px; width: 220px; }
+.dep-pick-list {
+  position: fixed; z-index: 60; overflow-y: auto; max-width: min(520px, calc(100vw - 16px));
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); font-size: 12.5px; font-weight: normal; white-space: nowrap;
+}
+.dep-pick-opt { display: flex; gap: 8px; align-items: baseline; padding: 4px 10px; cursor: pointer; }
+.dep-pick-opt.active { background: var(--bg-hover); }
+.dep-pick-key { font-family: var(--mono); font-size: 11.5px; color: var(--fg-muted); flex: none; min-width: 36px; }
+.dep-pick-title { overflow: hidden; text-overflow: ellipsis; }
+.dep-pick-empty, .dep-pick-more { padding: 4px 10px; color: var(--fg-muted); font-style: italic; }
+/* The small round "+" that opens the search box (dependencies) or the file
    picker (attachments). */
 .dep-add-btn, .attach-add {
   flex: 0 0 auto; width: 20px; height: 20px; padding: 0; border-radius: 50%; line-height: 1;
@@ -176,8 +190,11 @@
    of each parent shows where the next one begins. */
 .table.flat .row.task.group-start { border-top: 2px solid var(--border-strong); }
 
-/* ---------- reparent (move a task to another Ongoing/Project) ---------- */
-.reparent-select { width: auto; max-width: 100%; font-size: 12px; padding: 1px 2px; }
+/* ---------- reparent (move a task to another Ongoing/Project): the Move
+   button becomes a compact search box that takes what room the actions
+   cell has (its list of matches is the popup) ---------- */
+.row .actions .dep-pick.compact { flex: 1 1 60px; min-width: 60px; }
+.dep-pick.compact .dep-pick-input { width: 100%; min-width: 0; padding: 1px 4px; }
 
 /* ---------- attachments (expanded row): a header with the "+" button, the
    chips below it, everything left-aligned ---------- */

@@ -3,6 +3,7 @@ package io.github.lopezec007.planner.data.model
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -49,6 +50,20 @@ class FiltersTest {
         assertEquals(1, out.size)
         assertEquals(ongoing.id, out[0].parent.id)
         assertEquals(listOf(todo.id), out[0].tasks.map { it.id })
+    }
+
+    @Test
+    fun validatingIsOpenAndActiveLikeInProgress() {
+        val ongoing = item(ItemType.ONGOING, "Maintenance")
+        val checking = item(ItemType.TASK, "Being checked", parentId = ongoing.id, status = Status.VALIDATING)
+        val waiting = item(ItemType.TASK, "Waits on it", parentId = ongoing.id, blockedBy = listOf(checking.id))
+        val (groups, byId) = groupsOf(ongoing, checking, waiting)
+        assertFalse(Status.VALIDATING.isClosed)
+        assertFalse(checking.isClosed)
+        assertEquals(listOf(checking.id, waiting.id), Preset.ACTIVE.criteria().apply(groups, byId).single().tasks.map { it.id })
+        assertTrue(waiting.isBlocked(byId))   // a validating blocker is still open
+        assertEquals(Status.VALIDATING, Status.fromWire("validating"))
+        assertEquals(Status.VALIDATING, Preset.ACTIVE.criteria().newStatus(Status.VALIDATING))
     }
 
     @Test
@@ -146,10 +161,17 @@ class FiltersTest {
 
     @Test
     fun jsonRoundTripAndPresetDetection() {
-        val c = Criteria(statuses = setOf(Status.TODO, Status.IN_PROGRESS), recentDays = 14, hideEmptyParents = true, owners = setOf("3"), endAfter = LocalDate.of(2026, 1, 2))
+        val c = Criteria(statuses = setOf(Status.TODO, Status.IN_PROGRESS, Status.VALIDATING), recentDays = 14, hideEmptyParents = true, owners = setOf("3"), endAfter = LocalDate.of(2026, 1, 2))
         val back = Criteria.fromJson(c.toJson())
         assertEquals(c, back)
         assertEquals(Preset.ACTIVE, back.preset)
+        // Filters stored before the Validating status: showing In-Progress now shows Validating too,
+        // which keeps a stored Active template the Active template; others are untouched.
+        val old = Criteria.fromJson("""{"statuses":["todo","in-progress"],"recent_days":14,"hide_empty_parents":true}""")
+        assertNull(old.preset)
+        assertEquals(Preset.ACTIVE, old.withValidating().preset)
+        assertEquals(Preset.BACKLOG.criteria(), Preset.BACKLOG.criteria().withValidating())
+        assertSame(back, back.withValidating())
         assertNull(back.copy(owners = emptySet(), recentDays = 0).preset)
         assertEquals(Preset.ACTIVE, Criteria.fromJson(null).preset)
         assertEquals(Preset.ACTIVE, Criteria.fromJson("{not json").preset)

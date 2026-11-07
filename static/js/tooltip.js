@@ -1,5 +1,5 @@
 // Item tooltip: for a task, its Ongoing/Project (its key chip and title, muted) above
-// the key and title; then the urgency/importance/effort/status/assignee/
+// the key and title; then the importance/urgency/effort/status/assignee/
 // blocked line and the rendered description. Importance may be -1 and shows
 // as such; the effort (15m, 2h, see formatEffort) appears only when the task
 // has one. One shared element on the body, placed
@@ -38,8 +38,8 @@ export function itemTooltip() {
     const meta = el('div', { class: 'tip-meta' });
     if (item.type === 'task') {
       meta.append(
-        el('span', {}, el('b', {}, String(urgLevel(item.urgency))), ' urgency'),
-        el('span', {}, el('b', {}, String(impLevel(item.importance))), ' importance'));
+        el('span', {}, el('b', {}, String(impLevel(item.importance))), ' importance'),
+        el('span', {}, el('b', {}, String(urgLevel(item.urgency))), ' urgency'));
       if (item.effort != null && formatEffort(item.effort)) meta.append(el('span', { class: 'tip-effort' }, el('b', {}, formatEffort(item.effort)), ' effort'));
     }
     if (item.status) meta.append(el('span', { class: isClosed(item.status) ? 'tip-closed' : '' }, STATUS_LABEL[item.status] || item.status));

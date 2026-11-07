@@ -421,7 +421,7 @@ func TestSettings(t *testing.T) {
 		t.Fatal("clear failed")
 	}
 	// Every status is an acceptable default for new items.
-	for _, want := range []string{StatusIdea, StatusBacklog, StatusTodo, StatusInProgress, StatusDone, StatusCancelled} {
+	for _, want := range []string{StatusIdea, StatusBacklog, StatusTodo, StatusInProgress, StatusValidating, StatusDone, StatusCancelled} {
 		st, err = s.UpdateSettings(map[string]string{"default_status": want})
 		if err != nil || st["default_status"] != want {
 			t.Fatalf("default_status %q: %v %v", want, st["default_status"], err)
@@ -1146,6 +1146,228 @@ func TestClosedLastPref(t *testing.T) {
 	for _, bad := range []string{"", "2", "true"} {
 		if _, err := s.UpdateUserPrefs(u.ID, map[string]string{"closed_last": bad}); !errors.As(err, &ve) {
 			t.Errorf("closed_last %q: expected validation error, got %v", bad, err)
+		}
+	}
+}
+
+// Validating is an open status like In-Progress: accepted everywhere a status
+// is, recorded in the history, and never "closed".
+func TestValidatingStatus(t *testing.T) {
+	s := openTest(t)
+	o := mustCreate(t, s, TypeOngoing, Patch{Title: str("O")})
+	tk := mustCreate(t, s, TypeTask, Patch{Title: str("T"), ParentID: i64(o.ID), Status: str(StatusValidating), Effort: in(60)})
+	if *tk.Status != StatusValidating || tk.ClosedAt != nil || IsClosed(*tk.Status) {
+		t.Fatalf("created validating: %+v", tk)
+	}
+	p := mustCreate(t, s, TypeProject, Patch{Title: str("P")})
+	p, err := s.UpdateItem(p.ID, Patch{Status: str(StatusValidating)})
+	if err != nil || *p.Status != StatusValidating || p.ClosedAt != nil {
+		t.Fatalf("project to validating: %+v %v", p, err)
+	}
+	if h, _ := s.History(p.ID); len(h) != 2 || h[1].Status != StatusValidating {
+		t.Fatalf("history: %+v", h)
+	}
+	// A validating blocker is still open, so what it blocks stays blocked.
+	other := mustCreate(t, s, TypeTask, Patch{Title: str("other"), ParentID: i64(o.ID)})
+	if err := s.AddDependency(tk.ID, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Its effort option counts as in use (the task is not done or cancelled).
+	var ve *ValidationError
+	if _, err := s.UpdateSettings(map[string]string{"effort_options": `[15,30]`}); !errors.As(err, &ve) || !strings.Contains(err.Error(), tk.Key) {
+		t.Fatalf("removing an option a validating task uses: %v", err)
+	}
+	// Filters may name it.
+	u, _ := s.CreateUser("Evan", "", "")
+	if _, err := s.UpdateUserPrefs(u.ID, map[string]string{"filters": `{"statuses":["todo","in-progress","validating"]}`}); err != nil {
+		t.Fatalf("filters with validating: %v", err)
+	}
+}
+
+// A database from before the Validating status (schema version 6) has its
+// items table rebuilt for the wider CHECK, and stored filters that showed
+// In-Progress show Validating as well, once.
+func TestValidatingMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v6.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u1, _ := s.CreateUser("Active", "", "")
+	u2, _ := s.CreateUser("Backlog", "", "")
+	u3, _ := s.CreateUser("Default", "", "")
+	active := `{"types":[],"statuses":["todo","in-progress"],"recent_days":14,"hide_empty_parents":true,"owner":"","assignee":"","blocked":"","end_after":"","end_before":""}`
+	backlog := `{"types":[],"statuses":["backlog"],"recent_days":0,"hide_empty_parents":false,"owner":"","assignee":"","blocked":"","end_after":"","end_before":""}`
+	if _, err := s.UpdateUserPrefs(u1.ID, map[string]string{"filters": active, "view": "matrix"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateUserPrefs(u2.ID, map[string]string{"filters": backlog}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateUserPrefs(u3.ID, map[string]string{"filters": ""}); err != nil {
+		t.Fatal(err)
+	}
+	o := mustCreate(t, s, TypeOngoing, Patch{Title: str("O")})
+	tk := mustCreate(t, s, TypeTask, Patch{Title: str("T"), ParentID: i64(o.ID), Status: str(StatusInProgress), Importance: in(-1), Effort: in(30)})
+	// Put the items table back to its version 6 text (no 'validating').
+	old := strings.Replace(itemsTable, "'in-progress','validating',", "'in-progress',", 1)
+	old = strings.Replace(old, "CREATE TABLE IF NOT EXISTS items (", "CREATE TABLE items_v6 (", 1)
+	if strings.Contains(old, "validating") || !strings.Contains(old, "items_v6") {
+		t.Fatal("could not derive the version 6 items table")
+	}
+	// Built beside the current table and renamed into its place, so the
+	// tables that reference items(id) keep pointing at it.
+	for _, q := range []string{
+		`PRAGMA foreign_keys = OFF`,
+		old,
+		`INSERT INTO items_v6 SELECT * FROM items`,
+		`DROP TABLE items`,
+		`ALTER TABLE items_v6 RENAME TO items`,
+		`CREATE INDEX items_parent ON items(parent_id)`,
+		`PRAGMA foreign_keys = ON`,
+		`PRAGMA user_version = 6`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE items SET status = 'validating' WHERE id = ?`, tk.ID); err == nil {
+		t.Fatal("the version 6 table should refuse the validating status")
+	}
+	s.Close()
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("open v6 database: %v", err)
+	}
+	defer s.Close()
+	if s.LastBackup == "" {
+		t.Fatal("expected a backup before the rebuild")
+	}
+	var n int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&n); err != nil || n != schemaVersion {
+		t.Fatalf("user_version: %d %v", n, err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("foreign key violations after rebuild: %d %v", n, err)
+	}
+	got, err := s.GetItem(tk.ID)
+	if err != nil || *got.Status != StatusInProgress || *got.Importance != -1 || *got.Effort != 30 || got.Key != tk.Key {
+		t.Fatalf("task after rebuild: %+v %v", got, err)
+	}
+	if got, err = s.UpdateItem(tk.ID, Patch{Status: str(StatusValidating)}); err != nil || *got.Status != StatusValidating {
+		t.Fatalf("validating after rebuild: %+v %v", got, err)
+	}
+	if _, err := s.db.Exec(`UPDATE items SET status = 'testing' WHERE id = ?`, tk.ID); err == nil {
+		t.Fatal("the rebuilt CHECK constraint should refuse an unknown status")
+	}
+	// Filters: In-Progress brought Validating with it, right after it; the
+	// rest of the criteria and the other preferences are as they were.
+	p1, _ := s.UserPrefs(u1.ID)
+	if !strings.Contains(p1["filters"], `"statuses":["todo","in-progress","validating"]`) || !strings.Contains(p1["filters"], `"recent_days":14`) ||
+		!strings.Contains(p1["filters"], `"hide_empty_parents":true`) || p1["view"] != "matrix" {
+		t.Fatalf("active filters after migration: %v", p1["filters"])
+	}
+	if err := validFilters(p1["filters"]); err != nil {
+		t.Fatalf("migrated filters should still validate: %v", err)
+	}
+	if p2, _ := s.UserPrefs(u2.ID); p2["filters"] != backlog {
+		t.Fatalf("backlog filters should be untouched: %v", p2["filters"])
+	}
+	if p3, _ := s.UserPrefs(u3.ID); p3["filters"] != "" {
+		t.Fatalf("empty filters should stay empty: %v", p3["filters"])
+	}
+	// Narrowing the filter again sticks: the widening happens only once.
+	if _, err := s.UpdateUserPrefs(u1.ID, map[string]string{"filters": active}); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if s.LastBackup != "" {
+		t.Fatalf("no backup expected when up to date, got %s", s.LastBackup)
+	}
+	if p1, _ := s.UserPrefs(u1.ID); p1["filters"] != active {
+		t.Fatalf("filters narrowed after the migration should be kept: %v", p1["filters"])
+	}
+}
+
+func TestLevelDescriptions(t *testing.T) {
+	s := openTest(t)
+	st, err := s.Settings()
+	if err != nil || st["urgency_descriptions"] != `{}` || st["importance_descriptions"] != `{"-1":"Not important at all"}` {
+		t.Fatalf("defaults: %v %v", st, err)
+	}
+	st, err = s.UpdateSettings(map[string]string{
+		"urgency_descriptions":    `{"10":"  Drop everything ", "0":"Whenever", "5":"", "7":"   "}`,
+		"importance_descriptions": `{"-1":"Noise", "10":"Life or limb"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Stored trimmed, without blanks, keys sorted.
+	if st["urgency_descriptions"] != `{"0":"Whenever","10":"Drop everything"}` || st["importance_descriptions"] != `{"-1":"Noise","10":"Life or limb"}` {
+		t.Fatalf("stored: %q %q", st["urgency_descriptions"], st["importance_descriptions"])
+	}
+	// Clearing everything is allowed.
+	if st, err = s.UpdateSettings(map[string]string{"importance_descriptions": `{}`}); err != nil || st["importance_descriptions"] != `{}` {
+		t.Fatalf("clear: %v %v", st["importance_descriptions"], err)
+	}
+	long := strings.Repeat("é", MaxLevelDescription)
+	if _, err := s.UpdateSettings(map[string]string{"urgency_descriptions": `{"3":"` + long + `"}`}); err != nil {
+		t.Fatalf("a description of exactly the maximum length: %v", err)
+	}
+	for _, bad := range []map[string]string{
+		{"urgency_descriptions": `{"-1":"x"}`}, // urgency starts at 0
+		{"urgency_descriptions": `{"11":"x"}`},
+		{"importance_descriptions": `{"-2":"x"}`},
+		{"importance_descriptions": `{"1.5":"x"}`},
+		{"importance_descriptions": `{"05":"x"}`},
+		{"importance_descriptions": `{"high":"x"}`},
+		{"urgency_descriptions": `["a","b"]`},
+		{"urgency_descriptions": `null`},
+		{"urgency_descriptions": `{"3":4}`},
+		{"urgency_descriptions": ``},
+		{"urgency_descriptions": `{"3":"` + long + `x"}`},
+	} {
+		var ve *ValidationError
+		if _, err := s.UpdateSettings(bad); !errors.As(err, &ve) {
+			t.Errorf("%v: expected validation error, got %v", bad, err)
+		}
+	}
+}
+
+func TestLayoutPrefs(t *testing.T) {
+	s := openTest(t)
+	u, _ := s.CreateUser("Evan", "", "")
+	prefs, err := s.UserPrefs(u.ID)
+	if err != nil || prefs["multicol"] != "0" || prefs["matrix_hide_closed"] != "0" || prefs["multicol_count"] != "auto" {
+		t.Fatalf("defaults: %v %v", prefs, err)
+	}
+	for _, good := range []string{"2", "6", "auto"} {
+		if prefs, err = s.UpdateUserPrefs(u.ID, map[string]string{"multicol_count": good}); err != nil || prefs["multicol_count"] != good {
+			t.Fatalf("multicol_count %q: %v %v", good, prefs["multicol_count"], err)
+		}
+	}
+	for _, bad := range []string{"", "1", "7", "02", "two"} {
+		var ve *ValidationError
+		if _, err := s.UpdateUserPrefs(u.ID, map[string]string{"multicol_count": bad}); !errors.As(err, &ve) {
+			t.Errorf("multicol_count %q: expected validation error, got %v", bad, err)
+		}
+	}
+	prefs, err = s.UpdateUserPrefs(u.ID, map[string]string{"multicol": "1", "matrix_hide_closed": "1"})
+	if err != nil || prefs["multicol"] != "1" || prefs["matrix_hide_closed"] != "1" || prefs["narrow"] != "0" {
+		t.Fatalf("set: %v %v", prefs, err)
+	}
+	var ve *ValidationError
+	for _, k := range []string{"multicol", "matrix_hide_closed"} {
+		for _, bad := range []string{"", "2", "true"} {
+			if _, err := s.UpdateUserPrefs(u.ID, map[string]string{k: bad}); !errors.As(err, &ve) {
+				t.Errorf("%s %q: expected validation error, got %v", k, bad, err)
+			}
 		}
 	}
 }

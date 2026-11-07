@@ -4,7 +4,8 @@
 //   panel   the right-hand container element
 //   handle  the table handle from renderTable: rows [{ item, el, kind }]
 //   ctx     { rerender(), onChanged(), pointColor, setPointColor(mode),
-//             labelMode, setLabelMode(mode), sizeMode, setSizeMode(mode) }
+//             labelMode, setLabelMode(mode), sizeMode, setSizeMode(mode),
+//             hideClosed, setHideClosed(on) }
 //           pointColor is the point colouring mode (a preference: assignee,
 //           owner or the task's Ongoing/Project, see colors.js) picked with
 //           the dropdown above the plot; setPointColor persists a new one.
@@ -13,6 +14,8 @@
 //           sizeMode ('effort' | 'same', a preference) picks whether dot
 //           size shows effort or every dot is the same size, via the
 //           Effort | Same toggle at the left of the strip.
+//           hideClosed (a preference) leaves done and cancelled tasks out of
+//           the plot; the "Closed" checkbox in the same strip switches it.
 //
 // Classic Eisenhower orientation: urgency runs 10 on the left to 0 on the
 // right, importance -1 at the bottom to 10 at the top (the quadrant midline
@@ -31,6 +34,15 @@
 // "unknown" reads differently from "small". A legend beside the Effort |
 // Same toggle explains the encoding. In the Same mode every dot has the
 // R_SAME radius and nothing marks a missing effort.
+// Done and cancelled tasks are drawn very faintly (matrix.css .pt.closed:
+// they are history, not work to weigh up) and come back to full strength
+// under the pointer; with ctx.hideClosed they are not plotted at all (the
+// list beside the plot still has them).
+//
+// The numbers along each axis and the axis names carry the descriptions
+// given to the urgency and importance values in Settings (levels.js) as
+// mouseover tooltips: a number shows what that value means, the name lists
+// every described value. Described numbers are drawn a little stronger.
 // Tasks sharing the same (urgency, importance) are spread evenly around the
 // grid point, ordered by id, so the layout is deterministic and every point
 // stays visibly attached to its integer value. Labels sit on the outward
@@ -53,6 +65,7 @@ import { el, toast } from './util.js';
 import { itemTooltip } from './tooltip.js';
 import { POINT_COLOR_MODES, parentColor } from './colors.js';
 import { effortOptions, formatEffort } from './effort.js';
+import { LEVEL_NAME, levelTitle, levelLegend } from './levels.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const MAX = 10;
@@ -85,6 +98,28 @@ function svg(tag, attrs = {}, ...children) {
     node.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
   return node;
+}
+
+/** A tick number on an axis: the text over an invisible hit box, with the
+ *  value's description (Settings) as its mouseover tooltip. */
+function axisTick(field, v, x, y, textAttrs) {
+  const meaning = levelTitle(field, v);
+  const w = 22, h = 18;
+  const bx = textAttrs['text-anchor'] === 'end' ? x - w + 4 : x - w / 2;
+  const by = textAttrs['dominant-baseline'] === 'middle' ? y - h / 2 : y - h + 5;
+  return svg('g', { class: `tick${meaning ? ' described' : ''}`, dataset: { axis: field, value: v } },
+    meaning ? svg('title', {}, meaning) : null,
+    svg('rect', { class: 'tick-hit', x: bx, y: by, width: w, height: h }),
+    svg('text', { x, y, ...textAttrs }, v));
+}
+
+/** An axis name with its legend as the mouseover tooltip: every described
+ *  value, or where to describe them when there is none yet. */
+function axisLabel(field, attrs) {
+  const legend = levelLegend(field);
+  const name = LEVEL_NAME[field];
+  const tip = legend ? `${name}\n${legend}` : `${name}: say what each value means under Settings`;
+  return svg('text', { class: `axis-label${legend ? ' described' : ''}`, dataset: { axis: field }, ...attrs }, svg('title', {}, tip), name);
 }
 
 const urgLevel = (n) => (n == null ? 5 : Math.max(0, Math.min(MAX, Number(n))));
@@ -229,8 +264,9 @@ function drawDependencies(pts) {
     if (len < a.r + b.r + MIN_DEP_LEN) continue; // dots overlap: nothing to draw between them
     const ux = dx / len, uy = dy / len;
     const open = !isClosed(blocker.status);
+    const faint = isClosed(blocker.status) || isClosed(blocked.status); // an end that is history
     const line = svg('line', {
-      class: `dep${open ? ' open' : ''}`,
+      class: `dep${open ? ' open' : ''}${faint ? ' faint' : ''}`,
       x1: a.x + ux * a.r, y1: a.y + uy * a.r,
       x2: b.x - ux * b.r, y2: b.y - uy * b.r,
       'marker-end': `url(#${open ? 'mx-dep-arrow-open' : 'mx-dep-arrow'})`,
@@ -272,19 +308,19 @@ function drawPlot(root, rows, width, height, colorMode, labelMode, sizeMode) {
   for (let v = 0; v <= MAX; v++) {
     const major = v === mid || v === 0 || v === MAX;
     grid.append(svg('line', { class: major ? 'major' : '', x1: sx(v), y1: y0, x2: sx(v), y2: y1 }));
-    ticks.append(svg('text', { x: sx(v), y: y0 + 16, 'text-anchor': 'middle' }, v));
+    ticks.append(axisTick('urgency', v, sx(v), y0 + 16, { 'text-anchor': 'middle' }));
   }
   for (let v = IMP_MIN; v <= MAX; v++) {
     const major = v === mid || v === IMP_MIN || v === MAX;
     grid.append(svg('line', { class: major ? 'major' : '', x1: x0, y1: sy(v), x2: x1, y2: sy(v) }));
-    ticks.append(svg('text', { x: x0 - 8, y: sy(v), 'text-anchor': 'end', 'dominant-baseline': 'middle' }, v));
+    ticks.append(axisTick('importance', v, x0 - 8, sy(v), { 'text-anchor': 'end', 'dominant-baseline': 'middle' }));
   }
   node.append(grid, ticks);
 
   const yMid = y1 + halfH;
   node.append(
-    svg('text', { class: 'axis-label', x: sx(mid), y: H - 8, 'text-anchor': 'middle' }, 'Urgency'),
-    svg('text', { class: 'axis-label', x: 14, y: yMid, 'text-anchor': 'middle', transform: `rotate(-90 14 ${yMid})` }, 'Importance'),
+    axisLabel('urgency', { x: sx(mid), y: H - 8, 'text-anchor': 'middle' }),
+    axisLabel('importance', { x: 14, y: yMid, 'text-anchor': 'middle', transform: `rotate(-90 14 ${yMid})` }),
     svg('text', { class: 'quad-label', x: x0 + 6, y: y1 + 14, 'text-anchor': 'start' }, 'urgent & important'),
   );
 
@@ -371,7 +407,10 @@ export function renderMatrix(panel, handle, ctx) {
   if (panel._matrixResize) { window.removeEventListener('resize', panel._matrixResize); panel._matrixResize = null; }
   for (const r of handle.rows) r.el.classList.remove('matrix-hover');
 
-  const rows = handle.rows.filter((r) => r.kind === 'task' && r.item.type === 'task');
+  const hideClosed = !!ctx.hideClosed;
+  const tasks = handle.rows.filter((r) => r.kind === 'task' && r.item.type === 'task');
+  const nClosed = tasks.filter((r) => isClosed(r.item.status)).length;
+  const rows = hideClosed ? tasks.filter((r) => !isClosed(r.item.status)) : tasks;
   const wrap = el('div', { class: 'matrix' });
   panel.replaceChildren(wrap);
 
@@ -398,7 +437,15 @@ export function renderMatrix(panel, handle, ctx) {
     el('span', { class: 'matrix-size-label' }, 'Dot size'),
     toggle('matrix-sizes', 'Dot size', SIZE_MODES, 'size', sizeMode, (m) => ctx.setSizeMode?.(m)),
     sizeLegend);
-  const controls = el('div', { class: 'matrix-controls', role: 'group', 'aria-label': 'Matrix controls' }, sizeGroup, colorSel, labelsGroup);
+  // Done / cancelled tasks: plotted faintly, or (unchecked) not at all.
+  const closedBox = el('input', { type: 'checkbox', id: 'matrix-closed', checked: hideClosed ? null : true, onChange: (e) => ctx.setHideClosed?.(!e.target.checked) });
+  const closedToggle = el('label', {
+    class: 'matrix-closed', for: 'matrix-closed', dataset: { closed: nClosed },
+    title: hideClosed
+      ? `Done and cancelled tasks are hidden${nClosed ? ` (${nClosed} in view)` : ''}: tick to plot them, faintly`
+      : 'Done and cancelled tasks are plotted faintly: untick to leave them out',
+  }, closedBox, 'Closed');
+  const controls = el('div', { class: 'matrix-controls', role: 'group', 'aria-label': 'Matrix controls' }, sizeGroup, closedToggle, colorSel, labelsGroup);
   const plotRoot = el('div', { class: 'matrix-plot-wrap' });
   wrap.append(controls, plotRoot);
   const tip = itemTooltip();

@@ -10,9 +10,9 @@ const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${(n >>
 const rowVar = (loc) => loc.evaluate((e) => e.style.getPropertyValue('--row-color'));
 const bg = (loc) => loc.evaluate((e) => getComputedStyle(e).backgroundColor);
 
-test('Nested/Flat and Wide/Narrow are icon groups like the view switch', async ({ page }) => {
+test('Nested/Flat and Wide/Narrow/Columns are icon groups like the view switch', async ({ page }) => {
   await page.goto('/#/all');
-  for (const [id, hint] of [['btn-nested', /Nested/], ['btn-flat', /Flat/], ['btn-wide', /Wide/], ['btn-narrow', /Narrow/]]) {
+  for (const [id, hint] of [['btn-nested', /Nested/], ['btn-flat', /Flat/], ['btn-wide', /Wide/], ['btn-narrow', /Narrow/], ['btn-multicol', /Columns/]]) {
     const b = page.locator(`#${id}`);
     await expect(b.locator('svg')).toHaveCount(1);
     await expect(b).toHaveAttribute('title', hint);
@@ -22,8 +22,10 @@ test('Nested/Flat and Wide/Narrow are icon groups like the view switch', async (
   // Each pair's two icons are different drawings.
   const svg = (id) => page.locator(`#${id} svg`).evaluate((e) => e.innerHTML);
   expect(await svg('btn-wide')).not.toBe(await svg('btn-narrow'));
+  expect(await svg('btn-multicol')).not.toBe(await svg('btn-narrow'));
+  expect(await svg('btn-multicol')).not.toBe(await svg('btn-columns')); // not the Columns menu's icon
   expect(await svg('btn-nested')).not.toBe(await svg('btn-flat'));
-  await expect(page.locator('.group[aria-label=Width] button')).toHaveCount(2);
+  await expect(page.locator('.group[aria-label=Width] button')).toHaveCount(3);
   await expect(page.locator('#btn-nested')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#btn-flat')).toHaveAttribute('aria-pressed', 'false');
   await page.locator('#btn-flat').click();
@@ -71,12 +73,13 @@ test('dependencies and attachments use small + buttons; attachment chips sit bel
     const addBtn = detail.locator('[data-deps=blocks] .dep-add-btn');
     await expect(addBtn).toHaveText('+');
     expect((await addBtn.boundingBox()).width).toBeLessThan(24);
-    await expect(detail.locator('select.dep-add')).toHaveCount(0);
+    await expect(detail.locator('.dep-pick')).toHaveCount(0);
     await addBtn.click();
-    await expect(detail.locator('[data-deps=blocks] select.dep-add')).toBeVisible();
-    await expect(detail.locator('[data-deps=blocks] select.dep-add option').first()).toHaveText('Choose an item…');
+    await expect(detail.locator('[data-deps=blocks] .dep-pick-input')).toBeFocused();
+    await expect(page.locator('.dep-pick-list .dep-pick-opt').first()).toBeVisible();
     await page.mouse.click(5, 700); // elsewhere: back to the "+"
-    await expect(detail.locator('[data-deps=blocks] select.dep-add')).toHaveCount(0);
+    await expect(detail.locator('[data-deps=blocks] .dep-pick')).toHaveCount(0);
+    await expect(page.locator('.dep-pick-list')).toHaveCount(0);
     await expect(detail.locator('[data-deps=blocks] .dep-add-btn')).toBeVisible();
     // Attachments: header + "+" on one line, the chips below, flush left.
     const files = page.locator(`.attachments[data-attachments="${insurance.id}"]`);
@@ -114,7 +117,7 @@ test('the cycle message is capitalised and stays up longer', async ({ page, requ
   const detail = page.locator(`.row.description[data-desc-for="${budget.id}"]`);
   await detail.locator('[data-deps=blocked_by] .dep-add-btn').click();
   const t0 = Date.now();
-  await detail.locator('[data-deps=blocked_by] select.dep-add').selectOption(String(insurance.id));
+  await page.locator('.dep-pick-list .dep-pick-opt[data-id="' + insurance.id + '"]').click();
   const toast = page.locator('#toast');
   await expect(toast).toContainText(/^That would create a cycle/);
   await page.waitForTimeout(5000 - (Date.now() - t0)); // a normal snack is gone after 4 s
@@ -204,7 +207,7 @@ test('an Ongoing or Project gets a colour of its own from the Colour box of its 
     expect(await rowVar(kRow())).toBe(settings.color_project);
     expect(await rowVar(tRow())).toBe(settings.color_project);
     await expect(kDetail().locator('.color-swatch')).toHaveCSS('background-color', rgb(settings.color_project));
-    await expect(kDetail().locator('.color-swatch')).toHaveAttribute('title', /shows the type colour instead/);
+    await expect(kDetail().locator('.color-swatch')).toHaveAttribute('title', /keeps rows in the type colour, so it shows on the key chip/);
     await expect(kDetail().locator('.color-hex')).toHaveText('#e15759'); // the item's own colour is still named
     await page.reload(); // preferences
     await expect(page.locator('.row.parent', { hasText: 'Kitchen remodel' })).toBeVisible();

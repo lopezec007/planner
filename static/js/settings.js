@@ -1,5 +1,6 @@
 // Settings page: general options (week start, default status, effort
-// options), row colours, highlighting, and the users list.
+// options), row colours, highlighting, what the urgency and importance
+// values mean, and the users list.
 //
 // renderSettings(main, ctx)   ctx = { reload() } reloads state and re-renders.
 // Settings live on the server (GET/PATCH /api/settings) so every browser on
@@ -10,6 +11,10 @@ import { state, STATUSES, STATUS_LABEL } from './state.js';
 import { renderUsers } from './users.js';
 import { el, toast, contrastText } from './util.js';
 import { DEFAULT_EFFORT_OPTIONS, effortOptions, formatEffort, parseEffort } from './effort.js';
+import { levelColor } from './cells.js';
+import { LEVEL_FIELDS, LEVEL_NAME, levelValues, levelDescriptions } from './levels.js';
+
+const MAX_DESCRIPTION = 200; // characters, as the server enforces
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DEFAULT_COLORS = { color_ongoing: '#2a9d8f', color_project: '#5b6cff', color_task: '', color_unassigned: '#9aa3ad', hl_warn_color: '#f5a524', hl_alert_color: '#e5484d' };
@@ -65,8 +70,8 @@ function levelRamp(ctx, key, label) {
 function levelRamps(ctx) {
   return [
     el('p', { class: 'settings-help' }, 'Each urgency and importance value gets its own colour (or none). Pick a preset to fill a ramp, then adjust any value.'),
-    ...levelRamp(ctx, 'urgency_colors', 'Urgency'),
     ...levelRamp(ctx, 'importance_colors', 'Importance'),
+    ...levelRamp(ctx, 'urgency_colors', 'Urgency'),
   ];
 }
 
@@ -190,6 +195,46 @@ function highlightRows(ctx) {
   ];
 }
 
+/** One field's descriptions: a text box per value (importance starts at -1),
+ *  each beside the value drawn in its ramp colour. A box saves when it is
+ *  left or Enter is pressed; emptying it removes the description. */
+function descriptionList(ctx, field) {
+  const name = LEVEL_NAME[field];
+  const current = levelDescriptions(field);
+  const list = el('div', { class: 'level-descriptions', dataset: { descriptions: field } }, el('h3', {}, name));
+  for (const v of levelValues(field)) {
+    const id = `setting-${field}-description-${v}`;
+    const color = levelColor(v, field);
+    const input = el('input', {
+      type: 'text', id, maxlength: MAX_DESCRIPTION, value: current[v] || '', placeholder: 'No description', autocomplete: 'off',
+      'aria-label': `What ${name.toLowerCase()} ${v} means`, dataset: { level: v },
+    });
+    const commit = () => {
+      const text = input.value.trim();
+      if (text === (current[v] || '')) { input.value = text; return; }
+      const next = { ...current };
+      if (text) next[v] = text; else delete next[v];
+      save({ [`${field}_descriptions`]: JSON.stringify(next) }, ctx);
+    };
+    input.addEventListener('change', commit);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      else if (e.key === 'Escape') { input.value = current[v] || ''; input.blur(); }
+    });
+    list.append(el('div', { class: 'level-description' },
+      el('label', { for: id, class: 'ramp-sample ' + (color ? 'hl-level' : 'unset'), style: color ? { background: color, color: contrastText(color) } : {} }, String(v)),
+      input));
+  }
+  return list;
+}
+
+function levelDescriptionBlocks(ctx) {
+  return [
+    el('p', { class: 'settings-help' }, 'Say what each value means (for example "Must happen this week" for urgency 8). The text shows when the pointer rests on a value in the table, and on the numbers and names of the Matrix axes. Leave a box empty for no description.'),
+    el('div', { class: 'level-description-lists' }, ...LEVEL_FIELDS.map((f) => descriptionList(ctx, f))),
+  ];
+}
+
 export function renderSettings(main, ctx) {
   const usersBox = el('div', { id: 'settings-users' });
   main.replaceChildren(
@@ -202,6 +247,7 @@ export function renderSettings(main, ctx) {
       colorRow('color_task', 'Task rows', 'No tint by default.', ctx),
       colorRow('color_unassigned', 'No assignee', 'Matrix points and Timeline bars of items with no assignee.', ctx)),
     section('Highlighting', ...highlightRows(ctx)),
+    section('Urgency and importance descriptions', ...levelDescriptionBlocks(ctx)),
     section('Users', usersBox),
   );
   renderUsers(usersBox, ctx);

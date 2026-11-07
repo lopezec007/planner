@@ -18,7 +18,7 @@ import java.time.LocalDate
 data class Group(val parent: Item, val tasks: List<Item>)
 
 enum class Preset(val title: String, val hint: String, val statuses: Set<Status>, val recentDays: Int, val hideEmptyParents: Boolean) {
-    ACTIVE("Active", "To-Do and In-Progress items, plus anything closed in the last 14 days", setOf(Status.TODO, Status.IN_PROGRESS), 14, true),
+    ACTIVE("Active", "To-Do, In-Progress and Validating items, plus anything closed in the last 14 days", setOf(Status.TODO, Status.IN_PROGRESS, Status.VALIDATING), 14, true),
     BACKLOG("Backlog", "Backlog projects and tasks", setOf(Status.BACKLOG), 0, false),
     IDEAS("Ideas", "Idea projects and tasks", setOf(Status.IDEA), 0, false);
 
@@ -129,6 +129,14 @@ data class Criteria(
         }
         return out
     }
+
+    /**
+     * These criteria as stored before the Validating status existed, brought
+     * up to date: a filter that shows In-Progress shows Validating as well
+     * (which keeps a stored Active template the Active template).
+     */
+    fun withValidating(): Criteria =
+        if (Status.IN_PROGRESS in statuses && Status.VALIDATING !in statuses) copy(statuses = statuses + Status.VALIDATING) else this
 
     fun toJson(): String = json.encodeToString(
         CriteriaJson(

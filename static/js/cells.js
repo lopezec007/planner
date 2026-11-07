@@ -16,6 +16,7 @@ import { el, toast, contrastText } from './util.js';
 import { pin } from './search.js';
 import { itemTooltip } from './tooltip.js';
 import { formatEffort, effortOptions } from './effort.js';
+import { levelTitle } from './levels.js';
 
 // ---------------------------------------------------------------- new-row draft
 
@@ -310,12 +311,14 @@ export function levelColor(n, field) {
 }
 
 /** Urgency / importance: a number input; a single key sets the value
- *  (1-9, 0 = 10, ` = 0; for importance "-" = -1, a task that matters less
- *  than nothing) and saves immediately. Any other printable character is
+ *  (0-9 as themselves, and the "~" key, with or without Shift, for 10; for
+ *  importance "-" = -1, a task that matters less than nothing) and saves
+ *  immediately. Any other printable character is
  *  refused (a number input would otherwise accept e, +, -, . and, in some
  *  browsers, letters); navigation and editing keys pass. Text that arrives
  *  another way (paste, drop, IME) is dropped unless it is a whole value in
- *  the field's range. */
+ *  the field's range. Mouseover shows what the value means when Settings
+ *  describes it (levels.js). */
 export function levelControl(item, field, saver) {
   if (item.type !== 'task') return el('div', { class: 'num' });
   const min = field === 'importance' ? -1 : 0;
@@ -325,18 +328,23 @@ export function levelControl(item, field, saver) {
     value: item[field] ?? '', 'aria-label': field,
   });
   if (color) Object.assign(inp.style, { background: color, color: contrastText(color) });
+  const meaning = levelTitle(field, item[field]);
+  if (meaning) inp.title = meaning;
+  // The value last saved from this control. Compared against instead of the
+  // item it was drawn from: a save redraws the row a moment later, and a key
+  // pressed in between (7, then back to the old 4) must still be saved.
+  let committed = item[field] ?? null;
   const commit = () => {
     const v = inp.value === '' ? null : Number(inp.value);
-    if (v == null || v < min || v > 10) { inp.value = item[field] ?? ''; return; }
-    if (v !== item[field]) saver({ [field]: v });
+    if (v == null || v < min || v > 10) { inp.value = committed ?? ''; return; }
+    if (v !== committed) { committed = v; saver({ [field]: v }); }
   };
   inp.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     let v = null;
-    if (e.key === '`') v = 0;
-    else if (e.key === '0') v = 10;
+    if (e.key === '~' || e.key === '`') v = 10; // the key left of 1, shifted or not
     else if (e.key === '-' && min < 0) v = -1;
-    else if (/^[1-9]$/.test(e.key)) v = Number(e.key);
+    else if (/^[0-9]$/.test(e.key)) v = Number(e.key);
     if (v == null) {
       if (e.key === 'Enter') inp.blur();
       else if (e.key.length === 1) e.preventDefault(); // a printable character that is not a digit
@@ -349,10 +357,10 @@ export function levelControl(item, field, saver) {
   // Pasted or dropped text: keep it only when it is a value on its own.
   const whole = min < 0 ? /^(10|-1|[0-9])$/ : /^(10|[0-9])$/;
   inp.addEventListener('input', () => {
-    if (!whole.test(inp.value)) inp.value = item[field] ?? '';
+    if (!whole.test(inp.value)) inp.value = committed ?? '';
   });
   inp.addEventListener('change', commit);
-  return el('div', { class: 'num' }, inp);
+  return el('div', { class: 'num', title: meaning || null, dataset: { levelField: field } }, inp);
 }
 
 /** Effort (tasks): a dropdown of the configured durations plus "—" for
@@ -459,38 +467,29 @@ export function dependencyPanel(item, ctx) {
       });
       line.append(chip);
     }
-    // A small "+" that becomes the dropdown of candidates when clicked.
+    // A small "+" that becomes a search box when clicked: the candidates
+    // whose key or title contains what is typed are listed beneath it as
+    // the user types (itemPicker).
     const addBtn = el('button', { type: 'button', class: 'dep-add-btn', title: `Add to ${label}…`, 'aria-label': `Add to ${label}` }, '+');
     addBtn.addEventListener('click', () => {
-      const sel = el('select', { class: 'dep-add', 'aria-label': `Add to ${label}` }, el('option', { value: '' }, 'Choose an item…'));
-      for (const c of candidates) {
-        if (ids.includes(c.id)) continue;
-        sel.append(el('option', { value: String(c.id) }, `${c.key} ${c.title}`));
-      }
-      let done = false;
-      const finish = async (save) => {
-        if (done) return;
-        done = true;
-        stopOutside();
-        const v = sel.value ? Number(sel.value) : null;
-        if (!save || v == null) { sel.replaceWith(addBtn); return; }
-        const [a, b] = dir === 'blocked_by' ? [v, item.id] : [item.id, v];
-        try {
-          await api.addDependency(a, b);
-          await ctx.onChanged();
-        } catch (e) {
-          // A rejected cycle needs reading: show it for longer than usual.
-          toast(e.message, 8000);
-          sel.replaceWith(addBtn);
-        }
-      };
-      sel.addEventListener('change', () => finish(true));
-      sel.addEventListener('blur', () => finish(false));
-      sel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
-      const stopOutside = closeOnOutsidePointer(sel, () => finish(false));
-      addBtn.replaceWith(sel);
-      sel.focus();
-      try { sel.showPicker?.(); } catch {}
+      const picker = itemPicker({
+        label: `Add to ${label}`,
+        candidates: candidates.filter((c) => !ids.includes(c.id)),
+        onCancel: () => picker.replaceWith(addBtn),
+        onPick: async (chosen) => {
+          const [a, b] = dir === 'blocked_by' ? [chosen.id, item.id] : [item.id, chosen.id];
+          try {
+            await api.addDependency(a, b);
+            await ctx.onChanged();
+          } catch (e) {
+            // A rejected cycle needs reading: show it for longer than usual.
+            toast(e.message, 8000);
+            picker.replaceWith(addBtn);
+          }
+        },
+      });
+      addBtn.replaceWith(picker);
+      picker.focus();
     });
     line.append(addBtn);
     return line;
@@ -500,6 +499,116 @@ export function dependencyPanel(item, ctx) {
     row('Blocks', item.blocks || [], 'blocks'),
   );
   return panel;
+}
+
+// ---------------------------------------------------------------- item picker
+
+const PICKER_MAX = 40; // matches listed at once; typing more narrows them
+
+/** True when every whitespace-separated term of `query` occurs somewhere in
+ *  the item's key or title (any part, not just the start, case ignored):
+ *  "gut" finds "Clean gutters", "t-1" every key containing it, "fix post"
+ *  the task "Fix fence post". An empty query matches everything. */
+export function itemMatches(item, query) {
+  const hay = `${item.key} ${item.title}`.toLowerCase();
+  return query.toLowerCase().split(/\s+/).filter(Boolean).every((term) => hay.includes(term));
+}
+
+/** A search box that lists the matching `candidates` ({ id, key, title })
+ *  beneath it as the user types, in a popup on the body (so the cell's
+ *  overflow does not clip it). Enter or a click picks the highlighted match
+ *  (the first, until the arrow keys move it); Escape, or a click elsewhere,
+ *  cancels. Returns the box element; call .focus() on it once it is in
+ *  the document. The popup follows the box's position while it is open and
+ *  is kept inside the window. `className` is added to the box (edit.css
+ *  sizes the "compact" one that stands in for a row's Move button) and
+ *  `name` goes on the input. */
+export function itemPicker({ label, candidates, onPick, onCancel, placeholder = 'Type a key or title…', className = '', name = null }) {
+  const input = el('input', {
+    type: 'text', class: 'dep-pick-input', placeholder, autocomplete: 'off', spellcheck: 'false', name,
+    'aria-label': label, role: 'combobox', 'aria-expanded': 'true', 'aria-autocomplete': 'list',
+  });
+  const list = el('div', { class: 'dep-pick-list', role: 'listbox', 'aria-label': label });
+  const box = el('span', { class: `dep-pick ${className}` }, input);
+  let done = false;
+  let shown = [];
+  let active = 0;
+
+  const close = () => {
+    if (done) return;
+    done = true;
+    document.removeEventListener('pointerdown', onDown, true);
+    window.removeEventListener('scroll', place, true);
+    window.removeEventListener('resize', place);
+    list.remove();
+  };
+  const cancel = () => { if (done) return; close(); onCancel(); };
+  const pick = (c) => { if (done) return; close(); onPick(c); };
+
+  function place() {
+    const r = input.getBoundingClientRect();
+    list.style.minWidth = `${Math.max(240, r.width)}px`;
+    const below = window.innerHeight - r.bottom - 8;
+    list.style.maxHeight = `${Math.max(120, Math.min(320, below))}px`;
+    list.style.top = `${Math.round(r.bottom + 2)}px`;
+    // Under the box's left edge, pulled left when it would run off the window.
+    list.style.left = `${Math.round(r.left)}px`;
+    const over = list.getBoundingClientRect().right - (window.innerWidth - 8);
+    if (over > 0) list.style.left = `${Math.max(8, Math.round(r.left - over))}px`;
+  }
+
+  function render() {
+    const q = input.value;
+    shown = candidates.filter((c) => itemMatches(c, q));
+    const over = shown.length - PICKER_MAX;
+    if (over > 0) shown = shown.slice(0, PICKER_MAX);
+    active = Math.min(active, Math.max(0, shown.length - 1));
+    list.replaceChildren();
+    if (!shown.length) {
+      list.append(el('div', { class: 'dep-pick-empty' }, q.trim() ? 'No item matches' : 'Nothing to add'));
+    }
+    shown.forEach((c, i) => {
+      const opt = el('div', {
+        class: `dep-pick-opt${i === active ? ' active' : ''}`, role: 'option', 'aria-selected': i === active ? 'true' : 'false',
+        dataset: { id: c.id }, id: `dep-pick-opt-${c.id}`,
+      }, el('span', { class: 'dep-pick-key' }, c.key), el('span', { class: 'dep-pick-title' }, c.title));
+      // pointerdown would move the focus off the box (and close it): the
+      // click that follows is what picks.
+      opt.addEventListener('pointerdown', (e) => e.preventDefault());
+      opt.addEventListener('click', () => pick(c));
+      opt.addEventListener('pointermove', () => { if (active !== i) { active = i; render(); } });
+      list.append(opt);
+    });
+    if (over > 0) list.append(el('div', { class: 'dep-pick-more' }, `${over} more: keep typing to narrow the list`));
+    input.setAttribute('aria-activedescendant', shown[active] ? `dep-pick-opt-${shown[active].id}` : '');
+    list.querySelector('.dep-pick-opt.active')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  input.addEventListener('input', () => { active = 0; render(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (shown.length) { active = (active + 1) % shown.length; render(); } }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (shown.length) { active = (active - 1 + shown.length) % shown.length; render(); } }
+    else if (e.key === 'Enter') { e.preventDefault(); if (shown[active]) pick(shown[active]); }
+    else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    else if (e.key === 'Tab') cancel();
+  });
+  // A click anywhere but the box or its list cancels (the list is on the
+  // body, so a blur handler alone would close it under the pointer). The
+  // listener goes on when the box is shown, from the click that opens it,
+  // whose own pointerdown has already passed (a deferred registration can
+  // come too late: a hidden page's timers are throttled).
+  const onDown = (e) => { if (!box.contains(e.target) && !list.contains(e.target)) cancel(); };
+
+  box.focus = () => {
+    document.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    document.body.append(list);
+    render();
+    place();
+    input.focus();
+  };
+  return box;
 }
 
 // ---------------------------------------------------------------- attachments

@@ -20,7 +20,7 @@ The technology stack (language, framework, libraries, etc.) is at the implemente
 ### Users
 - Users are managed in-app.  There is no authentication.
 - Each user is also an "account": a menu in the title bar selects who is using the browser (no password).  Per-user
-  preferences (view, Flat, Narrow, collapsed parents, sort, blocked-last, hidden columns, the filter settings,
+  preferences (view, Flat, the table width (Wide, Narrow or Columns), collapsed parents, sort, blocked-last, hidden columns, the filter settings,
   timeline bar and matrix point colouring, and the row colour-coding choices) are stored on the server with the
   user so they follow them to any browser.  The menu offers only users: a browser that has not picked one (or
   whose user was deleted) is given the first user and remembers it; only while no user exists at all does the
@@ -49,8 +49,12 @@ The following statuses apply to "Project" and "Task" (this concept isn't applica
 - Backlog
 - To-Do
 - In-Progress
+- Validating
 - Done
 - Cancelled
+
+"Validating" is work that is finished but still being checked.  It behaves exactly like "In-Progress": it is an
+open status (not closed), the "Active" template shows it, and an item blocked by a validating item stays blocked.
 
 A global setting chooses the status new projects and tasks start in (To-Do by default); when the filters in
 effect would hide that status, a new item instead starts in a status they show, so it does not vanish on
@@ -84,6 +88,11 @@ Projects and Tasks should additionally have:
 And tasks should additionally have:
 - Urgency: byte w/ acceptable values 0-10, defaulted to 5
 - Importance: byte w/ acceptable values -1 to 10, defaulted to 5 (-1 is "not important at all")
+
+  Each urgency and each importance value can be given a description in Settings (at most 200 characters; none by
+  default except importance -1, "Not important at all").  The description of a task's value is shown on mouseover
+  of that value in the table (Nested and Flat); in the Matrix, each number along an axis shows its description on
+  mouseover and each axis name lists every described value.
 - Effort: an optional duration chosen from a global list of options (by default 15m, 30m, 1h, 2h, 4h, 8h, 16h,
   32h and 64h).  The list is edited in Settings; an option still used by any task that is not done or
   cancelled cannot be removed, while done and cancelled tasks keep a removed value.  Parent rows show the sum of
@@ -100,8 +109,9 @@ timezone of the user's device (the browser), not the server's, in case the serve
 Any Project or Task can be blocked by any number of other Projects or Tasks, and can block any number of them
 (Ongoing items take no part).  Two items cannot block each other, directly or through a chain of dependencies.
 An item that is blocked by another item whose status is not "Done" or "Cancelled" has its "Blocked" state locked
-to true.  Dependencies are viewed and edited to the right of the description in the expanded row, with dropdowns
-listing item key and title; the lists show only item keys, with the full item (title, status, description) in a
+to true.  Dependencies are viewed and edited to the right of the description in the expanded row; an item is added
+through a search box that lists, as the user types, the items whose key or title contains the text (any part of
+it, every typed word) with key and title; the lists show only item keys, with the full item (title, status, description) in a
 tooltip on mouseover as in the Matrix.  Attachments sit to the right of the dependencies.  The Timeline draws a line from the blocking item's end to the blocked item's start;
 the Matrix draws subtle lines with arrows pointing from blocker to blocked.
 
@@ -157,7 +167,7 @@ server (1 MiB per pane).
 
 #### Active (default template)
 This should display:
-- All to-do and in-progress items
+- All to-do, in-progress and validating items
 - All done and cancelled items that were marked "done" or "cancelled" within the last two weeks
 - Their parent "Ongoing"/"Project" rows; parents with no such tasks are hidden
 
@@ -169,7 +179,7 @@ The items should be presented as a hierarchical list of ongoing/project w/ child
 project) and task rows use entirely different column sets.  Columns for parents must align with the columns of other
 parents, and columns for tasks must align with the task columns under other parents.
 
-All fields except description should be shown as columns, with the following exceptions:
+All fields except description should be shown as columns (Importance before Urgency), with the following exceptions:
 - "Blocked" is not a column; it is shown only via the row mask described below.
 - "Start Date Firm" and "End Date Firm" are not columns; each is shown only as an icon on its corresponding date.
 
@@ -180,7 +190,7 @@ a caret at the far left of each "Ongoing"/"Project" row collapses its tasks (rem
 count shown after a collapsed parent's title is of the tasks that pass the current filters, and a second pair of
 buttons at the top collapses or expands the tasks of every parent at once.
 
-A "Nested / Flat" icon pair (next to the "Wide / Narrow" pair, both like the view switch) chooses the layout:
+A "Nested / Flat" icon pair (next to the "Wide / Narrow / Columns" group, both like the view switch) chooses the layout:
 "Flat" removes the "Ongoing"/"Project" rows and shows that information within each task row instead, in the column
 order: Ongoing/Project key, task key, Ongoing/Project title, task title, and then the remaining task columns.
 
@@ -194,6 +204,16 @@ the header and from the other blocks by a small gap with nothing drawn across it
 belong to which parent; in Flat the table is one frame and a heavier rule sits above the first task of each
 parent while tasks are grouped.  The Timeline beside the nested table is framed the same way: its date axis and
 each group are outlined separately and nothing is drawn across the gaps.
+
+"Wide / Narrow / Columns" chooses the table's width (a per-user preference, Table view only): the whole window,
+a capped width, or several columns: when the window is wide enough for two or more copies of the table (each at
+least the minimum width of the visible columns plus some slack), the rows continue in a second, third, ... column
+beside the first, as many as fit, or the number the user picks beside the choice (2 to 6, as far as the window has
+room for them with each column at the bare minimum width).  Each column has its own header row (they stay under the title bar together),
+the columns are balanced in height, and an "Ongoing"/"Project" with its tasks and expanded rows is never split
+between columns (in Flat, a task and its expanded row).  On a window with room for one column the table is the
+ordinary one; the number of columns follows the window as it is resized.  Editing, sorting and drag-and-drop work
+across the columns as in the single table.
 
 The order of items is user-specified via drag-and-drop of a handle at the far right of the row (after the
 Delete button), and the order is persisted.  In Flat, dragging only reorders a task among its own parent's tasks
@@ -217,7 +237,8 @@ are icons with mouseover descriptions.
 - Every "Ongoing" and "Project" row has an "Add task" button that adds a blank child task row in the same manner.
 - There is no separate edit mode: to edit a field the user simply clicks into it, and the change is saved
   immediately.  The toggle before a date shows "~" while the date is approximate and a pin icon once it is firm;
-  clicking it switches between the two.  The urgency and importance fields accept digits only.
+  clicking it switches between the two.  The urgency and importance fields accept digits only: a single key sets
+  the value (0-9 for themselves, the "~" key for 10 and, for importance, "-" for -1).
 - A new row is tinted exactly like its saved neighbours (including its parent's colour when tasks are coloured
   by parent) and marked as unsaved by an accent bar at its left.
 - Each row offers a "Delete" option (see Deletion above).
@@ -255,13 +276,16 @@ scale from the smallest to the largest configured option, with a clear differenc
 largest; in that mode a task without an effort is drawn as a hollow dot and a legend shows the two sizes.
 Mousing-over a point should display its title and description.  A toggle
 above the plot (a per-user preference) labels the points with the task key or with its title.  The plot keeps its
-place in the viewport while the list beside it scrolls.
+place in the viewport while the list beside it scrolls.  "Done" and "Cancelled" tasks are drawn very faintly (at
+full strength while under the pointer), and a "Closed" checkbox above the plot (a per-user preference) leaves them
+out of the plot altogether.
 
 ##### Highlighting
-The key of every "Ongoing" and "Project" row is a rounded chip in that type's colour from Settings, with a type
-glyph (a loop for "Ongoing", a flag for "Project"), shown whatever the row's own tint and the user's colour
-preferences, so the type of a parent is always obvious; task keys are plain text.  The same chip names a task's
-parent in the Timeline and Matrix tooltips.
+The key of every "Ongoing" and "Project" row is a rounded chip with a type glyph (a loop for "Ongoing", a flag
+for "Project"), so the type of a parent is always obvious; task keys are plain text.  The chip is in that type's
+colour from Settings, except when the user has the "Ongoing"/"Project" rows coloured by type (see below): then the
+chip carries the item's own colour when it has one, so the row shows the type and the chip the item.  The same
+chip names a task's parent in the Timeline and Matrix tooltips.
 
 Every "Ongoing" and "Project" may be given a colour of its own (a "Colour" box in its expanded row opens a palette,
 a custom colour, or back to none); the colour is stored with the item and shared by everyone.  How it shows is per
@@ -326,13 +350,19 @@ A phone client for the same server, kept in `android/` of this repository and bu
   tasks, and a strip above the list the count and effort of all visible tasks.  Scrolling must stay smooth: one
   lazy item per row, no per-row work in composition.  New items take the default status from Settings under the same filter rule as the web
   UI.  A detail screen edits every field in place with no edit mode, and shows dependencies, attachments and
-  the status history.
+  the status history; under the urgency and importance sliders it shows the description of the chosen value.
+  Sorting as in the web UI, from a Sort sheet: any number of columns in the order they are tapped (a tap adds a
+  column, a second reverses it, a third removes it; Urgency and Importance start descending), "User-defined", and
+  "blocked items last" / "done and cancelled items last".  Nested sorts the parents and the tasks within each;
+  Flat sorts every task together and can also sort by the Ongoing/Project.  The sort is a phone preference and
+  also orders the Timeline's rows.
 - Scratch pads: the shared pad and the account's own pad, monospaced and editable with a wrap toggle, cached on
   the phone and saved through the offline queue (one queued write per pad), refreshed on open and on every sync;
   a remote change never replaces text being typed.
 - Timeline and Matrix: full-screen versions of the web views (no adjacent table), with the same drawing rules,
   colouring modes, zoom/pan, and drag editing (including the importance range of -1 to 10, effort-scaled
-  dots and the Dot size switch).  In the Matrix, tapping the selected task's title opens it.
+  dots, the Dot size switch, and the very faint done/cancelled tasks with a "Closed" switch to leave them out).
+  In the Matrix, tapping the selected task's title opens it.
 - Attachments: files and photos from the device, and photos taken with the camera.
 - Settings: server and account, sync status and errors, notification time, users, app settings including the
   effort options (with the same removal guard as the web UI).

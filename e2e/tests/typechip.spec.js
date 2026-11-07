@@ -1,16 +1,17 @@
 import { test, expect } from '@playwright/test';
 
-// Ongoing and Project keys are chips in their type colour (with a type
-// glyph), whatever tint the row has, so the two kinds of parent are told
-// apart even when both rows carry colours of their own; task keys stay
-// plain text.
+// Ongoing and Project keys are chips with a type glyph, so the two kinds of
+// parent are told apart even when both rows carry colours of their own. The
+// chip is in the type colour while rows show the items' own colours; when
+// the Colours menu colours rows by type instead, the chip is what shows the
+// item's own colour. Task keys stay plain text.
 
 const byTitle = async (request, title) => (await (await request.get('/api/items')).json()).find((i) => i.title === title);
 const rgb = (hex) => { const n = parseInt(hex.slice(1), 16); return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`; };
 const rowVar = (loc) => loc.evaluate((e) => e.style.getPropertyValue('--row-color'));
 const bg = (loc) => loc.evaluate((e) => getComputedStyle(e).backgroundColor);
 
-/** The chip is one of the two type colours, carries the matching glyph and the key, and fits inside its cell. */
+/** The chip is in the given colour (a type colour, or the item's own), carries the type's glyph and the key, and fits inside its cell. */
 async function expectChip(chip, { type, color, key }) {
   await expect(chip).toHaveCount(1);
   await expect(chip).toHaveAttribute('data-type', type);
@@ -55,17 +56,42 @@ test('Ongoing and Project keys are type-coloured chips with a glyph, in Nested, 
     expect(parseFloat(await kRow().locator('.type-chip').evaluate((e) => getComputedStyle(e).opacity))).toBe(1);
 
     // The chip keeps the type colour when the parent has a colour of its own
-    // (the row is tinted with it) and when the Colours menu asks for the type colour on rows.
+    // and the row is tinted with it...
     await request.patch(`/api/items/${kitchen.id}`, { data: { color: '#e15759' } });
     await page.reload();
     await expect(kRow()).toBeVisible();
     expect(await rowVar(kRow())).toBe('#e15759');
     await expectChip(kRow().locator('.key .type-chip'), project);
+    await expect(kRow().locator('.key .type-chip')).toHaveAttribute('data-chip-color', 'type');
+    // ...and swaps with the row when the Colours menu asks for the type colour
+    // on rows: the row turns to the type colour, the chip to the item's own
+    // (with a text colour that contrasts with it). The glyph still tells the type.
+    const own = { ...project, color: '#e15759' };
     await page.locator('#btn-colors').click();
+    await expect(page.locator('#colors-panel')).toContainText('their own colour on the key chip');
     await page.locator('#colors-panel input[name=parent-colors][value=type]').check();
     expect(await rowVar(kRow())).toBe(settings.color_project);
-    await expectChip(kRow().locator('.key .type-chip'), project);
+    await expectChip(kRow().locator('.key .type-chip'), own);
+    await expect(kRow().locator('.key .type-chip')).toHaveAttribute('data-chip-color', 'own');
+    await expect(kRow().locator('.key .type-chip')).toHaveCSS('color', 'rgb(255, 255, 255)');
+    // A parent without a colour of its own keeps the type colour on both.
+    expect(await rowVar(mRow())).toBe(settings.color_ongoing);
+    await expectChip(mRow().locator('.key .type-chip'), ongoing);
+    await expect(mRow().locator('.key .type-chip')).toHaveAttribute('data-chip-color', 'type');
+    // The same chip in Flat's parent column and in the tooltips.
+    await page.keyboard.press('Escape');
+    await page.locator('#btn-flat').click();
+    await expectChip(tRow().locator('.key.parent-ref .type-chip'), own);
+    await page.locator('button[data-view=matrix]').click();
+    const probe = await byTitle(request, 'Order countertops');
+    await page.locator(`.matrix-plot .pt[data-key="${probe.key}"]`).hover();
+    await expect(page.locator('.item-tip .tip-parent .type-chip')).toHaveCSS('background-color', rgb('#e15759'));
+    await page.mouse.move(5, 5);
+    await page.locator('button[data-view=table]').click();
+    await page.locator('#btn-nested').click();
+    await page.locator('#btn-colors').click();
     await page.locator('#colors-panel input[name=parent-colors][value=custom]').check();
+    await expectChip(kRow().locator('.key .type-chip'), project); // back to the type colour
     await page.locator('#colors-panel input[name=task-colors][value=parent]').check();
     expect(await rowVar(tRow())).toBe('#e15759');
     await expect(page.locator('.row.task .type-chip')).toHaveCount(0); // still no chip on task keys

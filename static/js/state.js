@@ -32,9 +32,11 @@ export async function load() {
   return state;
 }
 
-export const STATUSES = ['idea', 'backlog', 'todo', 'in-progress', 'done', 'cancelled'];
+// In display (and sort) order. Validating is work that is finished but still
+// being checked: open in every respect, exactly like In-Progress.
+export const STATUSES = ['idea', 'backlog', 'todo', 'in-progress', 'validating', 'done', 'cancelled'];
 export const STATUS_LABEL = {
-  idea: 'Idea', backlog: 'Backlog', todo: 'To-Do', 'in-progress': 'In-Progress',
+  idea: 'Idea', backlog: 'Backlog', todo: 'To-Do', 'in-progress': 'In-Progress', validating: 'Validating',
   done: 'Done', cancelled: 'Cancelled',
 };
 export const isClosed = (status) => status === 'done' || status === 'cancelled';

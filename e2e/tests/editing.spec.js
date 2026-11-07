@@ -149,23 +149,28 @@ test('Click-to-edit every field type on a task', async ({ page, request }) => {
   await r2.locator('.date-text[data-field=end_date]').click();
   await r2.locator('input[name=end_date]').fill(ymd(2));
   await expect(r2.locator('.date-text[data-field=end_date]')).toHaveClass(/hl-warn/); // within a week
-  // Urgency / importance single keys: 9, then ` -> 0, then 0 -> 10, then 2.
-  // Each key saves at once; wait for the save (and the re-render it causes)
-  // before the next key so the presses do not race each other.
+  // Urgency / importance single keys: 9, then 0 -> 0, then ~ -> 10 (the same
+  // key unshifted, `, too), then 2.
+  // Each key saves at once and the save redraws the row. The next key must
+  // wait for the redraw, not just the save: a key sent to the old input in
+  // the moment it is replaced goes nowhere (a real keyboard cannot do that;
+  // the driver's focus-then-type can). So each press waits until the input
+  // it pressed is out of the document.
   const saved = async (field, v) => expect.poll(async () => (await byTitle(request, 'E2E Task A2'))[field]).toBe(v);
-  await r2.locator('input[name=urgency]').press('9');
-  await saved('urgency', 9);
-  await expect(r2.locator('input[name=urgency]')).toHaveValue('9');
+  const pressLevel = async (field, key, v) => {
+    const old = await r2.locator(`input[name=${field}]`).elementHandle();
+    await old.press(key);
+    await expect.poll(async () => (await byTitle(request, 'E2E Task A2'))[field]).toBe(v);
+    await expect.poll(() => old.evaluate((e) => e.isConnected)).toBe(false);
+    await expect(r2.locator(`input[name=${field}]`)).toHaveValue(String(v));
+  };
+  await pressLevel('urgency', '9', 9);
   await expect(r2.locator('input[name=urgency]')).toHaveClass(/hl-level/);
-  await r2.locator('input[name=importance]').press('`');
-  await saved('importance', 0);
-  await expect(r2.locator('input[name=importance]')).toHaveValue('0');
-  await r2.locator('input[name=importance]').press('0');
-  await saved('importance', 10);
-  await expect(r2.locator('input[name=importance]')).toHaveValue('10');
-  await r2.locator('input[name=importance]').press('2');
-  await saved('importance', 2);
-  await expect(r2.locator('input[name=importance]')).toHaveValue('2');
+  await pressLevel('importance', '0', 0);
+  await pressLevel('importance', '~', 10);
+  await pressLevel('importance', '4', 4);
+  await pressLevel('importance', '`', 10);
+  await pressLevel('importance', '2', 2);
   // Blocked.
   await r2.locator('input[name=blocked]').check();
   await expect(r2).toHaveClass(/blocked/);
@@ -246,7 +251,7 @@ test('Dependencies: add, lock Blocked, reject cycles, remove', async ({ page, re
   // Clean gutters (todo, open) blocks E2E Task A2.
   const gutters = await byTitle(request, 'Clean gutters');
   await detail.locator('[data-deps=blocked_by] .dep-add-btn').click();
-  await detail.locator('[data-deps=blocked_by] select.dep-add').selectOption(String(gutters.id));
+  await page.locator('.dep-pick-list .dep-pick-opt[data-id="' + gutters.id + '"]').click();
   const chip = detailOf(page, taskRow(page, 'E2E Task A2')).locator(`[data-deps=blocked_by] .dep-chip.open[data-id="${gutters.id}"]`);
   await expect(chip.locator('.dep-key')).toHaveText(gutters.key); // key only; the rest is in the tooltip
   await chip.hover();
@@ -267,7 +272,7 @@ test('Dependencies: add, lock Blocked, reject cycles, remove', async ({ page, re
   await expect(gd.locator(`[data-deps=blocks] .dep-chip[data-id="${(await byTitle(request, 'E2E Task A2')).id}"]`)).toBeVisible();
   const a2id = (await byTitle(request, 'E2E Task A2')).id;
   await gd.locator('[data-deps=blocked_by] .dep-add-btn').click();
-  await gd.locator('[data-deps=blocked_by] select.dep-add').selectOption(String(a2id));
+  await page.locator('.dep-pick-list .dep-pick-opt[data-id="' + a2id + '"]').click();
   await expect(page.locator('#toast')).toContainText('That would create a cycle');
 
   // A closed blocker does not lock: E2E Task B (done) blocks A2 too.
@@ -276,7 +281,7 @@ test('Dependencies: add, lock Blocked, reject cycles, remove', async ({ page, re
   const bid = (await byTitle(request, 'E2E Task B')).id;
   detail = detailOf(page, taskRow(page, 'E2E Task A2'));
   await detail.locator('[data-deps=blocked_by] .dep-add-btn').click();
-  await detail.locator('[data-deps=blocked_by] select.dep-add').selectOption(String(bid));
+  await page.locator('.dep-pick-list .dep-pick-opt[data-id="' + bid + '"]').click();
   await expect(detailOf(page, taskRow(page, 'E2E Task A2')).locator(`[data-deps=blocked_by] .dep-chip.closed[data-id="${(await byTitle(request, 'E2E Task B')).id}"]`)).toBeVisible();
   // Remove the open blocker: unlocked again (the closed one remains).
   detail = detailOf(page, taskRow(page, 'E2E Task A2'));

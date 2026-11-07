@@ -278,6 +278,49 @@ test('closed and blocked tasks are visually distinguished; assignee colour appli
   await expect(page.locator('.matrix-plot .pt[data-key="T-9"] .label')).toHaveText('T-9');
 });
 
+test('done and cancelled tasks are very faint, come back under the pointer, and can be left out of the plot', async ({ page }) => {
+  await openMatrix(page);
+  const closed = page.locator('.matrix-plot .pt.closed');
+  const nAll = await page.locator('.matrix-plot .pt').count();
+  const nClosed = await closed.count();
+  expect(nClosed).toBeGreaterThanOrEqual(2);
+  const opacity = (loc) => loc.evaluate((e) => parseFloat(getComputedStyle(e).opacity));
+  // Much fainter than a blocked point (0.55), label included; open points are untouched.
+  const done = page.locator('.matrix-plot .pt[data-key="T-8"]');
+  expect(await opacity(done.locator('.dot'))).toBeLessThan(0.25);
+  expect(await opacity(done.locator('.label'))).toBeLessThan(0.4);
+  expect(await opacity(page.locator('.matrix-plot .pt[data-key="T-6"] .dot'))).toBeGreaterThan(0.5); // blocked
+  expect(await opacity(page.locator('.matrix-plot .pt[data-key="T-9"] .dot'))).toBe(1);
+  // Under the pointer it is as strong as any other, and its tooltip shows.
+  await done.locator('.dot').hover();
+  await expect(page.locator('.item-tip')).toBeVisible();
+  await expect.poll(() => opacity(done.locator('.dot'))).toBe(1);
+  await page.mouse.move(5, 5);
+
+  // "Closed" is ticked by default; unticking leaves them out of the plot only.
+  const box = page.locator('#matrix-closed');
+  await expect(box).toBeChecked();
+  await expect(page.locator('.matrix-closed')).toHaveAttribute('title', /plotted faintly/);
+  const rows = await page.locator('.row[data-id].task').count();
+  await box.uncheck();
+  await expect(page.locator('.matrix-plot .pt.closed')).toHaveCount(0);
+  await expect(page.locator('.matrix-plot .pt')).toHaveCount(nAll - nClosed);
+  await expect(page.locator('.row[data-id].task')).toHaveCount(rows); // the list still has them
+  await expect(page.locator('.row.task.closed').first()).toBeVisible();
+  await expect(page.locator('#matrix-closed')).not.toBeChecked();
+  await expect(page.locator('.matrix-closed')).toHaveAttribute('title', new RegExp(`hidden \\(${nClosed} in view\\)`));
+  // Hovering a closed task's row is harmless when it has no point.
+  await page.locator('.row.task.closed').first().hover();
+  // A preference: it survives a reload.
+  await page.reload();
+  await expect(page.locator('.matrix-plot')).toBeVisible();
+  await expect(page.locator('#matrix-closed')).not.toBeChecked();
+  await expect(page.locator('.matrix-plot .pt.closed')).toHaveCount(0);
+  await page.locator('#matrix-closed').check();
+  await expect(page.locator('.matrix-plot .pt')).toHaveCount(nAll);
+  await expect(page.locator('.matrix-plot .pt.closed')).toHaveCount(nClosed);
+});
+
 test('matrix view on backlog and ideas pages shows only those tasks', async ({ page }) => {
   await openMatrix(page, '/#/backlog');
   const n = await page.locator('.row[data-id].task').count();
@@ -688,7 +731,8 @@ test('the importance axis reaches -1: a point dragged to the bottom gets importa
     await after.hover();
     const tip = page.locator('.item-tip');
     await expect(tip).toContainText('Clean gutters');
-    await expect(tip.locator('.tip-meta span').nth(1)).toHaveText('-1 importance');
+    await expect(tip.locator('.tip-meta span').nth(0)).toHaveText('-1 importance'); // importance comes first, as in the table
+    await expect(tip.locator('.tip-meta span').nth(1)).toHaveText('7 urgency');
     // And back up: dragging above the frame's top clamps to 10.
     const d2 = await after.boundingBox();
     await page.mouse.move(d2.x + d2.width / 2, d2.y + d2.height / 2);

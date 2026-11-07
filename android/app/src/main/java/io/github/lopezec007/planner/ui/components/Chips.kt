@@ -78,6 +78,7 @@ fun StatusChip(status: Status?, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
     val (bg, fg) = when (status) {
         Status.IN_PROGRESS -> scheme.primaryContainer to scheme.onPrimaryContainer
+        Status.VALIDATING -> scheme.tertiaryContainer to scheme.onTertiaryContainer
         Status.TODO -> scheme.secondaryContainer to scheme.onSecondaryContainer
         Status.DONE, Status.CANCELLED -> scheme.surfaceVariant to scheme.onSurfaceVariant.copy(alpha = 0.7f)
         else -> scheme.surfaceVariant to scheme.onSurfaceVariant

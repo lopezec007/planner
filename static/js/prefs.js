@@ -25,6 +25,8 @@ import { toast } from './util.js';
 export const PREF_DEFAULTS = {
   view: 'table',          // table | timeline | matrix
   narrow: '0',            // 0 | 1: constrain the table width on wide screens
+  multicol: '0',          // 0 | 1: the table continues in further columns beside the first when the window has room
+  multicol_count: 'auto', // how many: auto (as many as fit) | 2..6 (as far as the window has room for them)
   flat: '0',              // 0 | 1: tasks only, parent key/title as columns
   collapsed: '[]',        // JSON array of parent ids whose tasks are hidden
   sort: '[]',             // JSON array of { key, dir } (empty = user-defined order)
@@ -40,6 +42,7 @@ export const PREF_DEFAULTS = {
   filters: '',             // JSON of the Filters panel criteria (search.js), '' = the Active template
   matrix_labels: 'key',    // Matrix point labels: key | title
   matrix_size: 'effort',   // Matrix dot size: effort (shows the task's effort) | same (every dot alike)
+  matrix_hide_closed: '0', // Matrix: 1 leaves done/cancelled tasks out of the plot (they are drawn faintly otherwise)
   // The scratch pad panel (scratch.js): open, width in px, the global pane's
   // share of the height in percent, and line wrapping.
   scratch_open: '0',
@@ -59,7 +62,26 @@ const store = {
   remove(k) { try { localStorage.removeItem(k); } catch {} },
 };
 
+/** Filters kept in this browser from before the Validating status existed:
+ *  where they show In-Progress they now show Validating too (it behaves like
+ *  In-Progress), once. The server does the same for the accounts' filters. */
+const VALIDATING_FLAG = 'planner.migrated.validating';
+function addValidatingToLocalFilters() {
+  if (store.get(VALIDATING_FLAG)) return;
+  store.set(VALIDATING_FLAG, '1');
+  const raw = store.get(`${LOCAL_PREFIX}filters`);
+  if (!raw) return;
+  try {
+    const f = JSON.parse(raw);
+    const at = Array.isArray(f.statuses) ? f.statuses.indexOf('in-progress') : -1;
+    if (at < 0 || f.statuses.includes('validating')) return;
+    f.statuses.splice(at + 1, 0, 'validating');
+    store.set(`${LOCAL_PREFIX}filters`, JSON.stringify(f));
+  } catch {}
+}
+
 function localValues() {
+  addValidatingToLocalFilters();
   const out = {};
   for (const key of Object.keys(PREF_DEFAULTS)) {
     let v = store.get(LOCAL_PREFIX + key);

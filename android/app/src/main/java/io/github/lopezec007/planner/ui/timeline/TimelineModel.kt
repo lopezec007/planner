@@ -78,7 +78,7 @@ internal data class PendingDates(val id: Long, val start: LocalDate?, val end: L
  * (as in the list): dated tasks only, each naming its parent, with the
  * heavier rule above the first task of each parent.
  */
-internal fun buildTimelineModel(snap: Snapshot, groups: List<Group>, mode: ColorMode, pending: PendingDates?, flat: Boolean = false): TimelineModel {
+internal fun buildTimelineModel(snap: Snapshot, groups: List<Group>, mode: ColorMode, pending: PendingDates?, flat: Boolean = false, grouped: Boolean = true): TimelineModel {
     val rows = ArrayList<TimelineRow>()
     val rowOf = HashMap<Long, Int>()
     fun add(stored: Item, kind: RowKind, parent: Item? = null, firstOfParent: Boolean = false) {
@@ -95,7 +95,8 @@ internal fun buildTimelineModel(snap: Snapshot, groups: List<Group>, mode: Color
         for (t in g.tasks) {
             val dated = t.startDate != null || t.endDate != null || pending?.id == t.id
             if (!dated) continue
-            if (flat) add(t, RowKind.TASK, parent = g.parent, firstOfParent = first) else add(t, RowKind.TASK)
+            // The rule above a parent's first task only while the order keeps parents together.
+            if (flat) add(t, RowKind.TASK, parent = g.parent, firstOfParent = first && grouped) else add(t, RowKind.TASK)
             first = false
         }
     }

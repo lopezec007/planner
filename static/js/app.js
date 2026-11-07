@@ -5,7 +5,7 @@
 // from the gear at the far left. Routes: #/ and #/settings; #/active,
 // #/backlog, #/ideas and #/all (or #/everything) apply that filter template.
 //
-// View, Flat, Narrow, collapsed parents, sort order (and the blocked-last and
+// View, Flat, the table width (Wide, Narrow or Columns), collapsed parents, sort order (and the blocked-last and
 // done-last switches), the filter settings,
 // the Timeline bar and Matrix point colours and the row colour-coding are
 // preferences (prefs.js) belonging to the account picked in the account
@@ -222,7 +222,9 @@ function render() {
 
   const currentView = view();
   const flat = flag('flat');
-  const narrow = flag('narrow');
+  // Table width: one table across the window (wide), one of limited width
+  // (narrow), or as many side by side as fit (multicol, see table.js).
+  const width = flag('multicol') ? 'multicol' : flag('narrow') ? 'narrow' : 'wide';
   const collapsed = collapsedSet();
   // The "Ongoing / Project" column only exists in Flat; a stored sort on it
   // is set aside (not forgotten) while Flat is off.
@@ -318,8 +320,8 @@ function render() {
     setTaskColors: (mode) => { prefs.set('task_colors', mode); render(); },
   });
 
-  // Two-way choices as icon groups, like the view switch: Nested | Flat and
-  // Wide | Narrow (the width only applies to the Table view).
+  // Choices as icon groups, like the view switch: Nested | Flat and
+  // Wide | Narrow | Columns (the width only applies to the Table view).
   const pair = (label, choices, current, enabled, onPick) => {
     const g = el('div', { class: 'group', role: 'group', 'aria-label': label });
     for (const [value, id, name, hint] of choices) {
@@ -339,7 +341,23 @@ function render() {
   toolbar.append(pair('Width', [
     ['wide', 'btn-wide', 'Wide', tableView ? 'Wide: the table uses the full width of the window' : 'Width applies to the Table view'],
     ['narrow', 'btn-narrow', 'Narrow', tableView ? 'Narrow: constrain the table width on wide screens' : 'Width applies to the Table view'],
-  ], narrow ? 'narrow' : 'wide', tableView, (v) => { prefs.set('narrow', v === 'narrow' ? '1' : '0'); render(); }));
+    ['multicol', 'btn-multicol', 'Columns', tableView ? 'Columns: on a very wide window the table continues in a second (third, ...) column beside the first, as many as fit' : 'Width applies to the Table view'],
+  ], width, tableView, (v) => {
+    prefs.set('narrow', v === 'narrow' ? '1' : '0');
+    prefs.set('multicol', v === 'multicol' ? '1' : '0');
+    render();
+  }));
+  // How many columns (a preference), beside the Width group while Columns is on.
+  const columnCount = prefs.get('multicol_count');
+  if (width === 'multicol' && tableView) {
+    const sel = el('select', {
+      id: 'multicol-count', class: 'multicol-count', 'aria-label': 'Number of columns',
+      title: 'Number of columns: as many as fit the window, or a fixed number (as far as the window has room for them)',
+      onChange: () => { prefs.set('multicol_count', sel.value); render(); },
+    }, el('option', { value: 'auto', selected: columnCount === 'auto' ? true : null }, 'Auto'));
+    for (let n = 2; n <= 6; n++) sel.append(el('option', { value: String(n), selected: columnCount === String(n) ? true : null }, `${n} columns`));
+    toolbar.append(sel);
+  }
 
   const VIEW_HINT = { table: 'Table: every column, editable in place', timeline: 'Timeline: a Gantt chart beside the titles', matrix: 'Matrix: tasks plotted by urgency and importance' };
   const group = el('div', { class: 'group', role: 'group', 'aria-label': 'View' });
@@ -371,9 +389,9 @@ function render() {
     onSort: sortCtx.setSort,
   };
   if (currentView === 'table') {
-    const wrap = el('div', { class: `table-wrap ${narrow ? 'constrained' : ''}` });
+    const wrap = el('div', { class: `table-wrap ${width === 'narrow' ? 'constrained' : ''}` });
     main.replaceChildren(...[hint, wrap].filter(Boolean));
-    renderTable(wrap, { ...tableOpts, mode: 'full' });
+    renderTable(wrap, { ...tableOpts, mode: 'full', multicol: width === 'multicol', columnCount });
   } else {
     const wrap = el('div', { class: 'table-wrap' });
     // The Matrix stays in view while the list scrolls (the Timeline's bars
@@ -395,6 +413,9 @@ function render() {
         // Matrix dot size (a preference): effort | same.
         sizeMode: prefs.get('matrix_size'),
         setSizeMode: (mode) => { prefs.set('matrix_size', mode); render(); },
+        // Matrix: leave done/cancelled tasks out of the plot (a preference).
+        hideClosed: flag('matrix_hide_closed'),
+        setHideClosed: (on) => { prefs.set('matrix_hide_closed', on ? '1' : '0'); render(); },
       };
       if (currentView === 'timeline') renderTimeline(panel, handle, ctx);
       else renderMatrix(panel, handle, ctx);

@@ -11,6 +11,8 @@ import io.github.lopezec007.planner.attach.Outbox
 import io.github.lopezec007.planner.data.model.ColorMode
 import io.github.lopezec007.planner.data.model.Criteria
 import io.github.lopezec007.planner.data.model.Group
+import io.github.lopezec007.planner.data.model.SortLookup
+import io.github.lopezec007.planner.data.model.SortSpec
 import io.github.lopezec007.planner.data.repo.PlannerRepository
 import io.github.lopezec007.planner.data.repo.Snapshot
 import io.github.lopezec007.planner.data.sync.SyncState
@@ -25,6 +27,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/**
+ * What the List and Timeline show: the groups after search, filters and
+ * sort, with the layout they were built for. [flat] travels with the groups
+ * because a sorted Flat list comes as runs (the same parent may head several
+ * groups, see SortSpec.apply), which a Nested list must never be handed.
+ * [grouped]: in Flat, each parent's tasks still sit together. [sort] is the
+ * order the groups are in, so the list can go back to its top when it changes.
+ */
+data class Listing(val groups: List<Group>, val flat: Boolean, val grouped: Boolean, val sort: SortSpec = SortSpec()) {
+    companion object {
+        val EMPTY = Listing(emptyList(), flat = false, grouped = true)
+    }
+}
 
 class PlannerViewModel(val graph: Graph) : ViewModel() {
     val repo: PlannerRepository get() = graph.repo
@@ -47,11 +63,15 @@ class PlannerViewModel(val graph: Graph) : ViewModel() {
     private val pinned = MutableStateFlow<Set<Long>>(emptySet())
     fun pin(id: Long) { pinned.value = pinned.value + id }
 
-    /** The groups after search and filters, in display order. */
-    val visibleGroups: StateFlow<List<Group>> = combine(snapshot, prefs, searchText, pinned) { snap, p, text, pins ->
+    /** The groups after search, filters and sort, in display order. */
+    val listing: StateFlow<Listing> = combine(snapshot, prefs, searchText, pinned) { snap, p, text, pins ->
         val c = (p?.criteria ?: Criteria()).copy(text = text)
-        c.apply(snap.groups, { snap.itemsById[it] }, pins)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        val flat = p?.flat ?: false
+        val sort = p?.sort ?: SortSpec()
+        val filtered = c.apply(snap.groups, { snap.itemsById[it] }, pins)
+        val lookup = SortLookup(item = { snap.itemsById[it] }, userName = { snap.usersById[it]?.name })
+        Listing(sort.apply(filtered, flat, lookup), flat, sort.groupedIn(flat), sort)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Listing.EMPTY)
 
     // ---- preference setters
 
@@ -65,6 +85,8 @@ class PlannerViewModel(val graph: Graph) : ViewModel() {
         val cur = prefsStore.current().collapsed
         prefsStore.setCollapsed(if (parentId in cur) cur - parentId else cur + parentId)
     }
+    fun setSort(s: SortSpec) = viewModelScope.launch { prefsStore.setSort(s) }
+    fun setMatrixHideClosed(hide: Boolean) = viewModelScope.launch { prefsStore.setMatrixHideClosed(hide) }
     fun setBarColor(m: ColorMode) = viewModelScope.launch { prefsStore.setBarColor(m) }
     fun setPointColor(m: ColorMode) = viewModelScope.launch { prefsStore.setPointColor(m) }
     fun setDotSize(s: DotSize) = viewModelScope.launch { prefsStore.setDotSize(s) }

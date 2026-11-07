@@ -34,6 +34,9 @@ const (
 	StatusBacklog    = "backlog"
 	StatusTodo       = "todo"
 	StatusInProgress = "in-progress"
+	// StatusValidating is work that is finished but still being checked; it
+	// is open in every respect, exactly like StatusInProgress.
+	StatusValidating = "validating"
 	StatusDone       = "done"
 	StatusCancelled  = "cancelled"
 )
@@ -43,7 +46,7 @@ var keyPrefix = map[string]string{TypeOngoing: "N", TypeProject: "P", TypeTask: 
 
 var validStatuses = map[string]bool{
 	StatusIdea: true, StatusBacklog: true, StatusTodo: true,
-	StatusInProgress: true, StatusDone: true, StatusCancelled: true,
+	StatusInProgress: true, StatusValidating: true, StatusDone: true, StatusCancelled: true,
 }
 
 // IsClosed reports whether a status counts as closed for UI purposes.
@@ -154,7 +157,7 @@ type Store struct {
 
 // schemaVersion is stored in PRAGMA user_version. Bump it whenever migrate()
 // gains a step; an existing database below it is backed up before migrating.
-const schemaVersion = 6
+const schemaVersion = 7
 
 // Open opens (creating if necessary) the SQLite database at path and applies
 // the schema. An existing database whose schema is behind is first copied to
@@ -192,6 +195,15 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	// The Validating status (schema version 7) behaves like In-Progress, so
+	// stored filters that show In-Progress are widened to show it too. Done
+	// once, on the way to version 7: a user may narrow them again afterwards.
+	if version < 7 && tables > 0 {
+		if err := s.addValidatingToFilters(); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	if version < schemaVersion {
 		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion)); err != nil {
 			db.Close()
@@ -217,7 +229,7 @@ const itemsTable = `CREATE TABLE IF NOT EXISTS items (
 	description     TEXT NOT NULL DEFAULT '',
 	owner_id        INTEGER REFERENCES users(id),
 	assignee_id     INTEGER REFERENCES users(id),
-	status          TEXT CHECK (status IS NULL OR status IN ('idea','backlog','todo','in-progress','done','cancelled')),
+	status          TEXT CHECK (status IS NULL OR status IN ('idea','backlog','todo','in-progress','validating','done','cancelled')),
 	start_date      TEXT,
 	start_firm      INTEGER NOT NULL DEFAULT 0,
 	end_date        TEXT,
@@ -345,7 +357,9 @@ func (s *Store) migrate() error {
 	if err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items'`).Scan(&itemsSQL); err != nil {
 		return err
 	}
-	if strings.Contains(itemsSQL, "importance BETWEEN 0 AND 10") {
+	// The Validating status (schema version 7) needs the status CHECK
+	// widened, which is the same kind of rebuild.
+	if strings.Contains(itemsSQL, "importance BETWEEN 0 AND 10") || !strings.Contains(itemsSQL, "'validating'") {
 		if err := s.rebuildItems(); err != nil {
 			return fmt.Errorf("rebuild items table: %w", err)
 		}
@@ -390,6 +404,65 @@ func (s *Store) migrate() error {
 	rows.Close()
 	for _, r := range blank {
 		if _, err := s.db.Exec(`UPDATE users SET short = ? WHERE id = ?`, defaultShort(r.name), r.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addValidatingToFilters adds "validating" to every stored "filters"
+// preference whose status list has "in-progress" without it (the Active
+// template of earlier versions, or a hand-made filter that shows work under
+// way). Preferences that cannot be parsed are left alone.
+func (s *Store) addValidatingToFilters() error {
+	rows, err := s.db.Query(`SELECT user_id, value FROM user_prefs WHERE key = 'filters' AND value <> ''`)
+	if err != nil {
+		return err
+	}
+	type pref struct {
+		user  int64
+		value string
+	}
+	var changed []pref
+	for rows.Next() {
+		var p pref
+		if err := rows.Scan(&p.user, &p.value); err != nil {
+			rows.Close()
+			return err
+		}
+		var f map[string]json.RawMessage
+		if json.Unmarshal([]byte(p.value), &f) != nil {
+			continue
+		}
+		var statuses []string
+		if json.Unmarshal(f["statuses"], &statuses) != nil {
+			continue
+		}
+		if !slices.Contains(statuses, StatusInProgress) || slices.Contains(statuses, StatusValidating) {
+			continue
+		}
+		at := slices.Index(statuses, StatusInProgress) + 1
+		statuses = slices.Insert(statuses, at, StatusValidating)
+		raw, err := json.Marshal(statuses)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		f["statuses"] = raw
+		out, err := json.Marshal(f)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		p.value = string(out)
+		changed = append(changed, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, p := range changed {
+		if _, err := s.db.Exec(`UPDATE user_prefs SET value = ? WHERE user_id = ? AND key = 'filters'`, p.value, p.user); err != nil {
 			return err
 		}
 	}
@@ -494,7 +567,49 @@ var SettingDefaults = map[string]string{
 	// The values a task's effort may take, as a JSON array of minutes (see
 	// parseEffortOptions); stored sorted ascending.
 	"effort_options": DefaultEffortOptions,
+	// What each urgency (0-10) and importance (-1 to 10) value means, shown on
+	// mouseover: JSON objects from the value (as a string) to its description;
+	// values without one are left out (see parseLevelDescriptions).
+	"urgency_descriptions":    `{}`,
+	"importance_descriptions": `{"-1":"Not important at all"}`,
 }
+
+// MaxLevelDescription caps the length (in characters) of one urgency or
+// importance description.
+const MaxLevelDescription = 200
+
+// parseLevelDescriptions checks an urgency_descriptions (min 0) or
+// importance_descriptions (min -1) value and returns it in canonical form:
+// keys are whole values in min..10, descriptions are trimmed, and blank ones
+// are dropped.
+func parseLevelDescriptions(k, v string, min int) (string, error) {
+	var in map[string]string
+	if err := json.Unmarshal([]byte(v), &in); err != nil || in == nil {
+		return "", verr("%s must be a JSON object of value: description", k)
+	}
+	out := make(map[string]string, len(in))
+	for key, text := range in {
+		n, err := strconv.Atoi(key)
+		if err != nil || n < min || n > 10 || strconv.Itoa(n) != key {
+			return "", verr("%s: %q is not a value from %d to 10", k, key, min)
+		}
+		text = strings.TrimSpace(text)
+		if utf8.RuneCountInString(text) > MaxLevelDescription {
+			return "", verr("%s: the description of %d is longer than %d characters", k, n, MaxLevelDescription)
+		}
+		if text != "" {
+			out[key] = text
+		}
+	}
+	canon, err := json.Marshal(out) // keys sorted, so equal maps store equal text
+	if err != nil {
+		return "", err
+	}
+	return string(canon), nil
+}
+
+// levelDescriptionMin is the lowest value each description setting covers.
+var levelDescriptionMin = map[string]int{"urgency_descriptions": 0, "importance_descriptions": -1}
 
 // DefaultEffortOptions is 15m, 30m, 1h, 2h, 4h, 8h, 16h, 32h and 64h.
 const DefaultEffortOptions = `[15,30,60,120,240,480,960,1920,3840]`
@@ -650,7 +765,11 @@ func validSetting(k, v string) error {
 		}
 	case "default_status":
 		if !validStatuses[v] {
-			return verr("default_status must be one of idea, backlog, todo, in-progress, done, cancelled")
+			return verr("default_status must be one of idea, backlog, todo, in-progress, validating, done, cancelled")
+		}
+	case "urgency_descriptions", "importance_descriptions":
+		if _, err := parseLevelDescriptions(k, v, levelDescriptionMin[k]); err != nil {
+			return err
 		}
 	case "effort_options":
 		if _, err := parseEffortOptions(v); err != nil {
@@ -664,7 +783,8 @@ func validSetting(k, v string) error {
 
 // UpdateSettings stores the given values and returns the full settings.
 // effort_options is stored sorted, and dropping an option that an open task
-// still uses is a ValidationError naming the option and the tasks.
+// still uses is a ValidationError naming the option and the tasks. The
+// urgency and importance descriptions are stored trimmed, without blanks.
 func (s *Store) UpdateSettings(vals map[string]string) (map[string]string, error) {
 	for k, v := range vals {
 		if err := validSetting(k, v); err != nil {
@@ -689,6 +809,13 @@ func (s *Store) UpdateSettings(vals map[string]string) (map[string]string, error
 		vals = maps.Clone(vals)
 		vals["effort_options"] = string(canon)
 	}
+	for k, min := range levelDescriptionMin {
+		if v, ok := vals[k]; ok {
+			canon, _ := parseLevelDescriptions(k, v, min) // validated above
+			vals = maps.Clone(vals)
+			vals[k] = canon
+		}
+	}
 	for k, v := range vals {
 		if _, err := tx.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, k, v); err != nil {
 			return nil, err
@@ -707,6 +834,10 @@ func (s *Store) UpdateSettings(vals map[string]string) (map[string]string, error
 var PrefDefaults = map[string]string{
 	"view":         "table", // table | timeline | matrix
 	"narrow":       "0",
+	"multicol":     "0", // the full table flows into side-by-side columns when the window has room for more than one
+	// How many columns in that mode: as many as fit, or a number (used as far
+	// as the window has room for it).
+	"multicol_count": "auto", // auto | 2..6
 	"flat":         "0",
 	"collapsed":    "[]", // JSON array of collapsed parent item ids
 	"sort":         "[]", // JSON array of {"key": ..., "dir": "asc"|"desc"}
@@ -726,6 +857,9 @@ var PrefDefaults = map[string]string{
 	"matrix_labels": "key", // key | title
 	// Matrix dot size: the task's effort, or every dot the same size.
 	"matrix_size": "effort", // effort | same
+	// Matrix: leave done and cancelled tasks out of the plot altogether
+	// (they are drawn faintly otherwise).
+	"matrix_hide_closed": "0",
 	// The scratch pad panel (see static/js/scratch.js): whether it is open,
 	// its width in px, the height of the global pane as a percentage of the
 	// panel, and whether lines wrap.
@@ -768,9 +902,13 @@ func validPref(k, v string) error {
 		if !oneOf(v, "table", "timeline", "matrix") {
 			return verr("view must be one of table, timeline, matrix")
 		}
-	case "narrow", "flat", "blocked_last", "closed_last", "scratch_open", "scratch_wrap":
+	case "narrow", "multicol", "flat", "blocked_last", "closed_last", "matrix_hide_closed", "scratch_open", "scratch_wrap":
 		if v != "0" && v != "1" {
 			return verr("%s must be \"0\" or \"1\"", k)
+		}
+	case "multicol_count":
+		if !oneOf(v, "auto", "2", "3", "4", "5", "6") {
+			return verr("multicol_count must be auto or 2 to 6")
 		}
 	case "matrix_labels":
 		if !oneOf(v, "key", "title") {
