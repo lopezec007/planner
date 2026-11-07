@@ -22,7 +22,8 @@
 //                  the table, the rows continue in further columns beside
 //                  the first (full table only; see "Several columns" below)
 //   opts.columnCount  'auto' (as many columns as fit comfortably) or a number
-//                  of columns, used as far as the window has room for them
+//                  of columns, honoured by squeezing the columns' widths
+//                  down to MIN_SCALE of normal; beyond that, as many as fit
 //
 // Every field is edited in place (see cells.js): there is no edit mode. A
 // single unsaved "new row" (cells.draft) is rendered where it will live and
@@ -57,8 +58,8 @@
 // Several columns (opts.multicol): when the container has room for two or
 // more tables side by side (tableColumnCount: each at least the columns'
 // minimum width plus some slack, or, with a number asked for in
-// opts.columnCount, that many as long as each gets the bare minimum), the
-// table gets the class "multicol" and a
+// opts.columnCount, that many, the grid's widths scaled down as far as
+// MIN_SCALE to make them fit), the table gets the class "multicol" and a
 // different structure: a sticky ".table-head" holding one header row per
 // column, then a ".table-body" laid out with CSS columns (app.css), whose
 // children are ".tgroup" wrappers that are never split between columns: in
@@ -86,7 +87,7 @@ import {
 } from './cells.js';
 import { formatEffort, effortSums } from './effort.js';
 import { SORT_COLUMNS, normalizeSort, compareItems, toggleSort, defaultDir } from './sort.js';
-import { visibleColumns, gridTemplate, minTableWidth } from './columns.js';
+import { visibleColumns, gridTemplate, minTableWidth, scaleTemplate } from './columns.js';
 import { rowTint, typeChip } from './colors.js';
 import { colorSwatch, colorLabel } from './swatch.js';
 import { icon } from './icons.js';
@@ -98,18 +99,34 @@ import { prefs } from './prefs.js';
 const COL_GAP = 16;
 const COL_SLACK = 120;
 const MAX_TABLE_COLS = 6;
+// A fixed number of columns is honoured by scaling the grid's widths down,
+// no further than this (cells clip their content past it); beyond that the
+// count drops to what fits.
+const MIN_SCALE = 0.6;
+
+// A row's left and right borders (app.css), which its grid does not get.
+const ROW_BORDERS = 2;
+
+/** The width a row's grid gets in one of `n` columns in `container`. */
+const columnWidth = (container, n) => (container.clientWidth + COL_GAP) / n - COL_GAP - ROW_BORDERS;
 
 /** How many copies of the table with these columns to lay side by side in
  *  `container` (at least 1): with `want` 'auto', as many as fit with some
- *  slack each; with a number, that many as long as each column gets the
- *  bare minimum width of its grid (rows would overlap otherwise), else as
- *  many as do. */
+ *  slack each; with a number, that many as long as the grid fits at
+ *  MIN_SCALE of its widths, else as many as do. */
 export function tableColumnCount(container, columns, mode, flat, want = 'auto') {
   const min = minTableWidth(columns, mode, flat);
   const fits = (each) => Math.floor((container.clientWidth + COL_GAP) / (each + COL_GAP));
   const asked = Number(want);
-  const n = Number.isInteger(asked) && asked >= 2 ? Math.min(asked, fits(min)) : fits(min + COL_SLACK);
+  const n = Number.isInteger(asked) && asked >= 2 ? Math.min(asked, fits(min * MIN_SCALE)) : fits(min + COL_SLACK);
   return Math.max(1, Math.min(MAX_TABLE_COLS, n));
+}
+
+/** The factor the grid's widths are scaled by so `n` columns fit (1 when
+ *  they do as they are). */
+function columnScale(container, columns, mode, flat, n) {
+  if (n < 2) return 1;
+  return Math.min(1, columnWidth(container, n) / minTableWidth(columns, mode, flat));
 }
 
 export function userChip(id) {
@@ -535,7 +552,10 @@ export function renderTable(container, opts) {
     class: `table ${mode === 'title-only' ? 'title-only' : ''} ${flat ? 'flat' : ''} ${order.sorting ? 'sorted' : ''} ${multi ? 'multicol' : ''}`,
     dataset: { columns: columns.join(' '), tableCols: ncols },
   });
-  table.style.setProperty('--cols', gridTemplate(columns, mode, flat));
+  // A fixed number of columns squeezes the grid to fit (scale < 1).
+  const scale = multi ? columnScale(container, columns, mode, flat, ncols) : 1;
+  table.style.setProperty('--cols', scale < 1 ? scaleTemplate(columns, mode, flat, scale) : gridTemplate(columns, mode, flat));
+  if (scale < 1) table.dataset.tableScale = scale.toFixed(2);
   // Rows go into `sink`: the table itself, or (several columns) the current
   // unbreakable group of the body.
   let sink = table;
@@ -603,21 +623,24 @@ export function renderTable(container, opts) {
   captureFocusActive = !!focus;
   container.replaceChildren(table);
   restoreFocus(container, focus);
-  watchColumnCount(container, opts, wantCols ? { columns, mode, flat, fit } : null);
+  watchColumnCount(container, opts, wantCols ? { columns, mode, flat, fit, scale } : null);
   if (opts.onRendered) opts.onRendered(handle);
   return handle;
 }
 
-/** Several columns: re-render when the number that fits changes with the
- *  container's width. `shown` is what the current render used (null: this
- *  table is not a multi-column one, so only the old observer is dropped).
- *  An open text edit is left alone: its unsaved text lives in the DOM. */
+/** Several columns: re-render when the number that fits, or the scale a
+ *  fixed number needs, changes with the container's width. `shown` is what
+ *  the current render used (null: this table is not a multi-column one, so
+ *  only the old observer is dropped). An open text edit is left alone: its
+ *  unsaved text lives in the DOM. */
 function watchColumnCount(container, opts, shown) {
   if (container._colsObserver) { container._colsObserver.disconnect(); container._colsObserver = null; }
   if (!shown || typeof ResizeObserver === 'undefined') return;
   const ro = new ResizeObserver(() => {
     if (!container.isConnected) { ro.disconnect(); return; }
-    if (tableColumnCount(container, shown.columns, shown.mode, shown.flat, opts.columnCount) === shown.fit) return;
+    const fit = tableColumnCount(container, shown.columns, shown.mode, shown.flat, opts.columnCount);
+    const scale = fit > 1 ? columnScale(container, shown.columns, shown.mode, shown.flat, fit) : 1;
+    if (fit === shown.fit && Math.abs(scale - shown.scale) < 0.005) return;
     if (draft.item || container.querySelector('.title-input, .date-input, .desc-textarea')) return;
     renderTable(container, opts);
   });

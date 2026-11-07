@@ -100,8 +100,9 @@ the single SQLite file. The directory containing it must already exist.
    more than one, each with its own header and with every Ongoing/Project
    kept whole in one column (on a narrower window it is the same as Wide;
    hiding columns makes room for more). A dropdown beside the group then
-   sets the number of columns: Auto (as many as fit) or 2 to 6, used as
-   far as the window has room for them. **Nested / Flat** next to
+   sets the number of columns: Auto (as many as fit comfortably) or 2 to
+   6, for which the columns are squeezed to make room (down to about 60%
+   of their width; past that, as many as fit). **Nested / Flat** next to
    it switches the layout (see Flat above).
    **Sort**: click a column header to sort by it (again for the other
    direction, a third time to remove it); Urgency and Importance start

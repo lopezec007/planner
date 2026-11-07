@@ -208,8 +208,8 @@ each group are outlined separately and nothing is drawn across the gaps.
 "Wide / Narrow / Columns" chooses the table's width (a per-user preference, Table view only): the whole window,
 a capped width, or several columns: when the window is wide enough for two or more copies of the table (each at
 least the minimum width of the visible columns plus some slack), the rows continue in a second, third, ... column
-beside the first, as many as fit, or the number the user picks beside the choice (2 to 6, as far as the window has
-room for them with each column at the bare minimum width).  Each column has its own header row (they stay under the title bar together),
+beside the first, as many as fit, or the number the user picks beside the choice (2 to 6: the table's column widths
+are scaled down to make room, to no less than about 60% of normal; past that, as many as fit).  Each column has its own header row (they stay under the title bar together),
 the columns are balanced in height, and an "Ongoing"/"Project" with its tasks and expanded rows is never split
 between columns (in Flat, a task and its expanded row).  On a window with room for one column the table is the
 ordinary one; the number of columns follows the window as it is resized.  Editing, sorting and drag-and-drop work

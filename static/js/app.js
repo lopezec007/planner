@@ -352,7 +352,7 @@ function render() {
   if (width === 'multicol' && tableView) {
     const sel = el('select', {
       id: 'multicol-count', class: 'multicol-count', 'aria-label': 'Number of columns',
-      title: 'Number of columns: as many as fit the window, or a fixed number (as far as the window has room for them)',
+      title: 'Number of columns: as many as fit the window comfortably, or a fixed number (the columns are squeezed to make room, down to about 60% of their width; past that, as many as fit)',
       onChange: () => { prefs.set('multicol_count', sel.value); render(); },
     }, el('option', { value: 'auto', selected: columnCount === 'auto' ? true : null }, 'Auto'));
     for (let n = 2; n <= 6; n++) sel.append(el('option', { value: String(n), selected: columnCount === String(n) ? true : null }, `${n} columns`));

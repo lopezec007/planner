@@ -4,6 +4,7 @@
 //   visibleColumns(mode, flat, hidden) -> [name...] of the columns to render
 //   gridTemplate(cols, flat)     the grid-template-columns value for them
 //   minTableWidth(cols, mode, flat)  the least width (px) they can be drawn in
+//   scaleTemplate(cols, mode, flat, k)  the template with every px width scaled by k
 //   renderColumnsMenu(slot, ctx) ctx = { hidden (Set), flat, enabled, setHidden(names) }
 //
 // The title (and, in Flat, the task title) and the action buttons always
@@ -85,6 +86,14 @@ export function minTableWidth(names, mode, flat) {
     if (m) total += Number(m[1]);
   }
   return total;
+}
+
+/** The grid template with every px width (fixed widths and the minimums of
+ *  flexible columns) multiplied by `k` (0 < k <= 1): the same proportions in
+ *  less room, for a table squeezed into a column narrower than its minimum
+ *  (table.js, a fixed number of columns). */
+export function scaleTemplate(names, mode, flat, k) {
+  return gridTemplate(names, mode, flat).replace(/(\d+(?:\.\d+)?)px/g, (_, n) => `${Math.round(Number(n) * k * 10) / 10}px`);
 }
 
 // ---- toolbar menu ----

@@ -158,7 +158,7 @@ test('Columns lays the table out in side-by-side columns on a very wide window, 
   expect(errors).toEqual([]);
 });
 
-test('the number of columns can be fixed beside the Width group: Auto, or 2 to 6 as far as they fit', async ({ page }) => {
+test('the number of columns can be fixed beside the Width group: Auto, or 2 to 6, squeezing the columns to fit', async ({ page }) => {
   await page.setViewportSize({ width: 5200, height: 900 });
   await page.goto('/#/all');
   await expect(page.locator('#multicol-count')).toHaveCount(0); // only while Columns is on
@@ -170,25 +170,44 @@ test('the number of columns can be fixed beside the Width group: Auto, or 2 to 6
   await count.selectOption('2');
   await expect(page.locator('.table')).toHaveAttribute('data-table-cols', '2');
   await expect(page.locator('.table-head > .row.header')).toHaveCount(2);
+  await expect(page.locator('.table')).not.toHaveAttribute('data-table-scale', /.*/); // room enough: full-size columns
   // A preference: it survives a reload.
   await page.reload();
   await expect(page.locator('#multicol-count')).toHaveValue('2');
   await expect(page.locator('.table')).toHaveAttribute('data-table-cols', '2');
-  // More than fit at the bare minimum: as many as do (3 at this width with every column shown)...
-  await page.locator('#multicol-count').selectOption('6');
-  await expect(page.locator('.table')).toHaveAttribute('data-table-cols', '3');
-  // ...and more once the window has room for them.
-  await page.setViewportSize({ width: 7200, height: 900 });
+  // More than fit at full size: the grid is squeezed to make room (five
+  // columns of 1390px would need 7000px; here each gets ~1027px).
+  const cellWidths = () => page.locator('.table-body .row.task').first().locator('> div').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+  const full = await cellWidths();
+  await page.locator('#multicol-count').selectOption('5');
   await expect(page.locator('.table')).toHaveAttribute('data-table-cols', '5');
+  await expect(page.locator('.table-head > .row.header')).toHaveCount(5);
+  const scale = Number(await page.locator('.table').getAttribute('data-table-scale'));
+  expect(scale).toBeGreaterThan(0.6);
+  expect(scale).toBeLessThan(0.8);
+  const squeezed = await cellWidths();
+  expect(squeezed.length).toBe(full.length);
+  for (let i = 0; i < full.length; i++) if (i !== full.indexOf(Math.max(...full))) expect(squeezed[i]).toBeLessThan(full[i]); // every fixed column narrower
+  // Every row still fits its column: nothing spills past the right edge.
+  const spill = await page.locator('.table-body .row').evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth + 1).length);
+  expect(spill).toBe(0);
+  expect(await lefts(page.locator('.table-body .row.parent'))).toHaveLength(5);
+  // Past the squeeze limit (60%), as many as fit: 6 columns need 834px each, more than 5200px gives.
+  await page.locator('#multicol-count').selectOption('6');
+  await expect(page.locator('.table')).toHaveAttribute('data-table-cols', '6');
+  await page.setViewportSize({ width: 4200, height: 900 });
+  await expect(page.locator('.table')).toHaveAttribute('data-table-cols', '4');
   await page.setViewportSize({ width: 5200, height: 900 });
-  await expect(page.locator('.table')).toHaveAttribute('data-table-cols', '3');
-  // Narrower than two columns' worth: the single table, with the choice kept.
+  await expect(page.locator('.table')).toHaveAttribute('data-table-cols', '6');
+  // Narrower than two squeezed columns' worth: the single table, at full size, with the choice kept.
   await page.setViewportSize({ width: 1500, height: 900 });
   await expect(page.locator('.table')).not.toHaveClass(/multicol/);
+  await expect(page.locator('.table')).not.toHaveAttribute('data-table-scale', /.*/);
   await expect(page.locator('#multicol-count')).toHaveValue('6');
   await page.setViewportSize({ width: 5200, height: 900 });
   await page.locator('#multicol-count').selectOption('auto');
   await expect(page.locator('.table')).toHaveAttribute('data-table-cols', '3');
+  await expect(page.locator('.table')).not.toHaveAttribute('data-table-scale', /.*/);
   // Gone again with Wide; the Timeline view has no such control.
   await page.locator('#btn-wide').click();
   await expect(page.locator('#multicol-count')).toHaveCount(0);
