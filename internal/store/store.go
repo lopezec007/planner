@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
@@ -71,7 +72,11 @@ type User struct {
 	Color string `json:"color"`
 	// Short is the chip label (1-3 characters) shown in the Owner and
 	// Assignee columns; it defaults to initials or the start of the name.
-	Short     string `json:"short"`
+	Short string `json:"short"`
+	// Hotkey is the letter key (one lower-case letter, or "" for none) that
+	// assigns this user as Owner or Assignee from the keyboard in the web
+	// UI; no two users share one.
+	Hotkey    string `json:"hotkey"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -157,7 +162,7 @@ type Store struct {
 
 // schemaVersion is stored in PRAGMA user_version. Bump it whenever migrate()
 // gains a step; an existing database below it is backed up before migrating.
-const schemaVersion = 7
+const schemaVersion = 8
 
 // Open opens (creating if necessary) the SQLite database at path and applies
 // the schema. An existing database whose schema is behind is first copied to
@@ -251,6 +256,7 @@ CREATE TABLE IF NOT EXISTS users (
 	name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
 	color      TEXT NOT NULL,
 	short      TEXT NOT NULL DEFAULT '',
+	hotkey     TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL
 );
 
@@ -406,6 +412,19 @@ func (s *Store) migrate() error {
 		if _, err := s.db.Exec(`UPDATE users SET short = ? WHERE id = ?`, defaultShort(r.name), r.id); err != nil {
 			return err
 		}
+	}
+	// Users gained a hotkey (schema version 8): none until one is chosen in
+	// Settings. The index keeps a letter to one user.
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'hotkey'`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN hotkey TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if _, err := s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_hotkey ON users(hotkey) WHERE hotkey <> ''`); err != nil {
+		return err
 	}
 	return nil
 }
@@ -564,6 +583,10 @@ var SettingDefaults = map[string]string{
 	// Status given to new projects and tasks when the filters in effect admit
 	// it (the client falls back to a filter-derived status otherwise).
 	"default_status": StatusTodo,
+	// How many days a done or cancelled item stays in the Active template
+	// after it was closed (0 = not at all). Filters whose "closed within"
+	// window follows this setting carry recent_auto (see validFilters).
+	"closed_days": "14",
 	// The values a task's effort may take, as a JSON array of minutes (see
 	// parseEffortOptions); stored sorted ascending.
 	"effort_options": DefaultEffortOptions,
@@ -762,6 +785,10 @@ func validSetting(k, v string) error {
 	case "date_warn_days", "date_alert_days":
 		if n, err := strconv.Atoi(v); err != nil || n < -1 || n > 365 {
 			return verr("%s must be -1 to 365 (-1 disables it)", k)
+		}
+	case "closed_days":
+		if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 365 || strconv.Itoa(n) != v {
+			return verr("closed_days must be a whole number of days from 0 to 365")
 		}
 	case "default_status":
 		if !validStatuses[v] {
@@ -998,6 +1025,7 @@ func validFilters(v string) error {
 		Types            []string `json:"types"`
 		Statuses         []string `json:"statuses"`
 		RecentDays       int      `json:"recent_days"`
+		RecentAuto       bool     `json:"recent_auto"` // the window is the closed_days setting, not recent_days
 		HideEmptyParents bool     `json:"hide_empty_parents"`
 		Owner            string   `json:"owner"`
 		Assignee         string   `json:"assignee"`
@@ -1110,7 +1138,7 @@ var palette = []string{
 }
 
 func (s *Store) ListUsers() ([]User, error) {
-	rows, err := s.db.Query(`SELECT id, name, color, short, created_at FROM users ORDER BY name COLLATE NOCASE`)
+	rows, err := s.db.Query(`SELECT id, name, color, short, hotkey, created_at FROM users ORDER BY name COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}
@@ -1118,7 +1146,7 @@ func (s *Store) ListUsers() ([]User, error) {
 	out := []User{}
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &u.Short, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &u.Color, &u.Short, &u.Hotkey, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -1128,8 +1156,8 @@ func (s *Store) ListUsers() ([]User, error) {
 
 func (s *Store) GetUser(id int64) (*User, error) {
 	var u User
-	err := s.db.QueryRow(`SELECT id, name, color, short, created_at FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Name, &u.Color, &u.Short, &u.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, name, color, short, hotkey, created_at FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Name, &u.Color, &u.Short, &u.Hotkey, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1181,6 +1209,20 @@ func validShort(v string) error {
 	return nil
 }
 
+// normalHotkey returns a hotkey as stored: "" (none) or one lower-case
+// letter. Anything else is a ValidationError.
+func normalHotkey(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	r, size := utf8.DecodeRuneInString(v)
+	if size != len(v) || !unicode.IsLetter(r) {
+		return "", verr("hotkey must be a single letter, or empty for none")
+	}
+	return string(unicode.ToLower(r)), nil
+}
+
 // CreateUser creates a user. If color is empty a palette colour is chosen
 // that is least used among existing users; if short is empty the chip label
 // is derived from the name.
@@ -1215,7 +1257,10 @@ func (s *Store) CreateUser(name, color, short string) (*User, error) {
 	return s.GetUser(id)
 }
 
-func (s *Store) UpdateUser(id int64, name, color, short *string) (*User, error) {
+// UpdateUser changes the given fields of a user (nil leaves one as it is).
+// A hotkey is stored lower-case; "" removes it, and a letter that another
+// user already has is a ValidationError naming that user.
+func (s *Store) UpdateUser(id int64, name, color, short, hotkey *string) (*User, error) {
 	if _, err := s.GetUser(id); err != nil {
 		return nil, err
 	}
@@ -1245,6 +1290,25 @@ func (s *Store) UpdateUser(id int64, name, color, short *string) (*User, error) 
 			return nil, err
 		}
 		if _, err := s.db.Exec(`UPDATE users SET short = ? WHERE id = ?`, v, id); err != nil {
+			return nil, err
+		}
+	}
+	if hotkey != nil {
+		v, err := normalHotkey(*hotkey)
+		if err != nil {
+			return nil, err
+		}
+		if v != "" {
+			var holder string
+			err := s.db.QueryRow(`SELECT name FROM users WHERE hotkey = ? AND id <> ?`, v, id).Scan(&holder)
+			if err == nil {
+				return nil, verr("%s is already the key of %s", strings.ToUpper(v), holder)
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return nil, err
+			}
+		}
+		if _, err := s.db.Exec(`UPDATE users SET hotkey = ? WHERE id = ?`, v, id); err != nil {
 			return nil, err
 		}
 	}

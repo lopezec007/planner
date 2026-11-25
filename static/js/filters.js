@@ -15,13 +15,30 @@ export function allGroups() {
   return groups;
 }
 
+/** How many days a done or cancelled item stays in the Active template after
+ *  it was closed: the closed_days setting (0 = not at all; 14 until the
+ *  settings have loaded). */
+export function closedDays() {
+  const v = state.settings?.closed_days;
+  const n = v == null || v === '' ? NaN : Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : 14;
+}
+
 // Filter templates. `statuses` apply to each item's own status (Ongoing rows
-// have none and are never excluded by it), `recentDays` also admits items
-// closed within that many days, `types` restricts item types, and
+// have none and are never excluded by it), `recentAuto` also admits items
+// closed within the last closedDays() days, `types` restricts item types, and
 // `hideEmptyParents` drops Ongoing/Project rows with no matching tasks.
 export const PRESETS = {
-  active: { title: 'Active', hint: 'To-Do, In-Progress and Validating items, plus anything closed in the last 14 days', statuses: ['todo', 'in-progress', 'validating'], recentDays: 14, types: [], hideEmptyParents: true },
-  backlog: { title: 'Backlog', hint: 'Backlog projects and tasks', statuses: ['backlog'], recentDays: 0, types: [], hideEmptyParents: false },
-  ideas: { title: 'Ideas', hint: 'Idea projects and tasks', statuses: ['idea'], recentDays: 0, types: [], hideEmptyParents: false },
+  active: { title: 'Active', statuses: ['todo', 'in-progress', 'validating'], recentAuto: true, types: [], hideEmptyParents: true },
+  backlog: { title: 'Backlog', hint: 'Backlog projects and tasks', statuses: ['backlog'], recentAuto: false, types: [], hideEmptyParents: false },
+  ideas: { title: 'Ideas', hint: 'Idea projects and tasks', statuses: ['idea'], recentAuto: false, types: [], hideEmptyParents: false },
 };
 export const PRESET_ORDER = ['active', 'backlog', 'ideas'];
+
+/** What a template shows, for its tooltip (Active's depends on the setting). */
+export function presetHint(name) {
+  if (name !== 'active') return PRESETS[name].hint;
+  const n = closedDays();
+  const closed = n === 0 ? '' : `, plus anything closed in the last ${n === 1 ? 'day' : `${n} days`}`;
+  return `To-Do, In-Progress and Validating items${closed}`;
+}

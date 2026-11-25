@@ -87,6 +87,8 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     val p = prefs ?: return
     val snap by vm.snapshot.collectAsStateWithLifecycle()
+    // The filters in effect: a "closed within" window that follows the planner's setting takes its current value.
+    val criteria = p.criteria.withClosedDays(snap.settings.closedDays)
     // The groups come with the layout they were sorted for (see Listing).
     val listing by vm.listing.collectAsStateWithLifecycle()
     val groups = listing.groups
@@ -153,16 +155,16 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
                             }
                         }
                         IconButton(onClick = { nav.push(Screen.Scratch) }) { Icon(Icons.Filled.EditNote, "Scratch pad") }
-                        BadgedBox(badge = { if (p.criteria.filterCount > 0) Badge { Text(p.criteria.filterCount.toString()) } }) {
+                        BadgedBox(badge = { if (criteria.filterCount > 0) Badge { Text(criteria.filterCount.toString()) } }) {
                             IconButton(onClick = { filtersOpen = true }) { Icon(Icons.Filled.FilterList, "Filters") }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
                 )
                 PresetRow(
-                    current = p.criteria.preset,
-                    onPreset = { vm.setCriteria(it.criteria(p.criteria)) },
-                    showAll = p.criteria.isActive || search.isNotEmpty(),
+                    current = criteria.preset,
+                    onPreset = { vm.setCriteria(it.criteria(criteria, snap.settings.closedDays)) },
+                    showAll = criteria.isActive || search.isNotEmpty(),
                     onAll = { vm.searchText.value = ""; vm.setCriteria(Criteria()) },
                     // The Matrix has no row order, so Sort hides there (like Nested/Flat).
                     sort = if (p.view != View.MATRIX) p.sort else null,
@@ -217,7 +219,8 @@ fun HomeScreen(vm: PlannerViewModel, nav: Nav) {
 
     if (filtersOpen) {
         FilterSheet(
-            criteria = p.criteria,
+            criteria = criteria,
+            closedDays = snap.settings.closedDays,
             users = snap.users,
             onChange = { vm.setCriteria(it) },
             onDismiss = { filtersOpen = false },

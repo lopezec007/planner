@@ -723,10 +723,17 @@ private fun UserDialog(
 
 // ---------------------------------------------------------------- 5. planner settings
 
+private fun closedDaysLabel(days: Int): String = when (days) {
+    0 -> "Not at all"
+    1 -> "1 day"
+    else -> "$days days"
+}
+
 @Composable
 private fun PlannerSettingsSection(settings: AppSettings, onChange: (key: String, value: String) -> Unit) {
     var weekMenu by remember { mutableStateOf(false) }
     var statusMenu by remember { mutableStateOf(false) }
+    var closedMenu by remember { mutableStateOf(false) }
     var colorKey by remember { mutableStateOf<String?>(null) }
 
     SectionTitle("Planner settings")
@@ -780,6 +787,36 @@ private fun PlannerSettingsSection(settings: AppSettings, onChange: (key: String
             }
         }
     }
+
+    // How long done and cancelled items stay in the Active view after they are closed.
+    Box {
+        FieldRow(label = "Keep closed items", onClick = { closedMenu = true }) {
+            Text(closedDaysLabel(settings.closedDays), style = MaterialTheme.typography.bodyLarge)
+        }
+        DropdownMenu(expanded = closedMenu, onDismissRequest = { closedMenu = false }) {
+            // The stored value is offered too when it is not one of the choices (the web app takes any number).
+            for (d in (AppSettings.CLOSED_DAY_CHOICES + settings.closedDays).distinct().sorted()) {
+                DropdownMenuItem(
+                    text = { Text(closedDaysLabel(d)) },
+                    onClick = {
+                        closedMenu = false
+                        if (d != settings.closedDays) onChange("closed_days", d.toString())
+                    },
+                    leadingIcon = {
+                        if (d == settings.closedDays) {
+                            Icon(Icons.Filled.Check, contentDescription = null)
+                        } else {
+                            Spacer(Modifier.size(24.dp))
+                        }
+                    },
+                )
+            }
+        }
+    }
+    Hint(
+        if (settings.closedDays == 0) "Done and cancelled items leave the Active view as soon as they are closed."
+        else "Done and cancelled items stay in the Active view for ${closedDaysLabel(settings.closedDays)} after they are closed.",
+    )
 
     ColorRow("Ongoing", settings.colorOngoing, onClick = { colorKey = "color_ongoing" })
     ColorRow("Project", settings.colorProject, onClick = { colorKey = "color_project" })

@@ -433,3 +433,70 @@ test('Delete a task and a parent (with its tasks)', async ({ page, request }) =>
   await expect(parentRow(page, 'E2E Ongoing')).toHaveCount(0);
   expect(await byTitle(request, 'E2E Task A2')).toBeUndefined();
 });
+
+// Alt+Tab (or another browser tab) blurs the focused element without moving
+// the focus anywhere on the page: the element stays the active one and gets
+// the focus back with the window. A headless browser cannot switch windows,
+// so the test fires the blur the page would see.
+const windowBlur = (locator) => locator.evaluate((node) => {
+  if (document.activeElement !== node) throw new Error('the editor does not have the focus');
+  node.dispatchEvent(new FocusEvent('blur'));
+});
+
+test('switching to another window leaves an open description editor as it is', async ({ page, request }) => {
+  const item = (await (await request.get('/api/items')).json()).find((i) => i.title === 'Replace HVAC filter');
+  await page.goto('/#/all');
+  await page.locator(`.row[data-id="${item.id}"] .toggle button`).click();
+  const desc = page.locator(`.row.description[data-desc-for="${item.id}"]`);
+  await desc.locator('.md').click();
+  const ta = desc.locator('.desc-textarea');
+  await ta.fill('half typed');
+
+  await windowBlur(ta);
+  await page.waitForTimeout(300);
+  await expect(ta).toBeVisible();          // not saved and closed behind the user's back
+  await expect(ta).toHaveValue('half typed');
+  await expect(ta).toBeFocused();
+  expect((await (await request.get(`/api/items/${item.id}`)).json()).description).toBe(item.description);
+  // Back in the window: still typing in the same editor.
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await page.keyboard.type(' and more');
+  await expect(ta).toHaveValue('half typed and more');
+
+  // Leaving the editor for something else on the page still saves it.
+  await page.locator('#search-text').click();
+  await expect(desc.locator('.desc-textarea')).toHaveCount(0);
+  await expect.poll(async () => (await (await request.get(`/api/items/${item.id}`)).json()).description).toBe('half typed and more');
+  await expect(desc.locator('.md')).toHaveText('half typed and more');
+  await request.patch(`/api/items/${item.id}`, { data: { description: item.description } });
+});
+
+test('switching to another window leaves an open title editor as it is', async ({ page, request }) => {
+  const item = (await (await request.get('/api/items')).json()).find((i) => i.title === 'Replace HVAC filter');
+  await page.goto('/#/all');
+  const row = page.locator(`.row[data-id="${item.id}"]`);
+  await row.locator('.title-text').click();
+  const inp = row.locator('.title-input');
+  await inp.fill('Replace HVAC fil');
+  await windowBlur(inp);
+  await page.waitForTimeout(300);
+  await expect(inp).toBeVisible();
+  await expect(inp).toBeFocused();
+  expect((await (await request.get(`/api/items/${item.id}`)).json()).title).toBe('Replace HVAC filter');
+  // If the focus moved while the window was away (no second blur is fired
+  // then: the element already lost it), the edit is finished, and saved, when
+  // the window comes back.
+  await windowBlur(inp);
+  await page.evaluate(() => {
+    const mute = (e) => e.stopImmediatePropagation();
+    document.addEventListener('blur', mute, true);
+    document.activeElement.blur();
+    document.removeEventListener('blur', mute, true);
+  });
+  await page.waitForTimeout(200);
+  await expect(inp).toBeVisible(); // nothing told the editor yet
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(row.locator('.title-input')).toHaveCount(0);
+  await expect.poll(async () => (await (await request.get(`/api/items/${item.id}`)).json()).title).toBe('Replace HVAC fil');
+  await request.patch(`/api/items/${item.id}`, { data: { title: 'Replace HVAC filter' } });
+});

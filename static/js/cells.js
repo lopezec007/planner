@@ -84,6 +84,22 @@ export function closeOnOutsidePointer(node, close) {
   return stop;
 }
 
+/** Call `fn` when `node` loses the focus to something else on the page, but
+ *  not when the whole window does (Alt+Tab, another browser tab): an editor
+ *  that closes itself on blur would otherwise be gone, and the caret with it,
+ *  on the way back. The browser fires blur in both cases; when the window is
+ *  what lost the focus, the node is still the document's active element and
+ *  gets the focus back with the window. Should the focus come back somewhere
+ *  else instead, `fn` runs then. */
+export function onBlurWithinPage(node, fn) {
+  node.addEventListener('blur', () => {
+    if (document.activeElement !== node) { fn(); return; }
+    window.addEventListener('focus', () => setTimeout(() => {
+      if (node.isConnected && document.activeElement !== node) fn();
+    }, 0), { once: true });
+  });
+}
+
 export function makeSaver(item, ctx) {
   if (isDraft(item)) {
     // Merge into the draft and redraw so the row reflects the choice (e.g.
@@ -104,7 +120,8 @@ export function makeSaver(item, ctx) {
 // ---------------------------------------------------------------- controls
 
 /** Title: plain text that becomes an input when clicked (a new row starts
- *  as an input). Enter or blur saves, Escape reverts. */
+ *  as an input). Enter or blur saves, Escape reverts; switching to another
+ *  window leaves the input as it is. */
 export function titleControl(item, saver, ctx) {
   let committed = item.title || '';
   const text = el('span', {
@@ -144,7 +161,7 @@ export function titleControl(item, saver, ctx) {
       text.textContent = v;
       await saver({ title: v });
     };
-    inp.addEventListener('blur', () => finish(true));
+    onBlurWithinPage(inp, () => finish(true));
     inp.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); finish(true, true); }
       else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
@@ -174,9 +191,26 @@ export function statusControl(item, saver) {
 /** The text on a user's chip: the short label from Settings (1-3 characters). */
 export const chipLabel = (u) => u.short || u.name;
 
+/** The user whose hotkey (a letter from Settings) this key press is, or null. */
+function hotkeyUser(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return null;
+  const key = e.key.toLowerCase();
+  return state.users.find((u) => u.hotkey && u.hotkey === key) || null;
+}
+
+/** A user's name with their hotkey, for a tooltip: "Sam (key S)". */
+const nameWithKey = (u) => (u.hotkey ? `${u.name} (key ${u.hotkey.toUpperCase()})` : u.name);
+
 /** Owner / assignee: the current user's chip (or a dash). Clicking it opens
  *  the picker in place: a row of every user's chip when they all fit in the
- *  cell, else a select. Picking saves; clicking elsewhere or Escape closes it. */
+ *  cell, else a select. Picking saves; clicking elsewhere or Escape closes it.
+ *  From the keyboard, with the chip or its open picker focused, a user's
+ *  hotkey sets that user and Backspace or Delete clears the field; the chip
+ *  keeps the focus (table.js gives it back after the redraw), so the next
+ *  key or Tab carries on from there. One limit: while the select's native
+ *  list is open, Chromium keeps key presses to itself (its own type-ahead by
+ *  name), so with a dropdown the hotkeys work on the chip, before it is
+ *  opened; Firefox passes them on. */
 export function userControl(item, field, saver) {
   const name = field === 'owner_id' ? 'owner' : 'assignee';
   const current = item[field];
@@ -184,6 +218,20 @@ export function userControl(item, field, saver) {
   const chip = u
     ? el('span', { class: 'chip chip-pick', tabindex: '0', role: 'button', title: `${u.name}: click to change`, style: { background: u.color, color: contrastText(u.color) }, dataset: { name, userName: u.name } }, chipLabel(u))
     : el('span', { class: 'chip chip-pick empty', tabindex: '0', role: 'button', title: 'Click to set', dataset: { name }, 'aria-label': `${name}: none` });
+
+  /** Handle a hotkey, Backspace or Delete; true when the key was one of
+   *  them. `closePicker` puts the chip back in place of an open picker. */
+  const onHotkey = (e, closePicker = null) => {
+    const hit = hotkeyUser(e);
+    const clear = !hit && (e.key === 'Backspace' || e.key === 'Delete') && !(e.ctrlKey || e.metaKey || e.altKey);
+    if (!hit && !clear) return false;
+    e.preventDefault();
+    closePicker?.();
+    chip.focus();
+    const next = hit ? hit.id : null;
+    if (next !== (current ?? null)) saver({ [field]: next });
+    return true;
+  };
 
   const openSelect = () => {
     const sel = el('select', { name, class: 'cell-select', 'aria-label': name });
@@ -200,7 +248,10 @@ export function userControl(item, field, saver) {
     };
     sel.addEventListener('change', () => finish(true));
     sel.addEventListener('blur', () => finish(false));
-    sel.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
+    sel.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      else onHotkey(e, () => finish(false));
+    });
     const stopOutside = closeOnOutsidePointer(sel, () => finish(false));
     chip.replaceWith(sel);
     sel.focus();
@@ -214,7 +265,7 @@ export function userControl(item, field, saver) {
     for (const x of state.users) {
       const pressed = current === x.id;
       const b = el('button', {
-        type: 'button', class: 'chip', title: pressed ? `${x.name}: click to clear` : x.name,
+        type: 'button', class: 'chip', title: pressed ? `${x.name}: click to clear` : nameWithKey(x),
         dataset: { user: String(x.id), userName: x.name }, 'aria-pressed': pressed ? 'true' : 'false',
         style: { background: x.color, color: contrastText(x.color) },
       }, chipLabel(x));
@@ -222,7 +273,10 @@ export function userControl(item, field, saver) {
       wrap.append(b);
     }
     wrap.addEventListener('focusout', (e) => { if (!wrap.contains(e.relatedTarget)) close(); });
-    wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
+    wrap.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else onHotkey(e, close);
+    });
     chip.replaceWith(wrap);
     // The chips sit on one line; if they would overflow the cell, use the
     // dropdown instead.
@@ -237,7 +291,10 @@ export function userControl(item, field, saver) {
 
   const open = state.users.length ? openChips : openSelect;
   chip.addEventListener('click', open);
-  chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+  chip.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    else onHotkey(e);
+  });
   return el('div', {}, chip);
 }
 
@@ -408,7 +465,9 @@ export function blockedControl(item, saver) {
 
 // ---------------------------------------------------------------- expanded row
 
-/** Rendered markdown that turns into a textarea when clicked. */
+/** Rendered markdown that turns into a textarea when clicked. Leaving the
+ *  textarea saves (as does Ctrl+Enter) and Escape reverts; switching to
+ *  another window and back leaves it open, focused, with what was typed. */
 export function descriptionControl(item, saver) {
   const box = el('div', { class: 'desc-main' });
   const view = el('div', { class: `md ${item.description?.trim() ? '' : 'placeholder'}`, tabindex: '0', role: 'button', title: 'Click to edit' });
@@ -424,7 +483,7 @@ export function descriptionControl(item, saver) {
       if (save && ta.value !== (item.description || '')) saver({ description: ta.value });
       else ta.replaceWith(view);
     };
-    ta.addEventListener('blur', () => finish(true));
+    onBlurWithinPage(ta, () => finish(true)); // switching to another window and back keeps the editor open
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { e.preventDefault(); finish(false); }
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(true); }

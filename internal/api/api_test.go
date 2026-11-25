@@ -164,6 +164,51 @@ func TestSettingsEndpoint(t *testing.T) {
 	}
 }
 
+// closed_days (how long closed items stay in the Active template) is a setting like the others.
+func TestClosedDaysSetting(t *testing.T) {
+	srv := setup(t)
+	var st map[string]string
+	if c := call(t, srv, "GET", "/api/settings", nil, &st); c != 200 || st["closed_days"] != "14" {
+		t.Fatalf("default: %d %v", c, st["closed_days"])
+	}
+	if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"closed_days": "30"}, &st); c != 200 || st["closed_days"] != "30" {
+		t.Fatalf("patch: %d %v", c, st["closed_days"])
+	}
+	for _, bad := range []string{"-1", "366", "soon"} {
+		if c := call(t, srv, "PATCH", "/api/settings", map[string]string{"closed_days": bad}, nil); c != 400 {
+			t.Fatalf("closed_days %q: expected 400, got %d", bad, c)
+		}
+	}
+}
+
+// A user's hotkey is set, shown and cleared through PATCH /api/users/{id}.
+func TestUserHotkeyEndpoint(t *testing.T) {
+	srv := setup(t)
+	var evan, sam map[string]any
+	if c := call(t, srv, "POST", "/api/users", map[string]any{"name": "Evan"}, &evan); c != 201 || evan["hotkey"] != "" {
+		t.Fatalf("create: %d %v", c, evan)
+	}
+	call(t, srv, "POST", "/api/users", map[string]any{"name": "Sam"}, &sam)
+	path := func(u map[string]any) string { return "/api/users/" + jsonNum(int64(u["id"].(float64))) }
+	if c := call(t, srv, "PATCH", path(evan), map[string]any{"hotkey": "E"}, &evan); c != 200 || evan["hotkey"] != "e" {
+		t.Fatalf("set: %d %v", c, evan)
+	}
+	if c, e := callErr(t, srv, "PATCH", path(sam), map[string]any{"hotkey": "e"}); c != 400 || !strings.Contains(e["error"].(string), "Evan") {
+		t.Fatalf("taken: %d %v", c, e)
+	}
+	if c := call(t, srv, "PATCH", path(sam), map[string]any{"hotkey": "12"}, nil); c != 400 {
+		t.Fatalf("not a letter: expected 400, got %d", c)
+	}
+	var us []map[string]any
+	call(t, srv, "GET", "/api/users", nil, &us)
+	if len(us) != 2 || us[0]["hotkey"] != "e" || us[1]["hotkey"] != "" {
+		t.Fatalf("list: %v", us)
+	}
+	if c := call(t, srv, "PATCH", path(evan), map[string]any{"hotkey": ""}, &evan); c != 200 || evan["hotkey"] != "" {
+		t.Fatalf("clear: %d %v", c, evan)
+	}
+}
+
 func TestDependencyEndpoints(t *testing.T) {
 	srv := setup(t)
 	var a, b map[string]any

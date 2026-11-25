@@ -13,7 +13,7 @@
 }
 .user-row {
   display: grid;
-  grid-template-columns: 160px minmax(160px, 1fr) 150px 60px;
+  grid-template-columns: 160px minmax(160px, 1fr) 48px 150px 60px;
   align-items: center;
   gap: 8px;
   min-height: var(--row-h);
@@ -38,6 +38,10 @@
 .user-name { width: 100%; background: transparent; border-color: transparent; }
 .user-name:hover { border-color: var(--border); }
 .user-name:focus { background: var(--bg); border-color: var(--accent); outline: none; }
+
+.user-hotkey { width: 34px; text-align: center; font-family: var(--mono); text-transform: uppercase; background: transparent; border-color: transparent; padding: 3px 4px; }
+.user-hotkey:hover { border-color: var(--border); }
+.user-hotkey:focus { background: var(--bg); border-color: var(--accent); outline: none; }
 
 .user-color-cell { display: flex; align-items: center; gap: 8px; }
 .user-color {

@@ -147,15 +147,16 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Name  *string `json:"name"`
-		Color *string `json:"color"`
-		Short *string `json:"short"`
+		Name   *string `json:"name"`
+		Color  *string `json:"color"`
+		Short  *string `json:"short"`
+		Hotkey *string `json:"hotkey"`
 	}
 	if err := decode(r, &in); err != nil {
 		writeErr(w, err)
 		return
 	}
-	u, err := s.st.UpdateUser(id, in.Name, in.Color, in.Short)
+	u, err := s.st.UpdateUser(id, in.Name, in.Color, in.Short, in.Hotkey)
 	if err != nil {
 		writeErr(w, err)
 		return

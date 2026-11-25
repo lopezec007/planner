@@ -23,15 +23,20 @@ the single SQLite file. The directory containing it must already exist.
 1. Open **Settings** and add the people who will own or be assigned work. Each gets a colour (click the swatch to change it) that highlights
    the Owner and Assignee columns everywhere, and a chip label of up to
    three characters (initials, or the start of the name) that is what the
-   chips show; the full name is in the tooltip.
+   chips show; the full name is in the tooltip. A user can also be given a
+   **key** (one letter, in the Key column) for assigning them from the
+   keyboard, see step 3.
 2. The planner is a single page. **Active**, **Backlog** and **Ideas** beside
    the search box are filter templates: Active sets To-Do, In-Progress and
-   Validating plus anything closed in the last 14 days, the other two set that status
+   Validating plus anything closed in the last 14 days (the number of days
+   is "Keep done and cancelled items for" in Settings; 0 drops closed items
+   from Active at once), the other two set that status
    for projects and tasks. They are toggles that combine: click one to turn
    it on, click it again to turn it off, and turn on two or three to see
    their statuses together (Active + Backlog shows both and hides ideas).
    They fill the Filters panel, where you can adjust
-   them; Clear removes every filter and shows everything. The filter
+   them (a number of days typed into "or closed within" there is your own
+   and stays when the setting changes); Clear removes every filter and shows everything. The filter
    settings are remembered per account like the other
    preferences; the search text is not. The gear at the
    far left opens Settings, which has an Items button to come back.
@@ -46,10 +51,17 @@ the single SQLite file. The directory containing it must already exist.
    to add a task beneath it.
 3. There is no edit mode: click any field to change it and it saves at once.
    Titles, dates and the description become inputs when clicked (Enter or
-   leaving the field saves, Escape reverts; Ctrl+Enter in the description).
+   leaving the field saves, Escape reverts; Ctrl+Enter in the description;
+   switching to another window and back leaves an open title or description
+   editor as it was, still focused).
    Owner and Assignee show the current user's chip; click it to pick another
    (a row of every user's chip when they fit in the cell, a dropdown
-   otherwise; click the pressed chip to clear). The `~` before a date marks it approximate; click it to
+   otherwise; click the pressed chip to clear). With the chip focused (Tab
+   to it) or its picker open, pressing a user's key from Settings sets that
+   user and Backspace or Delete clears the cell; the cell keeps the focus,
+   so Tab moves on to the next. (When the picker is a dropdown, Chrome
+   keeps the keys for its own list while it is open: press the key with
+   the cell focused instead.) The `~` before a date marks it approximate; click it to
    pin it firm (the `~` becomes a 📌; click again to make it approximate).
    In the urgency and importance fields a single key sets the
    value: 0 to 9 for themselves, the `~` key (left of 1; Shift is not
@@ -329,7 +341,7 @@ Layout:
       js/cells.js         inline-editable cells, new-row draft, dependency and attachment panels
       js/timeline.js      Timeline (Gantt) view
       js/matrix.js        Matrix (scatter) view
-      js/settings.js      Settings page (week start, row colours)
+      js/settings.js      Settings page (week start, default status, closed-item window, row colours)
       js/users.js         Users section of Settings
       js/search.js        search box, filter templates and the filter popover (supersede rule lives here)
       css/app.css         theme tokens + table; one css file per feature module
@@ -347,7 +359,8 @@ Commands:
 
 API summary (all JSON):
 
-    GET    /api/users                 PATCH /api/users/{id}  {name?, color?, short?}
+    GET    /api/users                 PATCH /api/users/{id}  {name?, color?, short?, hotkey?}  (hotkey: one letter,
+                                      "" for none; 400 when another user has it)
     POST   /api/users {name, color?, short?}  DELETE /api/users/{id}   (409 if referenced)
     GET    /api/users/{id}/prefs      PATCH /api/users/{id}/prefs {key: value}
                                       (view, narrow, multicol, multicol_count, flat, collapsed, sort, blocked_last, bar_color,
@@ -373,6 +386,7 @@ API summary (all JSON):
     POST   /api/dependencies {blocker_id, blocked_id}   400 on self/ongoing/cycle
     DELETE /api/dependencies/{blocker}/{blocked}
     GET    /api/settings              PATCH /api/settings {key: value}  (week_start, default_status, effort_options,
+                                      closed_days: 0-365, how long the Active template keeps closed items,
                                       color_*, urgency_descriptions and importance_descriptions: JSON objects
                                       {"<value>": "text"}, ...; removing an effort option an open task uses is a 400)
 

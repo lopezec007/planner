@@ -4,8 +4,10 @@
 //
 // Each user is shown as a row: a chip preview (how the user appears in the
 // Owner/Assignee columns) with an input for its label (1-3 characters), an
-// inline name input (Enter or blur saves), a colour picker (saves when the
-// picker closes) and a Delete button. Deleting a user
+// inline name input (Enter or blur saves), a hotkey (one letter, or empty:
+// pressing it in an Owner or Assignee cell sets that user, see cells.js
+// userControl), a colour picker (saves when the picker closes) and a Delete
+// button. Deleting a user
 // that is still referenced by live items fails with the server's 409 message,
 // which is shown as a toast.
 
@@ -79,6 +81,28 @@ function userRow(u, ctx) {
     onKeydown: (e) => { if (e.key === 'Escape') { name.value = u.name; name.blur(); } },
   });
 
+  // The hotkey: one letter (shown upper-case, stored lower-case) or empty for
+  // none; Enter or blur saves. The server refuses a letter another user has.
+  const shown = (u.hotkey || '').toUpperCase();
+  const hotkey = el('input', {
+    type: 'text', class: 'user-hotkey', value: shown, maxlength: '1', placeholder: '–', 'aria-label': `Hotkey of ${u.name}`,
+    title: `A letter key that sets ${u.name} as Owner or Assignee when pressed in that cell (empty for none)`, autocomplete: 'off', spellcheck: 'false',
+    onFocus: () => hotkey.select(), // so the next key replaces the letter
+    onChange: async () => {
+      const next = hotkey.value.trim().toLowerCase();
+      if (next === (u.hotkey || '')) { hotkey.value = shown; return; }
+      if (next && !/^\p{L}$/u.test(next)) { hotkey.value = shown; toast('The key must be a single letter.'); return; }
+      try {
+        await api.updateUser(u.id, { hotkey: next });
+        await ctx.reload();
+      } catch (err) {
+        hotkey.value = shown;
+        toast(err.message);
+      }
+    },
+    onKeydown: (e) => { if (e.key === 'Escape') { hotkey.value = shown; hotkey.blur(); } if (e.key === 'Enter') hotkey.blur(); },
+  });
+
   const color = el('input', {
     type: 'color', class: 'user-color', value: u.color, 'aria-label': `Colour of ${u.name}`, title: 'Change colour',
     // live preview while the picker is open; persist once it closes
@@ -111,6 +135,7 @@ function userRow(u, ctx) {
   return el('div', { class: 'user-row', dataset: { userId: u.id } },
     el('div', { class: 'user-preview' }, preview, short),
     el('div', {}, name),
+    el('div', {}, hotkey),
     el('div', { class: 'user-color-cell' }, color, el('code', { class: 'user-hex' }, u.color)),
     el('div', { class: 'user-actions' }, del),
   );
@@ -120,7 +145,7 @@ export function renderUsers(main, ctx) {
   const page = el('div', { class: 'users-page' },
     el('div', { class: 'users-head' },
       el('h2', {}, 'Users'),
-      el('p', { class: 'users-hint' }, 'Each user gets a colour and a short chip label (up to three characters), used in the Owner and Assignee columns. Click a label or a name to edit it.'),
+      el('p', { class: 'users-hint' }, 'Each user gets a colour and a short chip label (up to three characters), used in the Owner and Assignee columns. Click a label or a name to edit it. A user can also be given a letter key: in the table, press it in an Owner or Assignee cell (click the cell or Tab to it) to set that user; Backspace clears the cell.'),
     ),
     addForm(ctx),
   );
@@ -130,7 +155,7 @@ export function renderUsers(main, ctx) {
     list.append(el('div', { class: 'empty' }, 'No users yet. Add one above.'));
   } else {
     list.append(el('div', { class: 'user-row header' },
-      el('div', {}, 'Chip'), el('div', {}, 'Name'), el('div', {}, 'Colour'), el('div')));
+      el('div', {}, 'Chip'), el('div', {}, 'Name'), el('div', { title: 'The letter key that sets this user as Owner or Assignee' }, 'Key'), el('div', {}, 'Colour'), el('div')));
     for (const u of state.users) list.append(userRow(u, ctx));
   }
   page.append(list);

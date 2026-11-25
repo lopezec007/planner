@@ -34,8 +34,10 @@ The app is a second client of the same JSON API the web UI uses (see
 "API summary" in the top-level README), including the scratch pads
 (`/api/scratch`, `/api/users/{id}/scratch`), the `default_status` setting,
 the task `effort` field (minutes, one of the `effort_options` setting's
-values, null to clear), importance from -1 to 10, the `validating` status
-and the `urgency_descriptions` / `importance_descriptions` settings. Nothing in the API is
+values, null to clear), importance from -1 to 10, the `validating` status,
+the `urgency_descriptions` / `importance_descriptions` settings and the
+`closed_days` setting (how long the Active template keeps closed items).
+A user's `hotkey` is a web-UI matter and is ignored here. Nothing in the API is
 specific to a client; the only things that live on the phone are its own
 view preferences and the offline queue.
 
@@ -109,7 +111,9 @@ network never blocks a screen.
 - **List**: the Active / Backlog / Ideas templates, search, and the filter
   sheet, with the same semantics as `static/js/search.js` (an item matches
   on its own fields; a parent shows when it or a task matches; Active hides
-  parents without matching tasks). Owner and Assignee are multi-select
+  parents without matching tasks, and keeps closed items for the planner's
+  `closed_days`, following the setting when it changes: see `recentAuto` in
+  `Filters.kt`). Owner and Assignee are multi-select
   chips: any chosen user, or "No owner" / "Unassigned", matches, and no
   choice means any. **Sort** is the chip at the right of the template row
   (tinted while a sort is in effect, with the number of sort columns): its
@@ -174,7 +178,7 @@ network never blocks a screen.
 - **Settings**: server and account, sync status and errors, notification
   time and look-ahead window, users (name, colour, chip label), planner
   settings shared with the web UI (week start, default status for new
-  items, colours, the effort options: a chip per option, tapped to remove
+  items, how long closed items stay in the Active view, colours, the effort options: a chip per option, tapped to remove
   it, and Add for a new one in minutes), about. Removing an effort option
   that an open task uses is refused on the phone with the server's
   wording ("effort option 15m is used by T-1"), and should the server
@@ -246,6 +250,10 @@ days"). It needs no network, so it works offline. Tapping opens the item
   values, in display and sort order. Validating is open like In-Progress
   (the Active template shows it); filters stored by an earlier version of
   the app that show In-Progress gain it once (`Prefs`, `filters_rev`).
+- Stored filters say whether their "closed within" window is the
+  `closed_days` setting (`recent_auto`, as in the web preference); filters
+  stored before the setting existed are read as following it when their
+  window is the old template's 14 days.
 - Scratch pad scopes are the server's (`global`, `user:<id>`, see
   `ScratchScope`) and key the cache and the queued op alike.
 - Colours arrive as `#rrggbb` strings; `parseColor()` is tolerant of "".

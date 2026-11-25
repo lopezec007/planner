@@ -161,7 +161,7 @@ class FiltersTest {
 
     @Test
     fun jsonRoundTripAndPresetDetection() {
-        val c = Criteria(statuses = setOf(Status.TODO, Status.IN_PROGRESS, Status.VALIDATING), recentDays = 14, hideEmptyParents = true, owners = setOf("3"), endAfter = LocalDate.of(2026, 1, 2))
+        val c = Criteria(statuses = setOf(Status.TODO, Status.IN_PROGRESS, Status.VALIDATING), recentDays = 14, recentAuto = true, hideEmptyParents = true, owners = setOf("3"), endAfter = LocalDate.of(2026, 1, 2))
         val back = Criteria.fromJson(c.toJson())
         assertEquals(c, back)
         assertEquals(Preset.ACTIVE, back.preset)
@@ -172,10 +172,63 @@ class FiltersTest {
         assertEquals(Preset.ACTIVE, old.withValidating().preset)
         assertEquals(Preset.BACKLOG.criteria(), Preset.BACKLOG.criteria().withValidating())
         assertSame(back, back.withValidating())
-        assertNull(back.copy(owners = emptySet(), recentDays = 0).preset)
+        assertNull(back.copy(owners = emptySet(), recentDays = 5, recentAuto = false).preset)
         assertEquals(Preset.ACTIVE, Criteria.fromJson(null).preset)
         assertEquals(Preset.ACTIVE, Criteria.fromJson("{not json").preset)
         assertFalse(Criteria().isActive)
+    }
+
+    @Test
+    fun activeWindowFollowsTheClosedDaysSetting() {
+        val ongoing = item(ItemType.ONGOING, "Maintenance")
+        val open = item(ItemType.TASK, "Open", parentId = ongoing.id)
+        val recent = item(ItemType.TASK, "Done lately", parentId = ongoing.id, status = Status.DONE,
+            closedAt = Instant.now().minus(3, ChronoUnit.DAYS).toString())
+        val old = item(ItemType.TASK, "Done a while ago", parentId = ongoing.id, status = Status.CANCELLED,
+            closedAt = Instant.now().minus(20, ChronoUnit.DAYS).toString())
+        val (groups, byId) = groupsOf(ongoing, open, recent, old)
+        fun shown(c: Criteria) = c.apply(groups, byId).single().tasks.map { it.id }
+
+        // The template takes the setting's value when it is applied...
+        assertEquals(listOf(open.id, recent.id), shown(Preset.ACTIVE.criteria()))
+        assertEquals(listOf(open.id, recent.id, old.id), shown(Preset.ACTIVE.criteria(closedDays = 30)))
+        assertEquals(listOf(open.id), shown(Preset.ACTIVE.criteria(closedDays = 0)))
+        assertEquals(listOf(open.id), shown(Preset.ACTIVE.criteria(closedDays = 2)))
+        // ...and stored criteria follow it when it changes, staying the Active template.
+        val stored = Criteria.fromJson(Preset.ACTIVE.criteria().toJson())
+        assertTrue(stored.recentAuto)
+        for (days in listOf(0, 2, 30)) {
+            val c = stored.withClosedDays(days)
+            assertEquals(days, c.recentDays)
+            assertEquals(Preset.ACTIVE, c.preset)
+            assertEquals(shown(Preset.ACTIVE.criteria(closedDays = days)), shown(c))
+        }
+        assertSame(stored, stored.withClosedDays(14))
+
+        // A number of the user's own is left alone and is not the template.
+        val own = Preset.ACTIVE.criteria().copy(recentDays = 5, recentAuto = false)
+        assertSame(own, own.withClosedDays(30))
+        assertNull(own.preset)
+        assertFalse(Criteria.fromJson(own.toJson()).recentAuto)
+        // The other templates have no window, whatever the setting.
+        assertEquals(0, Preset.BACKLOG.criteria(closedDays = 30).recentDays)
+        assertEquals(Preset.BACKLOG, Preset.BACKLOG.criteria(Preset.ACTIVE.criteria(), closedDays = 30).withClosedDays(30).preset)
+
+        // Filters stored before the setting existed: the template's 14 days follow it, another number does not.
+        val legacy = Criteria.fromJson("""{"statuses":["todo","in-progress","validating"],"recent_days":14,"hide_empty_parents":true}""")
+        assertTrue(legacy.recentAuto)
+        assertEquals(Preset.ACTIVE, legacy.withClosedDays(0).preset)
+        assertEquals(listOf(open.id), shown(legacy.withClosedDays(0)))
+        assertFalse(Criteria.fromJson("""{"statuses":["todo"],"recent_days":5}""").recentAuto)
+    }
+
+    @Test
+    fun closedDaysSettingIsReadLeniently() {
+        assertEquals(14, AppSettings.EMPTY.closedDays)
+        assertEquals(0, AppSettings(mapOf("closed_days" to "0")).closedDays)
+        assertEquals(30, AppSettings(mapOf("closed_days" to "30")).closedDays)
+        assertEquals(365, AppSettings(mapOf("closed_days" to "4000")).closedDays)
+        assertEquals(14, AppSettings(mapOf("closed_days" to "soon")).closedDays)
     }
 
     @Test

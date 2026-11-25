@@ -30,6 +30,12 @@ The technology stack (language, framework, libraries, etc.) is at the implemente
   can be changed by the user.  Each user also has a chip label of at most 3 characters (initials, or the start of
   the name, by default; editable in Settings) which is what the Owner/Assignee chips display, with the full name on
   mouseover.  Clicking a chip offers every user's chip when they all fit within the cell, else a dropdown.
+- Each user may be given a hotkey in Settings: a single letter (case does not matter), which no two users share;
+  none by default.  In the table, with an Owner or Assignee cell focused (its chip reached with Tab, or its picker
+  open), pressing a user's hotkey sets that user and Backspace or Delete clears the cell; the cell keeps the focus
+  afterwards.  (Where the picker is a dropdown, a browser may keep key presses to itself while the list is open;
+  the hotkeys then work on the focused chip.)  The picker's chips name each user's key on mouseover.  Hotkeys belong to the web UI (the Android
+  app has no use for them).
 
 ### Item Types
 There are only 3:
@@ -59,6 +65,11 @@ open status (not closed), the "Active" template shows it, and an item blocked by
 A global setting chooses the status new projects and tasks start in (To-Do by default); when the filters in
 effect would hide that status, a new item instead starts in a status they show, so it does not vanish on
 creation.
+
+A second global setting says for how many days a done or cancelled item stays in the "Active" template after it
+was closed (14 by default, 0 to 365; 0 means closed items leave it at once).  The template follows the setting
+whenever it changes, as do stored filters that came from the template; a number of days typed into the Filters
+panel's "or closed within" box is the user's own and is kept, unless it is the setting's value.
 
 A project of status "Idea" can be thought of as "superbacklogged".  Both "Done" and "Cancelled" should be considered
 closed items for UI purposes.  There are no constraints on how statuses can be changed (i.e. no "workflows").
@@ -168,7 +179,8 @@ server (1 MiB per pane).
 #### Active (default template)
 This should display:
 - All to-do, in-progress and validating items
-- All done and cancelled items that were marked "done" or "cancelled" within the last two weeks
+- All done and cancelled items that were marked "done" or "cancelled" within the last two weeks (the number of
+  days is a global setting, see Statuses)
 - Their parent "Ongoing"/"Project" rows; parents with no such tasks are hidden
 
 Backlogged (or idea) tasks are not shown, whatever their project's status.  The "Backlog" and "Ideas" templates
@@ -238,7 +250,11 @@ are icons with mouseover descriptions.
 - There is no separate edit mode: to edit a field the user simply clicks into it, and the change is saved
   immediately.  The toggle before a date shows "~" while the date is approximate and a pin icon once it is firm;
   clicking it switches between the two.  The urgency and importance fields accept digits only: a single key sets
-  the value (0-9 for themselves, the "~" key for 10 and, for importance, "-" for -1).
+  the value (0-9 for themselves, the "~" key for 10 and, for importance, "-" for -1).  A user's hotkey sets the
+  Owner or Assignee (see Users).
+- An open title or description editor saves when the focus moves elsewhere on the page, but not when the whole
+  window loses the focus (Alt+Tab, another browser tab): it is still open and focused, with what was typed, when
+  the user comes back.
 - A new row is tinted exactly like its saved neighbours (including its parent's colour when tasks are coloured
   by parent) and marked as unsaved by an accent bar at its left.
 - Each row offers a "Delete" option (see Deletion above).
@@ -365,7 +381,8 @@ A phone client for the same server, kept in `android/` of this repository and bu
   In the Matrix, tapping the selected task's title opens it.
 - Attachments: files and photos from the device, and photos taken with the camera.
 - Settings: server and account, sync status and errors, notification time, users, app settings including the
-  effort options (with the same removal guard as the web UI).
+  effort options (with the same removal guard as the web UI) and how long closed items stay in the Active
+  template, which the phone's Active template follows as the web UI's does.
 
 ### Notifications
 A daily local notification at a configurable time lists the account's open items that are overdue, due today

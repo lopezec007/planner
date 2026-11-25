@@ -300,7 +300,7 @@ func TestUsers(t *testing.T) {
 	if _, err := s.CreateUser("Z", "red", ""); err == nil {
 		t.Fatal("bad colour should fail")
 	}
-	u1, _ = s.UpdateUser(u1.ID, nil, str("#112233"), nil)
+	u1, _ = s.UpdateUser(u1.ID, nil, str("#112233"), nil, nil)
 	if u1.Color != "#112233" {
 		t.Fatal("colour not updated")
 	}
@@ -318,17 +318,17 @@ func TestUsers(t *testing.T) {
 	if _, err := s.CreateUser("Four", "", "FOUR"); err == nil {
 		t.Fatal("4-character short should fail")
 	}
-	u1, err = s.UpdateUser(u1.ID, nil, nil, str("EV"))
+	u1, err = s.UpdateUser(u1.ID, nil, nil, str("EV"), nil)
 	if err != nil || u1.Short != "EV" {
 		t.Fatalf("short update: %+v %v", u1, err)
 	}
-	u1, _ = s.UpdateUser(u1.ID, str("Evan Lopez"), nil, nil)
+	u1, _ = s.UpdateUser(u1.ID, str("Evan Lopez"), nil, nil, nil)
 	if u1.Short != "EV" {
 		t.Fatal("renaming must keep the chip label")
 	}
 	for _, bad := range []string{"", "   ", "ABCD"} {
 		var ve *ValidationError
-		if _, err := s.UpdateUser(u1.ID, nil, nil, str(bad)); !errors.As(err, &ve) {
+		if _, err := s.UpdateUser(u1.ID, nil, nil, str(bad), nil); !errors.As(err, &ve) {
 			t.Errorf("short %q: expected validation error, got %v", bad, err)
 		}
 	}
@@ -344,6 +344,78 @@ func TestUsers(t *testing.T) {
 	us, _ := s.ListUsers()
 	if len(us) != 2 {
 		t.Fatalf("expected 2 users, got %d", len(us))
+	}
+}
+
+// Hotkeys: one letter per user, stored lower-case, never shared.
+func TestUserHotkeys(t *testing.T) {
+	s := openTest(t)
+	evan, _ := s.CreateUser("Evan", "", "")
+	sam, _ := s.CreateUser("Sam", "", "")
+	if evan.Hotkey != "" {
+		t.Fatalf("a new user has no hotkey, got %q", evan.Hotkey)
+	}
+	evan, err := s.UpdateUser(evan.ID, nil, nil, nil, str(" E "))
+	if err != nil || evan.Hotkey != "e" {
+		t.Fatalf("hotkey update: %+v %v", evan, err)
+	}
+	// The same letter again for the same user is fine; another user is refused, whatever the case.
+	if _, err := s.UpdateUser(evan.ID, nil, nil, nil, str("e")); err != nil {
+		t.Fatalf("re-setting a user's own hotkey: %v", err)
+	}
+	var ve *ValidationError
+	for _, taken := range []string{"e", "E"} {
+		_, err := s.UpdateUser(sam.ID, nil, nil, nil, str(taken))
+		if !errors.As(err, &ve) || !strings.Contains(err.Error(), "Evan") {
+			t.Fatalf("hotkey %q taken by Evan: got %v", taken, err)
+		}
+	}
+	for _, bad := range []string{"ab", "1", "-", "é!"} {
+		if _, err := s.UpdateUser(sam.ID, nil, nil, nil, str(bad)); !errors.As(err, &ve) {
+			t.Errorf("hotkey %q: expected validation error, got %v", bad, err)
+		}
+	}
+	if sam, err = s.UpdateUser(sam.ID, nil, nil, nil, str("É")); err != nil || sam.Hotkey != "é" {
+		t.Fatalf("a non-ASCII letter: %+v %v", sam, err)
+	}
+	// Other updates leave it alone; "" removes it and frees the letter.
+	if evan, _ = s.UpdateUser(evan.ID, str("Evan L"), nil, nil, nil); evan.Hotkey != "e" {
+		t.Fatalf("renaming must keep the hotkey, got %q", evan.Hotkey)
+	}
+	if evan, err = s.UpdateUser(evan.ID, nil, nil, nil, str("")); err != nil || evan.Hotkey != "" {
+		t.Fatalf("clearing: %+v %v", evan, err)
+	}
+	if sam, err = s.UpdateUser(sam.ID, nil, nil, nil, str("e")); err != nil || sam.Hotkey != "e" {
+		t.Fatalf("a freed letter can be taken: %+v %v", sam, err)
+	}
+	us, _ := s.ListUsers()
+	if len(us) != 2 || us[0].Hotkey != "" || us[1].Hotkey != "e" {
+		t.Fatalf("listed hotkeys: %+v", us)
+	}
+}
+
+// A database from before hotkeys gains the column (and its index) on migrate.
+func TestHotkeyColumnAdded(t *testing.T) {
+	s := openTest(t)
+	s.CreateUser("Evan", "", "")
+	if _, err := s.db.Exec(`DROP INDEX users_hotkey`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE users DROP COLUMN hotkey`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.migrate(); err != nil {
+		t.Fatal(err)
+	}
+	us, _ := s.ListUsers()
+	if len(us) != 1 || us[0].Hotkey != "" || us[0].Short != "Eva" {
+		t.Fatalf("users after adding the column: %+v", us)
+	}
+	if _, err := s.UpdateUser(us[0].ID, nil, nil, nil, str("v")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO users (name, color, short, hotkey, created_at) VALUES ('Dup', '#000000', 'D', 'v', '')`); err == nil {
+		t.Fatal("the index should keep a letter to one user")
 	}
 }
 
@@ -419,6 +491,21 @@ func TestSettings(t *testing.T) {
 	st, _ = s.UpdateSettings(map[string]string{"color_task": ""})
 	if st["color_task"] != "" {
 		t.Fatal("clear failed")
+	}
+	// How long closed items stay in the Active template: 14 days by default, 0 to 365.
+	if st["closed_days"] != "14" {
+		t.Fatalf("closed_days default: %q", st["closed_days"])
+	}
+	for _, want := range []string{"0", "7", "365"} {
+		if st, err = s.UpdateSettings(map[string]string{"closed_days": want}); err != nil || st["closed_days"] != want {
+			t.Fatalf("closed_days %q: %v %v", want, st["closed_days"], err)
+		}
+	}
+	for _, bad := range []string{"", "-1", "366", "x", "1.5", "07", " 7"} {
+		var ve *ValidationError
+		if _, err := s.UpdateSettings(map[string]string{"closed_days": bad}); !errors.As(err, &ve) {
+			t.Fatalf("closed_days %q: expected validation error, got %v", bad, err)
+		}
 	}
 	// Every status is an acceptable default for new items.
 	for _, want := range []string{StatusIdea, StatusBacklog, StatusTodo, StatusInProgress, StatusValidating, StatusDone, StatusCancelled} {
@@ -615,6 +702,10 @@ func TestUserPrefs(t *testing.T) {
 	if _, err := s.UpdateUserPrefs(u.ID, map[string]string{"bar_color": "parent", "filters": ""}); err != nil {
 		t.Fatalf("bar_color parent / empty filters: %v", err)
 	}
+	// Filters whose "closed within" window follows the closed_days setting say so.
+	if _, err := s.UpdateUserPrefs(u.ID, map[string]string{"filters": `{"statuses":["todo"],"recent_days":14,"recent_auto":true}`}); err != nil {
+		t.Fatalf("filters with recent_auto: %v", err)
+	}
 	// Upsert replaces, and other keys are untouched.
 	prefs, _ = s.UpdateUserPrefs(u.ID, map[string]string{"view": "matrix"})
 	if prefs["view"] != "matrix" || prefs["narrow"] != "1" {
@@ -646,6 +737,7 @@ func TestUserPrefs(t *testing.T) {
 		{"filters": `{"types":["epic"]}`},
 		{"filters": `{"statuses":["open"]}`},
 		{"filters": `{"recent_days":400}`},
+		{"filters": `{"recent_auto":"yes"}`},
 		{"filters": `{"owner":"bob"}`},
 		{"filters": `{"blocked":"maybe"}`},
 		{"filters": `{"end_after":"tomorrow"}`},

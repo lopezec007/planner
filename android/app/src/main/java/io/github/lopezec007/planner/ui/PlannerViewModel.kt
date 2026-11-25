@@ -65,7 +65,7 @@ class PlannerViewModel(val graph: Graph) : ViewModel() {
 
     /** The groups after search, filters and sort, in display order. */
     val listing: StateFlow<Listing> = combine(snapshot, prefs, searchText, pinned) { snap, p, text, pins ->
-        val c = (p?.criteria ?: Criteria()).copy(text = text)
+        val c = (p?.criteria ?: Criteria()).withClosedDays(snap.settings.closedDays).copy(text = text)
         val flat = p?.flat ?: false
         val sort = p?.sort ?: SortSpec()
         val filtered = c.apply(snap.groups, { snap.itemsById[it] }, pins)

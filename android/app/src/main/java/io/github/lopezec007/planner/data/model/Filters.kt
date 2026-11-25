@@ -3,6 +3,13 @@
 // does, with only the matching tasks; `hideEmptyParents` drops parents with
 // no matching tasks. Persisted in the same JSON shape as the web "filters"
 // preference.
+//
+// The Active template's "closed within" window is the planner's
+// `closed_days` setting, not a number of its own: such criteria carry
+// `recentAuto`, and `withClosedDays` brings their `recentDays` up to the
+// setting wherever they are used, so a change of the setting is followed. A
+// number typed into the Filters sheet is the user's own (unless it is the
+// setting's value).
 package io.github.lopezec007.planner.data.model
 
 import androidx.compose.runtime.Immutable
@@ -17,13 +24,16 @@ import java.time.LocalDate
 @Immutable
 data class Group(val parent: Item, val tasks: List<Item>)
 
-enum class Preset(val title: String, val hint: String, val statuses: Set<Status>, val recentDays: Int, val hideEmptyParents: Boolean) {
-    ACTIVE("Active", "To-Do, In-Progress and Validating items, plus anything closed in the last 14 days", setOf(Status.TODO, Status.IN_PROGRESS, Status.VALIDATING), 14, true),
-    BACKLOG("Backlog", "Backlog projects and tasks", setOf(Status.BACKLOG), 0, false),
-    IDEAS("Ideas", "Idea projects and tasks", setOf(Status.IDEA), 0, false);
+/** [recentAuto]: the template also shows items closed within the `closed_days` setting. */
+enum class Preset(val title: String, val statuses: Set<Status>, val recentAuto: Boolean, val hideEmptyParents: Boolean) {
+    ACTIVE("Active", setOf(Status.TODO, Status.IN_PROGRESS, Status.VALIDATING), true, true),
+    BACKLOG("Backlog", setOf(Status.BACKLOG), false, false),
+    IDEAS("Ideas", setOf(Status.IDEA), false, false);
 
-    fun criteria(base: Criteria = Criteria()) = base.copy(
-        statuses = statuses, recentDays = recentDays, types = emptySet(), hideEmptyParents = hideEmptyParents,
+    /** The template applied over [base]; [closedDays] is the `closed_days` setting. */
+    fun criteria(base: Criteria = Criteria(), closedDays: Int = AppSettings.DEFAULT_CLOSED_DAYS) = base.copy(
+        statuses = statuses, recentAuto = recentAuto, recentDays = if (recentAuto) closedDays else 0,
+        types = emptySet(), hideEmptyParents = hideEmptyParents,
     )
 }
 
@@ -33,6 +43,7 @@ private data class CriteriaJson(
     val types: List<String> = emptyList(),
     val statuses: List<String> = emptyList(),
     @SerialName("recent_days") val recentDays: Int = 0,
+    @SerialName("recent_auto") val recentAuto: Boolean? = null, // absent in filters stored before the closed_days setting
     @SerialName("hide_empty_parents") val hideEmptyParents: Boolean = false,
     val owner: String = "",       // legacy single choice, read when `owners` is absent
     val assignee: String = "",    // legacy single choice, read when `assignees` is absent
@@ -48,6 +59,7 @@ data class Criteria(
     val types: Set<ItemType> = emptySet(),
     val statuses: Set<Status> = emptySet(),
     val recentDays: Int = 0,          // also match items closed within this many days (0 = off)
+    val recentAuto: Boolean = false,  // recentDays is the closed_days setting (see withClosedDays), not the user's own number
     val hideEmptyParents: Boolean = false,
     val owners: Set<String> = emptySet(),    // empty = any; else "none" and/or user ids, any of which matches
     val assignees: Set<String> = emptySet(), // empty = any; else "none" and/or user ids, any of which matches
@@ -68,8 +80,12 @@ data class Criteria(
     /** The template whose status/recent/type filters are exactly in effect, or null. */
     val preset: Preset?
         get() = Preset.entries.firstOrNull { p ->
-            statuses == p.statuses && recentDays == p.recentDays && types.isEmpty() && hideEmptyParents == p.hideEmptyParents
+            statuses == p.statuses && recentAuto == p.recentAuto && (p.recentAuto || recentDays == 0) &&
+                types.isEmpty() && hideEmptyParents == p.hideEmptyParents
         }
+
+    /** These criteria with a window that follows the `closed_days` setting brought up to [days]. */
+    fun withClosedDays(days: Int): Criteria = if (recentAuto && recentDays != days) copy(recentDays = days) else this
 
     /**
      * Status for a new project/task under these filters (search.js newStatus):
@@ -141,6 +157,7 @@ data class Criteria(
     fun toJson(): String = json.encodeToString(
         CriteriaJson(
             types = types.map { it.wire }, statuses = statuses.map { it.wire }, recentDays = recentDays,
+            recentAuto = recentAuto,
             hideEmptyParents = hideEmptyParents,
             // The list is the stored form; the single key keeps the web shape for a lone choice.
             owners = owners.toList(), assignees = assignees.toList(),
@@ -152,6 +169,9 @@ data class Criteria(
 
     companion object {
         private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+        /** The Active template's window before the `closed_days` setting existed: a stored 14 was the template's. */
+        private const val LEGACY_CLOSED_DAYS = 14
 
         /** The list when present, else the legacy single choice; blanks dropped. */
         private fun userSet(list: List<String>, single: String): Set<String> =
@@ -165,6 +185,7 @@ data class Criteria(
                 types = p.types.mapNotNull { t -> ItemType.entries.firstOrNull { it.wire == t } }.toSet(),
                 statuses = p.statuses.mapNotNull { Status.fromWire(it) }.toSet(),
                 recentDays = p.recentDays.coerceAtLeast(0),
+                recentAuto = p.recentAuto ?: (p.recentDays == LEGACY_CLOSED_DAYS),
                 hideEmptyParents = p.hideEmptyParents,
                 owners = userSet(p.owners, p.owner), assignees = userSet(p.assignees, p.assignee),
                 blocked = if (p.blocked == "yes" || p.blocked == "no") p.blocked else "",

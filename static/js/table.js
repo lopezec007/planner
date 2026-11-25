@@ -460,22 +460,29 @@ function detailRow(item, kind, ctx) {
   return row;
 }
 
-/** Remember which control has focus so a re-render can give it back. */
-function captureFocus(container) {
+/** Remember which control has focus so a re-render can give it back: a
+ *  named form control, or an Owner/Assignee chip (focused from the keyboard,
+ *  or after a hotkey set it: see cells.js userControl). renderTable does this
+ *  for a redraw in place; app.js does it for the chips across a page render,
+ *  which builds a new container. */
+export function captureFocus(container) {
   const a = document.activeElement;
-  if (!a || !container.contains(a) || !a.name) return null;
+  if (!a || !container.contains(a)) return null;
+  const chip = a.classList.contains('chip-pick');
+  if (!a.name && !chip) return null;
   const rowEl = a.closest('.row');
   if (!rowEl) return null;
   const id = rowEl.dataset.id || rowEl.dataset.descFor || (rowEl.dataset.editing ? 'new' : null);
   if (!id) return null;
   const sel = typeof a.selectionStart === 'number' ? [a.selectionStart, a.selectionEnd] : null;
-  return { id, name: a.name, sel };
+  return { id, name: chip ? a.dataset.name : a.name, chip, sel };
 }
 
-function restoreFocus(container, f) {
+export function restoreFocus(container, f) {
   if (!f) return;
   const rowSel = f.id === 'new' ? '.row[data-editing="new"]' : `.row[data-id="${f.id}"], .row[data-desc-for="${f.id}"]`;
-  const target = container.querySelector(`${rowSel} [name="${f.name}"]`);
+  const control = f.chip ? `.chip-pick[data-name="${f.name}"]` : `[name="${f.name}"]`;
+  const target = [...container.querySelectorAll(rowSel)].map((r) => r.querySelector(control)).find(Boolean);
   if (!target) return;
   target.focus({ preventScroll: true });
   if (f.sel && typeof target.setSelectionRange === 'function') {

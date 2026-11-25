@@ -49,6 +49,7 @@ import java.time.LocalDate
 @Composable
 fun FilterSheet(
     criteria: Criteria,
+    closedDays: Int, // the planner's closed_days setting: the Active template's window
     users: List<User>,
     onChange: (Criteria) -> Unit,
     onDismiss: () -> Unit,
@@ -100,7 +101,9 @@ fun FilterSheet(
                         value = days,
                         onValueChange = { v ->
                             days = v.filter { it.isDigit() }.take(3)
-                            onChange(c.copy(recentDays = days.toIntOrNull()?.coerceIn(0, 365) ?: 0))
+                            // A typed number is the user's own, except the setting's value, which goes on following the setting.
+                            val n = days.toIntOrNull()?.coerceIn(0, 365) ?: 0
+                            onChange(c.copy(recentDays = n, recentAuto = n > 0 && n == closedDays))
                         },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,

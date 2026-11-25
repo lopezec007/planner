@@ -2,7 +2,7 @@
 // templates (see filters.js PRESETS).
 //
 // The template buttons are toggles that combine: the selected ones give the
-// union of their statuses and types, the largest "closed within" window, and
+// union of their statuses and types, Active's "closed within" window, and
 // hide empty Ongoing/Project rows only when every selected template does (so
 // Active alone hides them, Active + Backlog keeps them). Which buttons are
 // lit is derived from the criteria (currentPresets), so a change made in the
@@ -26,13 +26,16 @@
 //
 // Semantics: an item matches on its own fields (the status filter never
 // excludes Ongoing rows, which have no status; `recentDays` also admits items
-// closed within that many days). A parent row is shown if it matches itself
+// closed within that many days). The Active template's window is not a number
+// of its own but the closed_days setting (`recentAuto`), so it follows the
+// setting when that changes; a number typed into the Filters panel is the
+// user's own, unless it is the setting's value. A parent row is shown if it matches itself
 // or any of its tasks match, and only matching tasks are shown;
 // `hideEmptyParents` additionally drops parents with no matching tasks. With
 // nothing active the groups pass through unchanged.
 
 import { state, STATUSES, STATUS_LABEL, isBlocked, isClosed, withinLastDays } from './state.js';
-import { PRESETS, PRESET_ORDER } from './filters.js';
+import { PRESETS, PRESET_ORDER, presetHint, closedDays } from './filters.js';
 import { el } from './util.js';
 import { icon } from './icons.js';
 import { prefs } from './prefs.js';
@@ -45,6 +48,7 @@ function emptyCriteria() {
     types: new Set(),
     statuses: new Set(),
     recentDays: 0,  // also match items closed within this many days (0 = off)
+    recentAuto: false, // the window is the closed_days setting instead (recentDays is then unused)
     hideEmptyParents: false, // drop Ongoing/Project rows without matching tasks
     owner: '',      // '' any | 'none' | user id (string)
     assignee: '',   // '' any | 'none' | user id (string)
@@ -63,7 +67,7 @@ function presetsCriteria(names) {
     const p = PRESETS[k];
     for (const s of p.statuses) c.statuses.add(s);
     for (const t of p.types) c.types.add(t);
-    c.recentDays = Math.max(c.recentDays, p.recentDays);
+    if (p.recentAuto) c.recentAuto = true;
   }
   c.hideEmptyParents = used.length > 0 && used.every((k) => !!PRESETS[k].hideEmptyParents);
   return c;
@@ -76,6 +80,7 @@ export function applyPresets(names) {
   const p = presetsCriteria(names);
   criteria.statuses = p.statuses;
   criteria.recentDays = p.recentDays;
+  criteria.recentAuto = p.recentAuto;
   criteria.types = p.types;
   criteria.hideEmptyParents = p.hideEmptyParents;
 }
@@ -86,6 +91,13 @@ export function applyPreset(name) {
 }
 
 const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+
+/** The "closed within" window in effect, in days (0 = none). */
+const recentDays = (c) => (c.recentAuto ? closedDays() : c.recentDays);
+
+// The window of filters stored before the closed_days setting existed: a
+// stored 14 was the Active template's, so it now follows the setting.
+const LEGACY_CLOSED_DAYS = 14;
 
 /** Every non-empty subset of PRESET_ORDER, in that order (7 for 3 templates). */
 function presetCombinations() {
@@ -101,7 +113,7 @@ function presetCombinations() {
 export function currentPresets() {
   for (const names of presetCombinations()) {
     const p = presetsCriteria(names);
-    if (sameSet(criteria.statuses, p.statuses) && criteria.recentDays === p.recentDays && sameSet(criteria.types, p.types)
+    if (sameSet(criteria.statuses, p.statuses) && criteria.recentAuto === p.recentAuto && (p.recentAuto || criteria.recentDays === 0) && sameSet(criteria.types, p.types)
       && criteria.hideEmptyParents === p.hideEmptyParents) return names;
   }
   return [];
@@ -137,7 +149,7 @@ export function typeAllowed(type) {
 /** The criteria as stored in the preference (the search text is left out). */
 function criteriaToPref(c) {
   return {
-    types: [...c.types], statuses: [...c.statuses], recent_days: c.recentDays, hide_empty_parents: !!c.hideEmptyParents,
+    types: [...c.types], statuses: [...c.statuses], recent_days: recentDays(c), recent_auto: !!c.recentAuto, hide_empty_parents: !!c.hideEmptyParents,
     owner: c.owner, assignee: c.assignee, blocked: c.blocked, end_after: c.endAfter, end_before: c.endBefore,
   };
 }
@@ -147,6 +159,8 @@ function criteriaFromPref(p) {
   c.types = new Set((p.types || []).filter((t) => TYPES.some(([v]) => v === t)));
   c.statuses = new Set((p.statuses || []).filter((s) => STATUSES.includes(s)));
   c.recentDays = Math.max(0, Number(p.recent_days) || 0);
+  c.recentAuto = p.recent_auto == null ? c.recentDays === LEGACY_CLOSED_DAYS : !!p.recent_auto;
+  if (c.recentAuto) c.recentDays = 0;
   c.hideEmptyParents = !!p.hide_empty_parents;
   c.owner = String(p.owner ?? '');
   c.assignee = String(p.assignee ?? '');
@@ -190,12 +204,12 @@ let listenersInstalled = false;
 
 export function isActive() {
   const c = criteria;
-  return !!(c.text.trim() || c.types.size || c.statuses.size || c.recentDays || c.hideEmptyParents || c.owner || c.assignee || c.blocked || c.endAfter || c.endBefore);
+  return !!(c.text.trim() || c.types.size || c.statuses.size || recentDays(c) || c.hideEmptyParents || c.owner || c.assignee || c.blocked || c.endAfter || c.endBefore);
 }
 
 function activeFilterCount() {
   const c = criteria;
-  return (c.types.size ? 1 : 0) + (c.statuses.size || c.recentDays ? 1 : 0) + (c.owner ? 1 : 0) + (c.assignee ? 1 : 0)
+  return (c.types.size ? 1 : 0) + (c.statuses.size || recentDays(c) ? 1 : 0) + (c.owner ? 1 : 0) + (c.assignee ? 1 : 0)
     + (c.blocked ? 1 : 0) + ((c.endAfter || c.endBefore) ? 1 : 0);
 }
 
@@ -228,10 +242,11 @@ function matches(it) {
 /** Status filter on the item's own status; Ongoing rows are never excluded. */
 function statusMatches(it) {
   const c = criteria;
-  if (!c.statuses.size && !c.recentDays) return true;
+  const days = recentDays(c);
+  if (!c.statuses.size && !days) return true;
   if (it.type === 'ongoing') return true;
   if (c.statuses.has(it.status)) return true;
-  if (c.recentDays && isClosed(it.status) && withinLastDays(it.closed_at, c.recentDays)) return true;
+  if (days && isClosed(it.status) && withinLastDays(it.closed_at, days)) return true;
   return false;
 }
 
@@ -351,8 +366,10 @@ function buildPanel() {
       ...STATUSES.map((s) => toggleChip(STATUS_LABEL[s], `status:${s}`, c.statuses.has(s),
         () => { if (c.statuses.has(s)) c.statuses.delete(s); else c.statuses.add(s); })),
       el('label', { class: 'search-recent' }, 'or closed within',
-        el('input', { type: 'number', min: 0, max: 365, value: c.recentDays || '', placeholder: '0', dataset: { searchKey: 'recentDays' }, 'aria-label': 'Closed within days',
-          onChange: (e) => { c.recentDays = Math.max(0, Number(e.target.value) || 0); rerender(); } }),
+        el('input', { type: 'number', min: 0, max: 365, value: recentDays(c) || '', placeholder: '0', dataset: { searchKey: 'recentDays' }, 'aria-label': 'Closed within days',
+          title: c.recentAuto ? 'The number of days from Settings ("Keep done and cancelled items for"); it changes when the setting does. Type a number to use your own.' : null,
+          // A typed number is the user's own, except the setting's value, which goes on following the setting.
+          onChange: (e) => { const n = Math.max(0, Number(e.target.value) || 0); c.recentAuto = n > 0 && n === closedDays(); c.recentDays = c.recentAuto ? 0 : n; rerender(); } }),
         'days'),
     ]),
     el('div', { class: 'search-row' },
@@ -396,7 +413,7 @@ export function renderSearch(slot, ctx) {
     presets.append(el('button', {
       type: 'button', class: `search-preset${on ? ' active' : ''}`, dataset: { preset: k, searchKey: `preset:${k}` },
       'aria-pressed': on ? 'true' : 'false', 'aria-label': PRESETS[k].title,
-      title: `${PRESETS[k].title}: ${PRESETS[k].hint}. ${on ? 'Click to turn it off' : `Click to turn it on; combine it with ${others}`}.`,
+      title: `${PRESETS[k].title}: ${presetHint(k)}. ${on ? 'Click to turn it off' : `Click to turn it on; combine it with ${others}`}.`,
       onClick: () => { togglePreset(k); rerender(); },
     }, icon(k)));
   }

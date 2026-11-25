@@ -1,5 +1,5 @@
-// Settings page: general options (week start, default status, effort
-// options), row colours, highlighting, what the urgency and importance
+// Settings page: general options (week start, default status, how long
+// closed items stay in the Active view, effort options), row colours, highlighting, what the urgency and importance
 // values mean, and the users list.
 //
 // renderSettings(main, ctx)   ctx = { reload() } reloads state and re-renders.
@@ -13,6 +13,7 @@ import { el, toast, contrastText } from './util.js';
 import { DEFAULT_EFFORT_OPTIONS, effortOptions, formatEffort, parseEffort } from './effort.js';
 import { levelColor } from './cells.js';
 import { LEVEL_FIELDS, LEVEL_NAME, levelValues, levelDescriptions } from './levels.js';
+import { closedDays } from './filters.js';
 
 const MAX_DESCRIPTION = 200; // characters, as the server enforces
 
@@ -108,6 +109,27 @@ function defaultStatusRow(ctx) {
     el('label', { for: 'setting-default-status' }, 'Default status for new projects and tasks'),
     sel,
     el('span', { class: 'settings-help' }, 'Used when the current filters show it; otherwise a new row takes a status the filters show (Backlog under the Backlog template).'));
+}
+
+/** How many days a done or cancelled item stays in the Active view after it
+ *  was closed (0 to 365; 0 = it leaves as soon as it is closed). */
+function closedDaysRow(ctx) {
+  const current = closedDays();
+  const inp = el('input', { type: 'number', id: 'setting-closed-days', min: 0, max: 365, step: 1, value: String(current), 'aria-label': 'Days to keep done and cancelled items in the Active view' });
+  inp.addEventListener('change', () => {
+    const n = Number(inp.value);
+    if (inp.value.trim() === '' || !Number.isInteger(n) || n < 0 || n > 365) {
+      inp.value = String(current);
+      toast('Enter a whole number of days from 0 to 365.');
+      return;
+    }
+    if (n !== current) save({ closed_days: String(n) }, ctx);
+  });
+  return el('div', { class: 'settings-row' },
+    el('label', { for: 'setting-closed-days' }, 'Keep done and cancelled items for'),
+    inp,
+    el('span', {}, 'days'),
+    el('span', { class: 'settings-help' }, 'How long an item stays in the Active view after it is marked done or cancelled (0: it leaves at once). A number typed into the Filters panel\'s "or closed within" box is kept as it is.'));
 }
 
 /** Effort options: the durations a task's Effort can be set to, as chips
@@ -239,7 +261,7 @@ export function renderSettings(main, ctx) {
   const usersBox = el('div', { id: 'settings-users' });
   main.replaceChildren(
     el('h1', {}, 'Settings'),
-    section('General', weekStartRow(ctx), defaultStatusRow(ctx), effortOptionsBlock(ctx)),
+    section('General', weekStartRow(ctx), defaultStatusRow(ctx), closedDaysRow(ctx), effortOptionsBlock(ctx)),
     section('Row colours',
       el('p', { class: 'settings-help' }, 'Rows are tinted with these colours in both light and dark themes.'),
       colorRow('color_ongoing', 'Ongoing rows', '', ctx),

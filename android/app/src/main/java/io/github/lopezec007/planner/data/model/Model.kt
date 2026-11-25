@@ -124,6 +124,8 @@ data class AppSettings(val values: Map<String, String>) {
     val colorUnassigned: String get() = values["color_unassigned"] ?: "#9aa3ad"
     /** The status a new project or task starts with when the filters allow it (server default "todo"). */
     val defaultStatus: Status get() = Status.fromWire(values["default_status"]) ?: Status.TODO
+    /** How many days a done or cancelled item stays in the Active template after it was closed (0 = not at all). */
+    val closedDays: Int get() = values["closed_days"]?.toIntOrNull()?.coerceIn(0, MAX_CLOSED_DAYS) ?: DEFAULT_CLOSED_DAYS
 
     /** The ramp for urgency or importance: index = value 0..10, "" = no colour (importance -1 has none). */
     fun ramp(field: String): List<String> = parseRamp(values["${field}_colors"])
@@ -148,6 +150,13 @@ data class AppSettings(val values: Map<String, String>) {
 
     companion object {
         val EMPTY = AppSettings(emptyMap())
+
+        /** The server's default and range for `closed_days`. */
+        const val DEFAULT_CLOSED_DAYS = 14
+        const val MAX_CLOSED_DAYS = 365
+
+        /** The choices offered in Settings (the web app takes any number of days up to the maximum). */
+        val CLOSED_DAY_CHOICES = listOf(0, 1, 3, 7, 14, 30, 60, 90)
 
         /** Parses a descriptions setting leniently: an empty map when blank or malformed. */
         fun parseDescriptions(json: String?): Map<String, String> {

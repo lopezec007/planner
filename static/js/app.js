@@ -20,7 +20,7 @@
 import { api, undo } from './api.js';
 import { state, load } from './state.js';
 import { allGroups } from './filters.js';
-import { renderTable, expandableIds } from './table.js';
+import { renderTable, expandableIds, captureFocus, restoreFocus } from './table.js';
 import { renderTimeline } from './timeline.js';
 import { renderMatrix } from './matrix.js';
 import { renderSettings } from './settings.js';
@@ -390,8 +390,13 @@ function render() {
   };
   if (currentView === 'table') {
     const wrap = el('div', { class: `table-wrap ${width === 'narrow' ? 'constrained' : ''}` });
+    // An Owner or Assignee chip that has the focus (reached with Tab, or just
+    // set with a user's hotkey) keeps it across the redraw, so the next key
+    // lands in the same cell.
+    const chipFocus = document.activeElement?.classList.contains('chip-pick') ? captureFocus(main) : null;
     main.replaceChildren(...[hint, wrap].filter(Boolean));
     renderTable(wrap, { ...tableOpts, mode: 'full', multicol: width === 'multicol', columnCount });
+    restoreFocus(main, chipFocus);
   } else {
     const wrap = el('div', { class: 'table-wrap' });
     // The Matrix stays in view while the list scrolls (the Timeline's bars
